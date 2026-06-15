@@ -268,7 +268,7 @@ Item {
                                 y: parent.height / 2 - height / 2
                                 x: Math.min(parent.width - width,
                                             (modelData.time / Math.max(1, root.player.duration)) * parent.width)
-                                color: "#ccffffff"
+                                color: Theme.tickMark
                             }
                         }
                     }
@@ -570,7 +570,7 @@ Item {
         width: 320
         height: statsCol.implicitHeight + Theme.spacing * 2
         radius: Theme.radius
-        color: "#e6202124"
+        color: Theme.statsBg
         border.color: Theme.divider
         border.width: 1
 

@@ -65,7 +65,7 @@ ColumnLayout {
         Rectangle { // scroll left
             anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: Theme.spacingTiny }
             width: 32; height: 72; radius: Theme.radius
-            color: "#cc000000"
+            color: Theme.overlayStrong
             visible: rowHover.hovered && list.contentX > rowArea.minX + 1
             Text { anchors.centerIn: parent; text: "‹"; color: Theme.textPrimary; font.pixelSize: 26 }
             TapHandler { onTapped: list.contentX = Math.max(rowArea.minX, list.contentX - list.width * 0.8) }
@@ -73,7 +73,7 @@ ColumnLayout {
         Rectangle { // scroll right
             anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacingTiny }
             width: 32; height: 72; radius: Theme.radius
-            color: "#cc000000"
+            color: Theme.overlayStrong
             visible: rowHover.hovered && list.contentX < rowArea.maxX - 1
             Text { anchors.centerIn: parent; text: "›"; color: Theme.textPrimary; font.pixelSize: 26 }
             TapHandler { onTapped: list.contentX = Math.min(rowArea.maxX, list.contentX + list.width * 0.8) }

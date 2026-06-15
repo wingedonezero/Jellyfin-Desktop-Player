@@ -197,7 +197,7 @@ Item {
                 }
                 Connections {
                     target: screen.client
-                    function onPasswordChanged(ok, message) { pwResult.text = message; pwResult.color = ok ? Theme.watched : "tomato"; if (ok) { curPw.clear(); newPw.clear() } }
+                    function onPasswordChanged(ok, message) { pwResult.text = message; pwResult.color = ok ? Theme.watched : Theme.error; if (ok) { curPw.clear(); newPw.clear() } }
                 }
             }
 

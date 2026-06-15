@@ -29,6 +29,12 @@ QtObject {
     readonly property color rating:        "#f9b300"   // community-rating star
     readonly property color scrimTop:      "#b3000000"
     readonly property color scrimBottom:   "#e6000000"
+    readonly property color scrimSoft:     "#33000000" // light top scrim over backdrops
+    readonly property color overlayStrong: "#cc000000" // play buttons / row arrows
+    readonly property color overlayMedium: "#80000000" // progress track behind a bar
+    readonly property color tickMark:      "#ccffffff" // chapter ticks on the scrubber
+    readonly property color statsBg:       "#e6202124" // playback-info overlay panel
+    readonly property color error:         "#ff5252"   // login / form errors
     readonly property color transparent:   "#00000000"
 
     // --- metrics ---

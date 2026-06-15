@@ -108,7 +108,7 @@ Item {
                 anchors.centerIn: parent
                 visible: hover.hovered && card.playable
                 width: 46; height: 46; radius: 23
-                color: "#cc000000"
+                color: Theme.overlayStrong
                 border.color: Theme.textPrimary
                 border.width: 1
                 Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 20 }
@@ -139,7 +139,7 @@ Item {
                 visible: card.progress > 0
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                 height: 4
-                color: "#80000000"
+                color: Theme.overlayMedium
                 Rectangle {
                     anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                     width: parent.width * card.progress

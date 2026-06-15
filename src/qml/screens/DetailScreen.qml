@@ -252,7 +252,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     gradient: Gradient {
-                        GradientStop { position: 0.0; color: "#33000000" }
+                        GradientStop { position: 0.0; color: Theme.scrimSoft }
                         GradientStop { position: 1.0; color: Theme.background }
                     }
                 }
@@ -425,14 +425,14 @@ Item {
                     HoverHandler { id: castHover }
                     Rectangle {
                         anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: Theme.spacingTiny }
-                        width: 32; height: 72; radius: Theme.radius; color: "#cc000000"
+                        width: 32; height: 72; radius: Theme.radius; color: Theme.overlayStrong
                         visible: castHover.hovered && castList.contentX > castArea.minX + 1
                         Text { anchors.centerIn: parent; text: "‹"; color: Theme.textPrimary; font.pixelSize: 26 }
                         TapHandler { onTapped: castList.contentX = Math.max(castArea.minX, castList.contentX - castList.width * 0.8) }
                     }
                     Rectangle {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacingTiny }
-                        width: 32; height: 72; radius: Theme.radius; color: "#cc000000"
+                        width: 32; height: 72; radius: Theme.radius; color: Theme.overlayStrong
                         visible: castHover.hovered && castList.contentX < castArea.maxX - 1
                         Text { anchors.centerIn: parent; text: "›"; color: Theme.textPrimary; font.pixelSize: 26 }
                         TapHandler { onTapped: castList.contentX = Math.min(castArea.maxX, castList.contentX + castList.width * 0.8) }
