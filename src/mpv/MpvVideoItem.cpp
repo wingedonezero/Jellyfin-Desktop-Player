@@ -1,5 +1,7 @@
 #include "MpvVideoItem.h"
 
+#include "Paths.h"
+
 #include <QByteArray>
 #include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
@@ -124,15 +126,24 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
         qFatal("MpvVideoItem: mpv_create() failed");
     }
 
-    // Render-API video output, plus sane spike defaults.
-    mpv_set_option_string(handle, "vo", "libmpv");
-    mpv_set_option_string(handle, "hwdec", "auto-safe");
+    // Load user config from a standard, editable location
+    // (~/.config/jellyfin-desktop/mpv.conf), generating a documented base file
+    // on first run. libmpv does not load config by default, so opt in here.
+    Paths::ensureDefaultMpvConfig();
+    const QByteArray configDir = Paths::configDir().toUtf8();
+    mpv_set_option_string(handle, "config-dir", configDir.constData());
+    mpv_set_option_string(handle, "config", "yes");
     mpv_set_option_string(handle, "terminal", "no");
 
     if (mpv_initialize(handle) < 0) {
         mpv_terminate_destroy(handle);
         qFatal("MpvVideoItem: mpv_initialize() failed");
     }
+
+    // The render-API output MUST be "libmpv" regardless of mpv.conf, or video
+    // can't render into our FBO. Set it as a property after the config loads so
+    // a stray `vo=` in the user's mpv.conf can't break embedding.
+    mpv_set_property_string(handle, "vo", "libmpv");
 
     mpv_set_wakeup_callback(handle, onMpvWakeup, this);
 

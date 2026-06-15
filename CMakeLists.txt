@@ -17,6 +17,8 @@ pkg_check_modules(Mpv REQUIRED IMPORTED_TARGET mpv)
 
 qt_add_executable(jellyfin-desktop
     src/main.cpp
+    src/core/Paths.h
+    src/core/Paths.cpp
 )
 
 qt_add_qml_module(jellyfin-desktop
@@ -35,7 +37,7 @@ qt_add_qml_module(jellyfin-desktop
 
 # Header dirs are on the include path so the generated QML type-registration
 # file (which does `#include <Basename.h>`) can find our QML_ELEMENT headers.
-target_include_directories(jellyfin-desktop PRIVATE src src/mpv src/jellyfin)
+target_include_directories(jellyfin-desktop PRIVATE src src/mpv src/jellyfin src/core)
 
 target_compile_definitions(jellyfin-desktop PRIVATE
     PROJECT_VERSION="${PROJECT_VERSION}"
