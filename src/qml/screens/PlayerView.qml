@@ -9,6 +9,7 @@ import JellyfinDesktop
 Item {
     id: root
     required property var client
+    property var config: null // AppConfig — default quality + subtitle prefs
     property alias playing: player.playing
     property bool osdVisible: true
     property var currentItem: ({})
@@ -20,6 +21,8 @@ Item {
     property int repeatMode: 0 // 0 none, 1 one, 2 all
     property int maxBitrate: 0 // 0 = Auto (direct play); >0 caps quality (transcode)
     property real _resumeSeconds: 0
+
+    Component.onCompleted: if (config) maxBitrate = config.value("playback/maxBitrate", 0)
 
     function playItem(item) { playQueue([item], 0) }
 
@@ -113,6 +116,10 @@ Item {
             if (pendingResume > 0) {
                 player.seek(pendingResume)
                 pendingResume = 0
+            }
+            if (root.config) {
+                const sc = root.config.value("subtitles/scale", 0)
+                if (sc > 0) player.setOption("sub-scale", "" + sc)
             }
         }
         onEndFile: (reason) => {

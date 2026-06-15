@@ -48,6 +48,7 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/screens/LibraryScreen.qml
         src/qml/screens/DetailScreen.qml
         src/qml/screens/SearchScreen.qml
+        src/qml/screens/SettingsScreen.qml
         src/qml/screens/PlayerView.qml
         src/qml/screens/PlayerControls.qml
     SOURCES
@@ -55,6 +56,8 @@ qt_add_qml_module(jellyfin-desktop
         src/mpv/MpvVideoItem.cpp
         src/jellyfin/JellyfinClient.h
         src/jellyfin/JellyfinClient.cpp
+        src/core/AppConfig.h
+        src/core/AppConfig.cpp
 )
 
 # Header dirs are on the include path so the generated QML type-registration

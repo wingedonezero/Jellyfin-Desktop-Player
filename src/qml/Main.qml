@@ -23,11 +23,14 @@ ApplicationWindow {
         onAuthenticationFailed: (msg) => console.log("[jf] auth failed:", msg)
     }
 
+    AppConfig { id: appConfig }
+
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }
     function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name }) }
     function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
     function openSearch() { stack.push(searchComp) }
+    function openSettings() { stack.push(settingsComp) }
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
@@ -61,7 +64,7 @@ ApplicationWindow {
             onBackClicked: stack.pop()
             onHomeClicked: win.goHome()
             onSearchClicked: win.openSearch()
-            onSettingsClicked: {} // settings screen lands in a later pass
+            onSettingsClicked: win.openSettings()
             onLogoutClicked: jellyfin.logout()
         }
 
@@ -79,8 +82,8 @@ ApplicationWindow {
         onNavHome: win.goHome()
         onNavFavorites: win.openFavorites()
         onNavLibrary: (lib) => win.openLibrary(lib)
-        onNavSettings: {} // settings screen lands in a later pass
-        onNavAdmin: {}
+        onNavSettings: win.openSettings()
+        onNavAdmin: win.openSettings() // admin lands in the Settings → Administration section
         onDoLogout: jellyfin.logout()
     }
 
@@ -119,6 +122,14 @@ ApplicationWindow {
             onItemOpenDetail: (it) => win.openDetail(it)
         }
     }
+    Component {
+        id: settingsComp
+        SettingsScreen {
+            client: jellyfin
+            config: appConfig
+            onLogout: jellyfin.logout()
+        }
+    }
 
     // ---- player overlay ---------------------------------------------------
     PlayerView {
@@ -126,6 +137,7 @@ ApplicationWindow {
         anchors.fill: parent
         visible: playing
         client: jellyfin
+        config: appConfig
     }
 
     // ---- shell data + dev auto-login/auto-play ---------------------------
