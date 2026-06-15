@@ -9,7 +9,7 @@ import QtQuick
 // the skin. See the capability tiers discussed for the player.
 // ----------------------------------------------------------------------------
 QtObject {
-    readonly property bool transcodeQuality: false // server-side quality/bitrate (transcode pipeline)
+    readonly property bool transcodeQuality: true  // server-side quality/bitrate (transcode pipeline)
     readonly property bool playQueue:        true  // previous/next, repeat, auto-play-next
     readonly property bool cast:             false // casting out to Chromecast/DLNA
     readonly property bool syncPlay:         false // watch-together (Jellyfin SyncPlay)

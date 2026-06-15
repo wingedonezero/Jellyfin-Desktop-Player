@@ -352,34 +352,159 @@ QUrl JellyfinClient::streamUrl(const QString &itemId) const
     return url;
 }
 
+QJsonObject JellyfinClient::deviceProfile() const
+{
+    // mpv direct-plays essentially everything; the transcode target is HLS
+    // (h264/aac) so the server can downscale when a bitrate cap forces it.
+    const QJsonObject videoDirect{
+        {QStringLiteral("Container"), QStringLiteral("mp4,m4v,mkv,webm,avi,mov,ts,m2ts,flv,wmv,asf,mpg,mpeg,3gp,ogv")},
+        {QStringLiteral("Type"), QStringLiteral("Video")}};
+    const QJsonObject audioDirect{
+        {QStringLiteral("Container"), QStringLiteral("mp3,aac,flac,alac,ogg,oga,wav,wma,opus,m4a,mka")},
+        {QStringLiteral("Type"), QStringLiteral("Audio")}};
+    const QJsonObject hls{
+        {QStringLiteral("Container"), QStringLiteral("ts")},
+        {QStringLiteral("Type"), QStringLiteral("Video")},
+        {QStringLiteral("AudioCodec"), QStringLiteral("aac,mp3")},
+        {QStringLiteral("VideoCodec"), QStringLiteral("h264")},
+        {QStringLiteral("Context"), QStringLiteral("Streaming")},
+        {QStringLiteral("Protocol"), QStringLiteral("hls")},
+        {QStringLiteral("MaxAudioChannels"), QStringLiteral("2")},
+        {QStringLiteral("MinSegments"), 1},
+        {QStringLiteral("BreakOnNonKeyFrames"), true}};
+    const auto subtitle = [](const QString &fmt) {
+        return QJsonObject{{QStringLiteral("Format"), fmt}, {QStringLiteral("Method"), QStringLiteral("External")}};
+    };
+    QJsonObject p;
+    p[QStringLiteral("DirectPlayProfiles")] = QJsonArray{videoDirect, audioDirect};
+    p[QStringLiteral("TranscodingProfiles")] = QJsonArray{hls};
+    p[QStringLiteral("CodecProfiles")] = QJsonArray{};
+    p[QStringLiteral("ContainerProfiles")] = QJsonArray{};
+    p[QStringLiteral("ResponseProfiles")] = QJsonArray{};
+    p[QStringLiteral("SubtitleProfiles")] = QJsonArray{
+        subtitle(QStringLiteral("srt")), subtitle(QStringLiteral("ass")),
+        subtitle(QStringLiteral("subrip")), subtitle(QStringLiteral("vtt"))};
+    return p;
+}
+
+void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
+                                   const QString &requestTag)
+{
+    if (maxBitrate <= 0) {
+        // Auto: mpv direct-plays the original file — no server transcode, no
+        // PlaybackInfo round-trip. (The server reports direct-play unsupported
+        // for our generic profile, but mpv handles every codec, so we trust it.)
+        m_playSessionId.clear();
+        m_mediaSourceId = itemId;
+        m_transcoding = false;
+        QVariantMap info;
+        info[QStringLiteral("url")] = streamUrl(itemId).toString();
+        info[QStringLiteral("isTranscode")] = false;
+        Q_EMIT streamReady(requestTag, info);
+        return;
+    }
+
+    QJsonObject body;
+    body[QStringLiteral("DeviceProfile")] = deviceProfile();
+    if (maxBitrate > 0)
+        body[QStringLiteral("MaxStreamingBitrate")] = maxBitrate;
+    if (startTicks > 0)
+        body[QStringLiteral("StartTimeTicks")] = startTicks;
+    body[QStringLiteral("EnableDirectPlay")] = (maxBitrate <= 0);
+    body[QStringLiteral("EnableDirectStream")] = (maxBitrate <= 0);
+    body[QStringLiteral("EnableTranscoding")] = true;
+    body[QStringLiteral("AllowVideoStreamCopy")] = true;
+    body[QStringLiteral("AllowAudioStreamCopy")] = true;
+
+    const QString path = QStringLiteral("/Items/%1/PlaybackInfo?userId=%2").arg(itemId, m_userId);
+    QNetworkReply *reply = post(path, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, maxBitrate]() {
+        reply->deleteLater();
+        QVariantMap info;
+        if (reply->error() != QNetworkReply::NoError) {
+            // PlaybackInfo failed → fall back to direct play.
+            m_playSessionId.clear();
+            m_mediaSourceId = itemId;
+            m_transcoding = false;
+            info[QStringLiteral("url")] = streamUrl(itemId).toString();
+            info[QStringLiteral("isTranscode")] = false;
+            Q_EMIT streamReady(requestTag, info);
+            return;
+        }
+        const QJsonObject resp = QJsonDocument::fromJson(reply->readAll()).object();
+        m_playSessionId = resp.value(QStringLiteral("PlaySessionId")).toString();
+        const QJsonArray sources = resp.value(QStringLiteral("MediaSources")).toArray();
+        const QJsonObject ms = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+        m_mediaSourceId = ms.value(QStringLiteral("Id")).toString();
+        if (m_mediaSourceId.isEmpty())
+            m_mediaSourceId = itemId;
+
+        const QString transcodingUrl = ms.value(QStringLiteral("TranscodingUrl")).toString();
+        const bool supportsDirect = ms.value(QStringLiteral("SupportsDirectPlay")).toBool()
+                                  || ms.value(QStringLiteral("SupportsDirectStream")).toBool();
+
+        QString url;
+        bool isTranscode = false;
+        if (maxBitrate <= 0 && supportsDirect) {
+            url = streamUrl(itemId).toString();              // Auto + fits → direct
+        } else if (!transcodingUrl.isEmpty()) {
+            url = m_serverUrl + transcodingUrl;              // server-provided HLS transcode
+            isTranscode = true;
+        } else {
+            url = streamUrl(itemId).toString();              // last-resort direct
+        }
+        m_transcoding = isTranscode;
+        info[QStringLiteral("url")] = url;
+        info[QStringLiteral("isTranscode")] = isTranscode;
+        info[QStringLiteral("playSessionId")] = m_playSessionId;
+        Q_EMIT streamReady(requestTag, info);
+    });
+}
+
 // --- progress reporting -----------------------------------------------------
 
 void JellyfinClient::reportPlaybackStart(const QString &itemId)
 {
-    const QJsonObject body{{QStringLiteral("ItemId"), itemId}};
+    QJsonObject body{{QStringLiteral("ItemId"), itemId}};
+    if (!m_playSessionId.isEmpty()) body[QStringLiteral("PlaySessionId")] = m_playSessionId;
+    if (!m_mediaSourceId.isEmpty()) body[QStringLiteral("MediaSourceId")] = m_mediaSourceId;
     QNetworkReply *reply = post(QStringLiteral("/Sessions/Playing"), QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
 void JellyfinClient::reportPlaybackProgress(const QString &itemId, qint64 positionTicks, bool paused)
 {
-    const QJsonObject body{
+    QJsonObject body{
         {QStringLiteral("ItemId"), itemId},
         {QStringLiteral("PositionTicks"), positionTicks},
         {QStringLiteral("IsPaused"), paused},
     };
+    if (!m_playSessionId.isEmpty()) body[QStringLiteral("PlaySessionId")] = m_playSessionId;
+    if (!m_mediaSourceId.isEmpty()) body[QStringLiteral("MediaSourceId")] = m_mediaSourceId;
     QNetworkReply *reply = post(QStringLiteral("/Sessions/Playing/Progress"), QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
 void JellyfinClient::reportPlaybackStopped(const QString &itemId, qint64 positionTicks)
 {
-    const QJsonObject body{
+    QJsonObject body{
         {QStringLiteral("ItemId"), itemId},
         {QStringLiteral("PositionTicks"), positionTicks},
     };
+    if (!m_playSessionId.isEmpty()) body[QStringLiteral("PlaySessionId")] = m_playSessionId;
+    if (!m_mediaSourceId.isEmpty()) body[QStringLiteral("MediaSourceId")] = m_mediaSourceId;
     QNetworkReply *reply = post(QStringLiteral("/Sessions/Playing/Stopped"), QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+
+    // Free the server-side transcode if one was running.
+    if (m_transcoding && !m_playSessionId.isEmpty()) {
+        QNetworkReply *d = del(QStringLiteral("/Videos/ActiveEncodings?deviceId=%1&playSessionId=%2")
+                                   .arg(m_deviceId, m_playSessionId));
+        connect(d, &QNetworkReply::finished, d, &QNetworkReply::deleteLater);
+    }
+    m_transcoding = false;
+    m_playSessionId.clear();
+    m_mediaSourceId.clear();
 }
 
 // --- user data -------------------------------------------------------------

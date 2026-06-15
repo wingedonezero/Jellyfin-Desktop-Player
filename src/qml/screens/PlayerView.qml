@@ -18,6 +18,8 @@ Item {
     property var queue: []
     property int queueIndex: -1
     property int repeatMode: 0 // 0 none, 1 one, 2 all
+    property int maxBitrate: 0 // 0 = Auto (direct play); >0 caps quality (transcode)
+    property real _resumeSeconds: 0
 
     function playItem(item) { playQueue([item], 0) }
 
@@ -36,12 +38,36 @@ Item {
         player.currentId = item.id
         root.currentItem = item
         root.favorite = (item.isFavorite === true)
-        player.pendingResume = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
+        root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         showOsd()
-        player.play(client.streamUrl(item.id))
-        client.reportPlaybackStart(item.id)
-        console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", player.pendingResume)
+        // resolve direct-play vs transcode first; onStreamReady actually loads it
+        client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", root._resumeSeconds)
+    }
+
+    // Re-resolve the current item (e.g. after a quality change) and resume where
+    // we are now.
+    function reloadAtPosition() {
+        if (player.currentId.length === 0) return
+        root._resumeSeconds = player.position
+        client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+    }
+    function setQuality(bitrate) {
+        if (root.maxBitrate === bitrate) return
+        root.maxBitrate = bitrate
+        reloadAtPosition()
+    }
+
+    Connections {
+        target: root.client
+        function onStreamReady(tag, info) {
+            if (tag !== "stream:play") return
+            player.pendingResume = root._resumeSeconds
+            player.play(info.url)
+            client.reportPlaybackStart(player.currentId)
+            console.log("[jf] stream", info.isTranscode ? "transcode" : "direct")
+        }
     }
 
     function playNext() {
@@ -116,6 +142,7 @@ Item {
         title: root.currentItem.name || ""
         favorite: root.favorite
         repeatMode: root.repeatMode
+        maxBitrate: root.maxBitrate
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
@@ -123,6 +150,7 @@ Item {
         onPrevious: root.playPrev()
         onNext: root.playNext()
         onCycleRepeat: root.repeatMode = (root.repeatMode + 1) % 3
+        onSetQuality: (br) => root.setQuality(br)
         onToggleFavorite: {
             root.favorite = !root.favorite
             root.client.setFavorite(player.currentId, root.favorite)

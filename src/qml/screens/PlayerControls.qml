@@ -15,6 +15,7 @@ Item {
     property string title: ""
     property bool favorite: false
     property int repeatMode: 0 // 0 none, 1 one, 2 all
+    property int maxBitrate: 0 // 0 = Auto (direct play)
 
     signal back()
     signal toggleFullscreen()
@@ -22,6 +23,7 @@ Item {
     signal previous()
     signal next()
     signal cycleRepeat()
+    signal setQuality(int bitrate)
 
     // Local skin state (the mpv side is authoritative for speed/delays).
     property string aspectMode: "Auto"
@@ -41,6 +43,10 @@ Item {
         return (h > 0 ? h + ":" + pad(m) : "" + m) + ":" + pad(s)
     }
     function fmtSpeed(s) { return (Math.round(s * 100) / 100) + "x" }
+    function fmtBitrate(bps) {
+        if (!bps || bps <= 0) return qsTr("Auto")
+        return (bps >= 1000000) ? ((Math.round(bps / 100000) / 10) + " Mbps") : (Math.round(bps / 1000) + " kbps")
+    }
     function endsAt() {
         const remain = Math.max(0, root.player.duration - root.player.position)
                        / Math.max(0.01, root.player.speed)
@@ -442,8 +448,9 @@ Item {
                                     onClicked: settingsMenu.page = 2
                                 }
                                 SettingRow {
-                                    label: qsTr("Quality"); value: qsTr("Auto")
+                                    label: qsTr("Quality"); value: root.fmtBitrate(root.maxBitrate)
                                     enabled: Features.transcodeQuality
+                                    onClicked: settingsMenu.page = 4
                                 }
                                 SettingRow {
                                     label: qsTr("Repeat Mode")
@@ -525,6 +532,24 @@ Item {
                                     IconButton { text: "−"; implicitWidth: 34; implicitHeight: 34; onClicked: root.player.setAudioDelay(root.player.audioDelay - 0.1) }
                                     Label { text: root.player.audioDelay.toFixed(1) + "s"; color: Theme.textSecondary; horizontalAlignment: Text.AlignHCenter; Layout.preferredWidth: 52 }
                                     IconButton { text: "+"; implicitWidth: 34; implicitHeight: 34; onClicked: root.player.setAudioDelay(root.player.audioDelay + 0.1) }
+                                }
+                            }
+
+                            // page 4 — quality (transcode bitrate cap)
+                            ColumnLayout {
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    IconButton { text: "←"; implicitWidth: 36; implicitHeight: 36; onClicked: settingsMenu.page = 0 }
+                                    Label { text: qsTr("Quality"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true }
+                                }
+                                Repeater {
+                                    model: [0, 120000000, 60000000, 40000000, 20000000, 10000000, 8000000, 4000000, 2000000, 1000000, 720000]
+                                    SettingRow {
+                                        label: root.fmtBitrate(modelData)
+                                        value: root.maxBitrate === modelData ? "✓" : ""
+                                        onClicked: { root.setQuality(modelData); settingsMenu.page = 0 }
+                                    }
                                 }
                             }
                         }

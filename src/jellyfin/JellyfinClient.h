@@ -71,6 +71,12 @@ public:
                               const QString &tag = QString()) const;
     Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
 
+    // Resolve a playable URL via /Items/{id}/PlaybackInfo: direct-play when the
+    // source fits (maxBitrate <= 0 = Auto), otherwise an HLS transcode URL.
+    // Emits streamReady(requestTag, {url, isTranscode, playSessionId}).
+    Q_INVOKABLE void requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
+                                   const QString &requestTag = QStringLiteral("stream"));
+
     // --- playback progress reporting ---
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId);
     Q_INVOKABLE void reportPlaybackProgress(const QString &itemId, qint64 positionTicks, bool paused);
@@ -85,6 +91,7 @@ Q_SIGNALS:
     void authenticatedChanged();
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
+    void streamReady(const QString &requestTag, const QVariantMap &info);
     void errorOccurred(const QString &message);
 
 private:
@@ -95,6 +102,7 @@ private:
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     static QVariantList parseItems(const QByteArray &json);
     static QVariantMap parseItem(const QJsonObject &o);
+    QJsonObject deviceProfile() const; // capabilities sent to PlaybackInfo
 
     QNetworkAccessManager *m_net;
     QString m_serverUrl; // no trailing slash
@@ -103,4 +111,9 @@ private:
     QString m_userName;
     QString m_deviceId;
     QString m_deviceName;
+
+    // current playback session (for progress reports + transcode teardown)
+    QString m_playSessionId;
+    QString m_mediaSourceId;
+    bool m_transcoding = false;
 };
