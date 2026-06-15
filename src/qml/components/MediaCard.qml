@@ -20,6 +20,10 @@ Item {
     implicitHeight: artHeight + labels.implicitHeight + Theme.spacingSmall
 
     readonly property bool isEpisode: item && item.type === "Episode"
+    // only these play directly; everything else (Series/Season/BoxSet/Genre/…) opens detail
+    readonly property bool playable: item && (item.type === "Movie" || item.type === "Episode"
+                                              || item.type === "Video" || item.type === "MusicVideo"
+                                              || item.type === "Trailer" || item.type === "Audio")
     readonly property real progress: {
         if (!item) return 0
         const t = item.playbackTicks || 0
@@ -93,17 +97,21 @@ Item {
                 elide: Text.ElideRight
             }
 
-            // hover overlay + play button
+            // hover dim (visual only — taps fall through to the card's openDetail)
             Rectangle {
                 anchors.fill: parent
                 color: Theme.overlay
                 visible: hover.hovered
-                Text {
-                    anchors.centerIn: parent
-                    text: "▶"
-                    color: Theme.textPrimary
-                    font.pixelSize: 34
-                }
+            }
+            // play button — only for directly-playable items; opens detail otherwise
+            Rectangle {
+                anchors.centerIn: parent
+                visible: hover.hovered && card.playable
+                width: 46; height: 46; radius: 23
+                color: "#cc000000"
+                border.color: Theme.textPrimary
+                border.width: 1
+                Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 20 }
                 TapHandler { onTapped: card.activated(card.item) }
             }
 
@@ -140,7 +148,6 @@ Item {
             }
 
             HoverHandler { id: hover }
-            TapHandler { onTapped: card.openDetail(card.item) }
         }
 
         // --- labels ---
@@ -167,4 +174,7 @@ Item {
             }
         }
     }
+
+    // click anywhere on the card (except the play button) → open detail
+    TapHandler { onTapped: card.openDetail(card.item) }
 }

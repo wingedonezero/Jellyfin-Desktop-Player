@@ -402,16 +402,40 @@ Item {
                 spacing: Theme.spacingSmall
                 visible: screen.cast.length > 0
                 Text { text: qsTr("Cast & Crew"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.leftMargin: Theme.pagePad }
-                ListView {
+                Item {
+                    id: castArea
                     Layout.fillWidth: true
                     Layout.preferredHeight: 150
-                    orientation: ListView.Horizontal
-                    spacing: Theme.spacing
-                    clip: true
-                    leftMargin: Theme.pagePad; rightMargin: Theme.pagePad
-                    model: screen.cast
-                    delegate: PersonTile {}
-                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+                    readonly property real minX: castList.originX
+                    readonly property real maxX: castList.originX + Math.max(0, castList.contentWidth - castList.width)
+                    ListView {
+                        id: castList
+                        anchors.fill: parent
+                        orientation: ListView.Horizontal
+                        interactive: false // vertical wheel scrolls the page; arrows scroll the cast
+                        spacing: Theme.spacing
+                        clip: true
+                        leftMargin: Theme.pagePad; rightMargin: Theme.pagePad
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: screen.cast
+                        Behavior on contentX { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        delegate: PersonTile {}
+                    }
+                    HoverHandler { id: castHover }
+                    Rectangle {
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: Theme.spacingTiny }
+                        width: 32; height: 72; radius: Theme.radius; color: "#cc000000"
+                        visible: castHover.hovered && castList.contentX > castArea.minX + 1
+                        Text { anchors.centerIn: parent; text: "‹"; color: Theme.textPrimary; font.pixelSize: 26 }
+                        TapHandler { onTapped: castList.contentX = Math.max(castArea.minX, castList.contentX - castList.width * 0.8) }
+                    }
+                    Rectangle {
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacingTiny }
+                        width: 32; height: 72; radius: Theme.radius; color: "#cc000000"
+                        visible: castHover.hovered && castList.contentX < castArea.maxX - 1
+                        Text { anchors.centerIn: parent; text: "›"; color: Theme.textPrimary; font.pixelSize: 26 }
+                        TapHandler { onTapped: castList.contentX = Math.min(castArea.maxX, castList.contentX + castList.width * 0.8) }
+                    }
                 }
             }
 

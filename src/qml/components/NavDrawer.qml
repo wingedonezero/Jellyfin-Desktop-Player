@@ -19,6 +19,7 @@ Drawer {
     signal doLogout()
 
     width: Theme.drawerWidth
+    height: parent ? parent.height : 0 // overriding contentItem drops the implicit full height
     edge: Qt.LeftEdge
     dim: true
 
