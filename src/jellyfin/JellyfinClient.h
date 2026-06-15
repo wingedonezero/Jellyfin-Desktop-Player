@@ -28,6 +28,7 @@ class JellyfinClient : public QObject
     Q_PROPERTY(QString serverUrl READ serverUrl WRITE setServerUrl NOTIFY serverUrlChanged)
     Q_PROPERTY(bool authenticated READ isAuthenticated NOTIFY authenticatedChanged)
     Q_PROPERTY(QString userName READ userName NOTIFY authenticatedChanged)
+    Q_PROPERTY(bool isAdmin READ isAdmin NOTIFY authenticatedChanged)
 
 public:
     explicit JellyfinClient(QObject *parent = nullptr);
@@ -37,6 +38,10 @@ public:
 
     bool isAuthenticated() const { return !m_token.isEmpty(); }
     QString userName() const { return m_userName; }
+    bool isAdmin() const { return m_isAdmin; }
+
+    // Raw GET for admin/dashboard endpoints — emits jsonReady(tag, <array|object>).
+    Q_INVOKABLE void getJson(const QString &path, const QString &requestTag);
 
     // --- auth ---
     Q_INVOKABLE void authenticate(const QString &username, const QString &password);
@@ -103,6 +108,7 @@ Q_SIGNALS:
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
     void streamReady(const QString &requestTag, const QVariantMap &info);
+    void jsonReady(const QString &requestTag, const QVariant &data);
     void passwordChanged(bool ok, const QString &message);
     void errorOccurred(const QString &message);
 
@@ -124,6 +130,7 @@ private:
     QString m_userName;
     QString m_deviceId;
     QString m_deviceName;
+    bool m_isAdmin = false;
 
     // current playback session (for progress reports + transcode teardown)
     QString m_playSessionId;

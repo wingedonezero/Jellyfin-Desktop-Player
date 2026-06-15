@@ -116,6 +116,8 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         const QJsonObject user = obj.value(QStringLiteral("User")).toObject();
         m_userId = user.value(QStringLiteral("Id")).toString();
         m_userName = user.value(QStringLiteral("Name")).toString();
+        m_isAdmin = user.value(QStringLiteral("Policy")).toObject()
+                        .value(QStringLiteral("IsAdministrator")).toBool();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
@@ -131,8 +133,22 @@ void JellyfinClient::logout()
     m_token.clear();
     m_userId.clear();
     m_userName.clear();
+    m_isAdmin = false;
     QSettings().remove(QStringLiteral("session"));
     Q_EMIT authenticatedChanged();
+}
+
+void JellyfinClient::getJson(const QString &path, const QString &requestTag)
+{
+    QNetworkReply *reply = get(path);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            Q_EMIT errorOccurred(reply->errorString());
+            return;
+        }
+        Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(reply->readAll()).toVariant());
+    });
 }
 
 void JellyfinClient::saveSession() const
@@ -143,6 +159,7 @@ void JellyfinClient::saveSession() const
     s.setValue(QStringLiteral("token"), m_token);
     s.setValue(QStringLiteral("userId"), m_userId);
     s.setValue(QStringLiteral("userName"), m_userName);
+    s.setValue(QStringLiteral("isAdmin"), m_isAdmin);
     s.endGroup();
 }
 
@@ -154,6 +171,7 @@ bool JellyfinClient::restoreSession()
     const QString token = s.value(QStringLiteral("token")).toString();
     const QString userId = s.value(QStringLiteral("userId")).toString();
     const QString userName = s.value(QStringLiteral("userName")).toString();
+    const bool isAdmin = s.value(QStringLiteral("isAdmin")).toBool();
     s.endGroup();
 
     if (server.isEmpty() || token.isEmpty() || userId.isEmpty())
@@ -163,6 +181,7 @@ bool JellyfinClient::restoreSession()
     m_token = token;
     m_userId = userId;
     m_userName = userName;
+    m_isAdmin = isAdmin;
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
     return true;

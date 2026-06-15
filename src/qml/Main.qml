@@ -31,6 +31,7 @@ ApplicationWindow {
     function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
     function openSearch() { stack.push(searchComp) }
     function openSettings() { stack.push(settingsComp) }
+    function openAdmin() { if (jellyfin.isAdmin) stack.push(adminComp) }
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
@@ -65,6 +66,7 @@ ApplicationWindow {
             onHomeClicked: win.goHome()
             onSearchClicked: win.openSearch()
             onSettingsClicked: win.openSettings()
+            onAdminClicked: win.openAdmin()
             onLogoutClicked: jellyfin.logout()
         }
 
@@ -83,7 +85,7 @@ ApplicationWindow {
         onNavFavorites: win.openFavorites()
         onNavLibrary: (lib) => win.openLibrary(lib)
         onNavSettings: win.openSettings()
-        onNavAdmin: win.openSettings() // admin lands in the Settings → Administration section
+        onNavAdmin: win.openAdmin()
         onDoLogout: jellyfin.logout()
     }
 
@@ -131,6 +133,10 @@ ApplicationWindow {
             config: appConfig
             onLogout: jellyfin.logout()
         }
+    }
+    Component {
+        id: adminComp
+        AdminScreen { client: jellyfin }
     }
 
     // ---- player overlay ---------------------------------------------------

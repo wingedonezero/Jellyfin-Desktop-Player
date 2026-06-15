@@ -17,8 +17,8 @@ Item {
 
     property int section: 0
     readonly property var sections: [qsTr("Profile"), qsTr("Display"), qsTr("Home"), qsTr("Playback"),
-                                     qsTr("Subtitles"), qsTr("Player"), qsTr("Quick Connect"),
-                                     qsTr("Administration"), qsTr("About")]
+                                     qsTr("Subtitles"), qsTr("Controls"), qsTr("Player"),
+                                     qsTr("Quick Connect"), qsTr("About")]
     readonly property var bitrates: [0, 120000000, 60000000, 40000000, 20000000, 10000000, 8000000, 4000000, 2000000, 1000000]
 
     // reactive copies of persisted prefs
@@ -255,7 +255,17 @@ Item {
                 OptionRow { text: qsTr("Burn in subtitles"); stub: true }
             }
 
-            // 5 — Player (mpv.conf)
+            // 5 — Controls (keyboard) — stub
+            Panel {
+                SectionTitle { text: qsTr("Controls") }
+                Hint { text: qsTr("Keyboard & remote shortcuts. Customisation isn't wired yet.") }
+                OptionRow { text: qsTr("Space — Play / Pause"); stub: true }
+                OptionRow { text: qsTr("Left / Right — Skip"); stub: true }
+                OptionRow { text: qsTr("F — Fullscreen"); stub: true }
+                OptionRow { text: qsTr("Customise shortcuts"); stub: true }
+            }
+
+            // 6 — Player (mpv.conf)
             ColumnLayout {
                 ColumnLayout {
                     Layout.fillWidth: true; Layout.margins: Theme.pagePad; Layout.bottomMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
@@ -286,18 +296,6 @@ Item {
                 Hint { text: qsTr("Authorize a sign-in code from another device. Not implemented yet.") }
                 Field { placeholderText: qsTr("Quick Connect code"); enabled: false }
                 PanelButton { text: qsTr("Authorize"); enabled: false }
-            }
-
-            // 7 — Administration (stub list mirrors the web dashboard nav)
-            Panel {
-                SectionTitle { text: qsTr("Administration") }
-                Hint { text: qsTr("Server administration. Native dashboard panels are not built yet — use the web dashboard for now.") }
-                Item { Layout.preferredHeight: Theme.spacingSmall }
-                Repeater {
-                    model: [qsTr("Dashboard"), qsTr("Users"), qsTr("Libraries"), qsTr("Playback / Transcoding"),
-                            qsTr("Plugins"), qsTr("Scheduled Tasks"), qsTr("Logs"), qsTr("API Keys"), qsTr("Networking")]
-                    OptionRow { text: modelData; stub: true }
-                }
             }
 
             // 8 — About

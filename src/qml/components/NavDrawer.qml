@@ -112,7 +112,7 @@ Drawer {
 
             NavDivider {}
             NavItem { text: qsTr("Settings"); glyph: "⚙"; onClicked: { drawer.close(); drawer.navSettings() } }
-            NavItem { text: qsTr("Administration"); glyph: "\u{1F6E0}"; enabled: Features.adminDashboard; onClicked: { drawer.close(); drawer.navAdmin() } } // 🛠 (stub)
+            NavItem { text: qsTr("Administration"); glyph: "\u{1F6E0}"; visible: drawer.client && drawer.client.isAdmin; onClicked: { drawer.close(); drawer.navAdmin() } } // 🛠 admins only
             NavItem { text: qsTr("Log out"); glyph: "\u{23FB}"; onClicked: { drawer.close(); drawer.doLogout() } } // ⏻
         }
     }
