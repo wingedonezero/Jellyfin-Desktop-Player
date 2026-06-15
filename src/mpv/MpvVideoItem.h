@@ -3,6 +3,7 @@
 #include <QtQml/qqmlregistration.h>
 #include <QtQuick/QQuickFramebufferObject>
 #include <QStringList>
+#include <QVariantList>
 
 #include <memory>
 
@@ -57,9 +58,10 @@ struct MpvRenderResources {
 // MpvVideoItem — a libmpv video surface for Qt Quick.
 //
 // mpv renders through its OpenGL render API directly into this item's FBO. The
-// only external dependency is libmpv itself. Playback state (position,
-// duration, pause) is observed from mpv and exposed as bindable properties —
-// mpv is the authoritative source of state; the UI reflects it.
+// only external dependency is libmpv itself. Playback state is observed from
+// mpv and exposed as bindable properties — mpv is the authoritative source of
+// state; the UI reflects it. audioTracks/subtitleTracks are lists of
+// { id, label, selected } maps.
 // ----------------------------------------------------------------------------
 
 class MpvVideoItem : public QQuickFramebufferObject
@@ -70,6 +72,10 @@ class MpvVideoItem : public QQuickFramebufferObject
     Q_PROPERTY(double position READ position NOTIFY positionChanged)
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(bool paused READ paused NOTIFY pausedChanged)
+    Q_PROPERTY(double volume READ volume NOTIFY volumeChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
+    Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY tracksChanged)
+    Q_PROPERTY(QVariantList subtitleTracks READ subtitleTracks NOTIFY tracksChanged)
 
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
@@ -80,11 +86,20 @@ public:
     double position() const { return m_position; }
     double duration() const { return m_duration; }
     bool paused() const { return m_paused; }
+    double volume() const { return m_volume; }
+    bool muted() const { return m_muted; }
+    QVariantList audioTracks() const { return m_audioTracks; }
+    QVariantList subtitleTracks() const { return m_subtitleTracks; }
 
     // --- playback control ---
     Q_INVOKABLE void play(const QString &url);
-    Q_INVOKABLE void seek(double seconds);     // absolute seek, in seconds
+    Q_INVOKABLE void seek(double seconds);    // absolute seek, in seconds
+    Q_INVOKABLE void skip(double seconds);    // relative seek, in seconds
     Q_INVOKABLE void setPaused(bool paused);
+    Q_INVOKABLE void setVolume(double volume);
+    Q_INVOKABLE void setMuted(bool muted);
+    Q_INVOKABLE void setAudioTrack(int id);
+    Q_INVOKABLE void setSubtitleTrack(int id); // id < 0 => off
 
     // --- low-level passthrough (typed API grows on top of these) ---
     Q_INVOKABLE void command(const QStringList &args);
@@ -97,16 +112,24 @@ Q_SIGNALS:
     void positionChanged();
     void durationChanged();
     void pausedChanged();
+    void volumeChanged();
+    void mutedChanged();
+    void tracksChanged();
 
 private:
     static void onMpvWakeup(void *ctx); // called from an mpv-owned thread
     Q_INVOKABLE void pumpEvents();      // runs on the GUI thread
     Q_INVOKABLE void scheduleUpdate();  // runs on the GUI thread
     void handlePropertyChange(mpv_event_property *prop);
+    void updateTracks(const QVariantList &trackList);
 
     double m_position = 0.0;
     double m_duration = 0.0;
     bool m_paused = false;
+    double m_volume = 100.0;
+    bool m_muted = false;
+    QVariantList m_audioTracks;
+    QVariantList m_subtitleTracks;
 
     std::shared_ptr<MpvHandle> m_mpv;
     std::shared_ptr<MpvRenderResources> m_resources;

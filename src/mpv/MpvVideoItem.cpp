@@ -7,8 +7,44 @@
 #include <QOpenGLFramebufferObject>
 #include <QPointer>
 #include <QQuickWindow>
+#include <QVariant>
 #include <QVector>
 #include <QtGlobal>
+
+namespace {
+// Recursively convert an mpv_node into a QVariant (used for track-list, etc.).
+QVariant nodeToVariant(const mpv_node *node)
+{
+    switch (node->format) {
+    case MPV_FORMAT_STRING:
+        return QString::fromUtf8(node->u.string);
+    case MPV_FORMAT_FLAG:
+        return node->u.flag != 0;
+    case MPV_FORMAT_INT64:
+        return static_cast<qlonglong>(node->u.int64);
+    case MPV_FORMAT_DOUBLE:
+        return node->u.double_;
+    case MPV_FORMAT_NODE_ARRAY: {
+        QVariantList list;
+        mpv_node_list *l = node->u.list;
+        for (int i = 0; i < l->num; ++i) {
+            list.append(nodeToVariant(&l->values[i]));
+        }
+        return list;
+    }
+    case MPV_FORMAT_NODE_MAP: {
+        QVariantMap map;
+        mpv_node_list *l = node->u.list;
+        for (int i = 0; i < l->num; ++i) {
+            map.insert(QString::fromUtf8(l->keys[i]), nodeToVariant(&l->values[i]));
+        }
+        return map;
+    }
+    default:
+        return {};
+    }
+}
+} // namespace
 
 // ----------------------------------------------------------------------------
 // MpvRenderer — lives on the Qt scene-graph render thread. Owns nothing but a
@@ -149,6 +185,9 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_observe_property(handle, 0, "time-pos", MPV_FORMAT_DOUBLE);
     mpv_observe_property(handle, 0, "duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(handle, 0, "pause", MPV_FORMAT_FLAG);
+    mpv_observe_property(handle, 0, "volume", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(handle, 0, "track-list", MPV_FORMAT_NODE);
 
     mpv_set_wakeup_callback(handle, onMpvWakeup, this);
 
@@ -186,6 +225,37 @@ void MpvVideoItem::setPaused(bool paused)
         int flag = paused ? 1 : 0;
         mpv_set_property(m_mpv->handle, "pause", MPV_FORMAT_FLAG, &flag);
     }
+}
+
+void MpvVideoItem::skip(double seconds)
+{
+    command({QStringLiteral("seek"), QString::number(seconds), QStringLiteral("relative")});
+}
+
+void MpvVideoItem::setVolume(double volume)
+{
+    if (m_mpv && m_mpv->handle) {
+        double v = volume;
+        mpv_set_property(m_mpv->handle, "volume", MPV_FORMAT_DOUBLE, &v);
+    }
+}
+
+void MpvVideoItem::setMuted(bool muted)
+{
+    if (m_mpv && m_mpv->handle) {
+        int flag = muted ? 1 : 0;
+        mpv_set_property(m_mpv->handle, "mute", MPV_FORMAT_FLAG, &flag);
+    }
+}
+
+void MpvVideoItem::setAudioTrack(int id)
+{
+    setOption(QStringLiteral("aid"), id < 0 ? QStringLiteral("no") : QString::number(id));
+}
+
+void MpvVideoItem::setSubtitleTrack(int id)
+{
+    setOption(QStringLiteral("sid"), id < 0 ? QStringLiteral("no") : QString::number(id));
 }
 
 void MpvVideoItem::command(const QStringList &args)
@@ -284,5 +354,47 @@ void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
     } else if (name == "pause" && prop->format == MPV_FORMAT_FLAG) {
         m_paused = (*static_cast<int *>(prop->data) != 0);
         Q_EMIT pausedChanged();
+    } else if (name == "volume" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_volume = *static_cast<double *>(prop->data);
+        Q_EMIT volumeChanged();
+    } else if (name == "mute" && prop->format == MPV_FORMAT_FLAG) {
+        m_muted = (*static_cast<int *>(prop->data) != 0);
+        Q_EMIT mutedChanged();
+    } else if (name == "track-list" && prop->format == MPV_FORMAT_NODE) {
+        updateTracks(nodeToVariant(static_cast<mpv_node *>(prop->data)).toList());
     }
+}
+
+void MpvVideoItem::updateTracks(const QVariantList &trackList)
+{
+    m_audioTracks.clear();
+    m_subtitleTracks.clear();
+    for (const QVariant &tv : trackList) {
+        const QVariantMap t = tv.toMap();
+        const QString type = t.value(QStringLiteral("type")).toString();
+        const bool isAudio = (type == QLatin1String("audio"));
+        const bool isSub = (type == QLatin1String("sub"));
+        if (!isAudio && !isSub) {
+            continue;
+        }
+        const int id = t.value(QStringLiteral("id")).toInt();
+        const QString title = t.value(QStringLiteral("title")).toString();
+        const QString lang = t.value(QStringLiteral("lang")).toString();
+        QString label;
+        if (!title.isEmpty() && !lang.isEmpty()) {
+            label = QStringLiteral("%1 (%2)").arg(title, lang);
+        } else if (!title.isEmpty()) {
+            label = title;
+        } else if (!lang.isEmpty()) {
+            label = lang;
+        } else {
+            label = QStringLiteral("Track %1").arg(id);
+        }
+        QVariantMap track;
+        track[QStringLiteral("id")] = id;
+        track[QStringLiteral("label")] = label;
+        track[QStringLiteral("selected")] = t.value(QStringLiteral("selected")).toBool();
+        (isAudio ? m_audioTracks : m_subtitleTracks).append(track);
+    }
+    Q_EMIT tracksChanged();
 }

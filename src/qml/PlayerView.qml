@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import JellyfinDesktop
 
 // The playback layer: the mpv surface, the OSD controls, auto-hide, resume,
@@ -54,6 +55,7 @@ Item {
             console.log("[mpv] end-file, reason:", reason)
             root.stop()
         }
+        onTracksChanged: console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
     }
 
     MouseArea {
@@ -73,6 +75,11 @@ Item {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         onBack: root.stop()
+        onToggleFullscreen: {
+            const w = Window.window
+            if (w)
+                w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
+        }
     }
 
     Timer {
