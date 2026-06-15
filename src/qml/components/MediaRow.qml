@@ -32,15 +32,14 @@ ColumnLayout {
     Item {
         id: rowArea
         Layout.fillWidth: true
-        Layout.preferredHeight: (row.shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight) + 50
-        readonly property real minX: list.originX
-        readonly property real maxX: list.originX + Math.max(0, list.contentWidth - list.width)
+        readonly property real artHeight: row.shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight
+        Layout.preferredHeight: artHeight + 50
 
         ListView {
             id: list
             anchors.fill: parent
             orientation: ListView.Horizontal
-            interactive: false // vertical wheel goes to the page; scroll via arrows
+            interactive: false // vertical wheel goes to the page; scroll via the edge gutters
             spacing: Theme.spacing
             clip: true
             leftMargin: Theme.pagePad
@@ -62,21 +61,61 @@ ColumnLayout {
 
         HoverHandler { id: rowHover }
 
-        Rectangle { // scroll left
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: Theme.spacingTiny }
-            width: 32; height: 72; radius: Theme.radius
-            color: Theme.overlayStrong
-            visible: rowHover.hovered && list.contentX > rowArea.minX + 1
-            Text { anchors.centerIn: parent; text: "‹"; color: Theme.textPrimary; font.pixelSize: 26 }
-            TapHandler { onTapped: list.contentX = Math.max(rowArea.minX, list.contentX - list.width * 0.8) }
+        // --- horizontal scroll gutters (jellyfin-web edge chevrons) ----------
+        // Full-height, fully-clickable edge strips. They appear on hover ONLY
+        // when the row actually overflows (atXBeginning/atXEnd is authoritative,
+        // so they never show — nor steal a click — when everything already
+        // fits), and sit above the cards: the strip's MouseArea consumes the
+        // click, so it can't fall through and open the card beneath it.
+        component ScrollGutter: Rectangle {
+            property bool toRight: true
+            width: 56
+            height: rowArea.artHeight
+            anchors.top: parent.top
+            z: 5
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: toRight ? Theme.transparent : Theme.overlayStrong }
+                GradientStop { position: 1.0; color: toRight ? Theme.overlayStrong : Theme.transparent }
+            }
+            // circular chevron badge (matches the card play button)
+            Rectangle {
+                anchors.centerIn: parent
+                width: 40; height: 40; radius: 20
+                color: Theme.overlayStrong
+                border.color: Theme.textPrimary
+                border.width: 1
+                Text {
+                    anchors.centerIn: parent
+                    text: toRight ? "›" : "‹"   // › ‹
+                    color: Theme.textPrimary
+                    font.pixelSize: 24
+                }
+            }
+            // the WHOLE strip is the target; consume the click so it never
+            // reaches the card behind it
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    const page = list.width * 0.8
+                    const maxX = Math.max(0, list.contentWidth - list.width)
+                    list.contentX = toRight ? Math.min(list.contentX + page, maxX)
+                                            : Math.max(0, list.contentX - page)
+                }
+            }
         }
-        Rectangle { // scroll right
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter; rightMargin: Theme.spacingTiny }
-            width: 32; height: 72; radius: Theme.radius
-            color: Theme.overlayStrong
-            visible: rowHover.hovered && list.contentX < rowArea.maxX - 1
-            Text { anchors.centerIn: parent; text: "›"; color: Theme.textPrimary; font.pixelSize: 26 }
-            TapHandler { onTapped: list.contentX = Math.min(rowArea.maxX, list.contentX + list.width * 0.8) }
+
+        ScrollGutter {
+            toRight: false
+            anchors.left: parent.left
+            visible: rowHover.hovered && !list.atXBeginning
+        }
+        ScrollGutter {
+            toRight: true
+            anchors.right: parent.right
+            visible: rowHover.hovered && !list.atXEnd
         }
     }
 }
