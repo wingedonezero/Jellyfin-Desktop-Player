@@ -1,7 +1,14 @@
 # Jellyfin Desktop Player
 
-Clean slate — stack and design TBD (see CLAUDE.md once written).
+A native **C++ / Qt6 (QML) / libmpv** Jellyfin client for Linux — own UI, mpv for
+playback, no embedded web engine.
 
-The previous CEF/Rust implementation is archived at:
-  ../jellyfin-cef-archive-20260615/   (source + full-history git bundle + patches)
-and locally on branches `archive/old-cef-main` and `archive/old-cef-work`.
+See **[CLAUDE.md](CLAUDE.md)** for build instructions, architecture, and roadmap.
+
+```sh
+sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-declarative-dev libmpv-dev
+cmake -B build -G Ninja && cmake --build build
+./build/jellyfin-desktop /path/to/video.mkv
+```
+
+The previous CEF/Rust implementation is archived in `../jellyfin-cef-archive-20260615/`.
