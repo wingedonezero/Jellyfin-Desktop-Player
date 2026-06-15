@@ -14,10 +14,14 @@ Item {
     required property var player
     property string title: ""
     property bool favorite: false
+    property int repeatMode: 0 // 0 none, 1 one, 2 all
 
     signal back()
     signal toggleFullscreen()
     signal toggleFavorite()
+    signal previous()
+    signal next()
+    signal cycleRepeat()
 
     // Local skin state (the mpv side is authoritative for speed/delays).
     property string aspectMode: "Auto"
@@ -295,7 +299,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.spacingTiny
 
-                IconButton { text: "⏮"; enabled: Features.playQueue }                 // ⏮ previous (stub)
+                IconButton { text: "⏮"; enabled: Features.playQueue; onClicked: root.previous() } // ⏮ previous
                 IconButton { text: "⏪"; onClicked: root.player.skip(-10) }            // ⏪ back 10s
                 IconButton {
                     text: root.player.paused ? "▶" : "⏸"                          // ▶ / ⏸
@@ -303,7 +307,7 @@ Item {
                     onClicked: root.player.setPaused(!root.player.paused)
                 }
                 IconButton { text: "⏩"; onClicked: root.player.skip(30) }             // ⏩ forward 30s
-                IconButton { text: "⏭"; enabled: Features.playQueue }                 // ⏭ next (stub)
+                IconButton { text: "⏭"; enabled: Features.playQueue; onClicked: root.next() } // ⏭ next
 
                 Label {
                     text: qsTr("Ends at %1").arg(root.endsAt())
@@ -442,8 +446,10 @@ Item {
                                     enabled: Features.transcodeQuality
                                 }
                                 SettingRow {
-                                    label: qsTr("Repeat Mode"); value: qsTr("None")
+                                    label: qsTr("Repeat Mode")
+                                    value: [qsTr("None"), qsTr("Repeat One"), qsTr("Repeat All")][root.repeatMode]
                                     enabled: Features.playQueue
+                                    onClicked: root.cycleRepeat()
                                 }
                                 SettingRow {
                                     label: qsTr("Subtitle Settings")

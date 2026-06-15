@@ -14,6 +14,7 @@ Item {
     property string pageTitle: (detail && detail.name) ? detail.name : qsTr("Details")
 
     signal play(var item)
+    signal playQueue(var items, int index)
     signal openDetail(var item)
 
     property bool favorite: false
@@ -40,14 +41,20 @@ Item {
         episodes = []
         client.fetchEpisodes(detail.id, s.id, "d:episodes:" + s.id)
     }
+    function playEpisode(ep) {
+        let idx = 0
+        for (let i = 0; i < episodes.length; ++i)
+            if (episodes[i].id === ep.id) { idx = i; break }
+        screen.playQueue(episodes, idx) // queue the season so it auto-plays next
+    }
     function playPrimary() {
         if (!detail) return
         if (isSeries) {
             if (episodes.length > 0) {
-                let ep = null
+                let ep = episodes[0]
                 for (let i = 0; i < episodes.length; ++i)
                     if (!episodes[i].played) { ep = episodes[i]; break }
-                screen.play(ep || episodes[0])
+                playEpisode(ep)
             }
         } else {
             screen.play(detail)
@@ -162,7 +169,7 @@ Item {
         Layout.fillWidth: true
         implicitHeight: 110
         background: Rectangle { radius: Theme.radius; color: ep.hovered ? Theme.surfaceHover : "transparent" }
-        onClicked: screen.play(ep.modelData)
+        onClicked: screen.playEpisode(ep.modelData)
         contentItem: RowLayout {
             spacing: Theme.spacing
             Rectangle {

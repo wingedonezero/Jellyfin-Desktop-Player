@@ -10,7 +10,7 @@ import QtQuick
 // ----------------------------------------------------------------------------
 QtObject {
     readonly property bool transcodeQuality: false // server-side quality/bitrate (transcode pipeline)
-    readonly property bool playQueue:        false // previous/next, repeat, auto-play-next (needs a queue)
+    readonly property bool playQueue:        true  // previous/next, repeat, auto-play-next
     readonly property bool cast:             false // casting out to Chromecast/DLNA
     readonly property bool syncPlay:         false // watch-together (Jellyfin SyncPlay)
     readonly property bool trickplay:        false // scrubber thumbnail previews

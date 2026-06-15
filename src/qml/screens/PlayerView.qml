@@ -4,7 +4,8 @@ import QtQuick.Window
 import JellyfinDesktop
 
 // The playback layer: the mpv surface, the OSD controls, auto-hide, resume,
-// and periodic progress reporting. Driven by a JellyfinClient passed in.
+// periodic progress reporting, and a play queue (next/previous/repeat +
+// auto-play-next on end-of-file). Driven by a JellyfinClient passed in.
 Item {
     id: root
     required property var client
@@ -13,7 +14,25 @@ Item {
     property var currentItem: ({})
     property bool favorite: false
 
-    function playItem(item) {
+    // play queue
+    property var queue: []
+    property int queueIndex: -1
+    property int repeatMode: 0 // 0 none, 1 one, 2 all
+
+    function playItem(item) { playQueue([item], 0) }
+
+    function playQueue(items, index) {
+        root.queue = items
+        root.queueIndex = index
+        _startCurrent()
+    }
+
+    function _startCurrent() {
+        if (queueIndex < 0 || queueIndex >= queue.length)
+            return
+        const item = queue[queueIndex]
+        if (player.currentId.length > 0 && player.currentId !== item.id)
+            client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.currentId = item.id
         root.currentItem = item
         root.favorite = (item.isFavorite === true)
@@ -22,7 +41,20 @@ Item {
         showOsd()
         player.play(client.streamUrl(item.id))
         client.reportPlaybackStart(item.id)
-        console.log("[jf] play", item.id, "resume@", player.pendingResume)
+        console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", player.pendingResume)
+    }
+
+    function playNext() {
+        if (repeatMode === 1) { player.seek(0); player.setPaused(false); return }
+        if (queueIndex + 1 < queue.length) { root.queueIndex = queueIndex + 1; _startCurrent() }
+        else if (repeatMode === 2 && queue.length > 0) { root.queueIndex = 0; _startCurrent() }
+        else { stop() }
+    }
+
+    function playPrev() {
+        if (player.position > 3) { player.seek(0); return }
+        if (queueIndex - 1 >= 0) { root.queueIndex = queueIndex - 1; _startCurrent() }
+        else { player.seek(0) }
     }
 
     function stop() {
@@ -32,6 +64,8 @@ Item {
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.playing = false
         player.currentId = ""
+        root.queue = []
+        root.queueIndex = -1
         player.command(["stop"])
     }
 
@@ -56,8 +90,12 @@ Item {
             }
         }
         onEndFile: (reason) => {
+            // mpv reasons: 0 eof, 2 stop (our loadfile/stop), 4 error.
             console.log("[mpv] end-file, reason:", reason)
-            root.stop()
+            if (reason === "0")
+                root.playNext()          // natural end: advance / repeat / stop
+            else if (reason !== "2")
+                root.stop()              // error etc.; (transcode fallback lands later)
         }
         onTracksChanged: console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
     }
@@ -77,10 +115,14 @@ Item {
         player: player
         title: root.currentItem.name || ""
         favorite: root.favorite
+        repeatMode: root.repeatMode
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         onBack: root.stop()
+        onPrevious: root.playPrev()
+        onNext: root.playNext()
+        onCycleRepeat: root.repeatMode = (root.repeatMode + 1) % 3
         onToggleFavorite: {
             root.favorite = !root.favorite
             root.client.setFavorite(player.currentId, root.favorite)

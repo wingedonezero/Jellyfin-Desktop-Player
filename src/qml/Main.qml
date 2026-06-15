@@ -35,6 +35,7 @@ ApplicationWindow {
             stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
+    function playQueue(items, index) { playerView.playQueue(items, index) }
 
     // ---- login (no chrome) ------------------------------------------------
     Loader {
@@ -106,6 +107,7 @@ ApplicationWindow {
         DetailScreen {
             client: jellyfin
             onPlay: (it) => win.playItem(it)
+            onPlayQueue: (items, index) => win.playQueue(items, index)
             onOpenDetail: (it) => win.openDetail(it)
         }
     }
