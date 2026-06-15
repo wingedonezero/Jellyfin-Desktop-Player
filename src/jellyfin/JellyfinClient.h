@@ -58,6 +58,10 @@ public:
     Q_INVOKABLE void reportPlaybackProgress(const QString &itemId, qint64 positionTicks, bool paused);
     Q_INVOKABLE void reportPlaybackStopped(const QString &itemId, qint64 positionTicks);
 
+    // --- user data (fire-and-forget; UI updates optimistically) ---
+    Q_INVOKABLE void setFavorite(const QString &itemId, bool favorite);
+    Q_INVOKABLE void setWatched(const QString &itemId, bool watched);
+
 Q_SIGNALS:
     void serverUrlChanged();
     void authenticatedChanged();
@@ -69,6 +73,7 @@ private:
     QString authHeader() const; // "MediaBrowser Token=..., Client=..., ..."
     QNetworkReply *get(const QString &pathWithQuery) const;
     QNetworkReply *post(const QString &pathWithQuery, const QByteArray &json) const;
+    QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     static QVariantList parseItems(const QByteArray &json);
 

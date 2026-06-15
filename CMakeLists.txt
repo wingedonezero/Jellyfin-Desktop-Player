@@ -21,10 +21,17 @@ qt_add_executable(jellyfin-desktop
     src/core/Paths.cpp
 )
 
+# Singletons (theme tokens + feature flags) — must be marked before the module
+# is declared so the QML type is registered as a singleton.
+set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(src/qml/Features.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(jellyfin-desktop
     URI JellyfinDesktop
     VERSION 1.0
     QML_FILES
+        src/qml/Theme.qml
+        src/qml/Features.qml
         src/qml/Main.qml
         src/qml/LoginView.qml
         src/qml/BrowseView.qml

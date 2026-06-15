@@ -72,6 +72,13 @@ QNetworkReply *JellyfinClient::post(const QString &pathWithQuery, const QByteArr
     return m_net->post(req, json);
 }
 
+QNetworkReply *JellyfinClient::del(const QString &pathWithQuery) const
+{
+    QNetworkRequest req{QUrl(m_serverUrl + pathWithQuery)};
+    req.setRawHeader("Authorization", authHeader().toUtf8());
+    return m_net->deleteResource(req);
+}
+
 // --- auth -------------------------------------------------------------------
 
 void JellyfinClient::authenticate(const QString &username, const QString &password)
@@ -168,6 +175,8 @@ QVariantList JellyfinClient::parseItems(const QByteArray &json)
         // resume position (ticks; 1 tick = 100ns) for continue-watching
         const QJsonObject userData = o.value(QStringLiteral("UserData")).toObject();
         m[QStringLiteral("playbackTicks")] = userData.value(QStringLiteral("PlaybackPositionTicks")).toDouble();
+        m[QStringLiteral("isFavorite")] = userData.value(QStringLiteral("IsFavorite")).toBool();
+        m[QStringLiteral("played")] = userData.value(QStringLiteral("Played")).toBool();
         out.append(m);
     }
     return out;
@@ -227,5 +236,21 @@ void JellyfinClient::reportPlaybackStopped(const QString &itemId, qint64 positio
         {QStringLiteral("PositionTicks"), positionTicks},
     };
     QNetworkReply *reply = post(QStringLiteral("/Sessions/Playing/Stopped"), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+// --- user data -------------------------------------------------------------
+
+void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
+{
+    const QString path = QStringLiteral("/Users/%1/FavoriteItems/%2").arg(m_userId, itemId);
+    QNetworkReply *reply = favorite ? post(path, QByteArray()) : del(path);
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::setWatched(const QString &itemId, bool watched)
+{
+    const QString path = QStringLiteral("/Users/%1/PlayedItems/%2").arg(m_userId, itemId);
+    QNetworkReply *reply = watched ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }

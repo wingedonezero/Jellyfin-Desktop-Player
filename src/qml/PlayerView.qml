@@ -10,9 +10,13 @@ Item {
     required property var client
     property alias playing: player.playing
     property bool osdVisible: true
+    property var currentItem: ({})
+    property bool favorite: false
 
     function playItem(item) {
         player.currentId = item.id
+        root.currentItem = item
+        root.favorite = (item.isFavorite === true)
         player.pendingResume = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         showOsd()
@@ -71,10 +75,16 @@ Item {
     PlayerControls {
         anchors.fill: parent
         player: player
+        title: root.currentItem.name || ""
+        favorite: root.favorite
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         onBack: root.stop()
+        onToggleFavorite: {
+            root.favorite = !root.favorite
+            root.client.setFavorite(player.currentId, root.favorite)
+        }
         onToggleFullscreen: {
             const w = Window.window
             if (w)
