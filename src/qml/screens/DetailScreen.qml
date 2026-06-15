@@ -29,6 +29,9 @@ Item {
     readonly property bool isSeries: detail && detail.type === "Series"
     readonly property bool isPerson: detail && detail.type === "Person"
     property var filmography: []
+    property var extras: []
+    property var playlists: []
+    property var collectionsList: []
 
     Component.onCompleted: load()
     onItemIdChanged: load()
@@ -75,6 +78,27 @@ Item {
         if (detail.officialRating) parts.push(detail.officialRating)
         return parts.join("   •   ")
     }
+    function videoLine() {
+        const v = (detail.mediaStreams || []).find(s => s.type === "Video")
+        if (!v) return ""
+        const res = (v.width && v.height) ? (v.width + "×" + v.height) : ""
+        return [v.codec ? v.codec.toUpperCase() : "", res].filter(Boolean).join("  •  ")
+    }
+    function audioText() {
+        return (detail.mediaStreams || []).filter(s => s.type === "Audio")
+               .map(s => s.title || [s.codec, s.language].filter(Boolean).join(" ")).join(", ")
+    }
+    function subText() {
+        return (detail.mediaStreams || []).filter(s => s.type === "Subtitle")
+               .map(s => s.title || s.language || qsTr("Subtitle")).join(", ")
+    }
+    function fmtSize(bytes) {
+        if (!bytes || bytes <= 0) return ""
+        const gb = bytes / 1073741824
+        return gb >= 1 ? (gb.toFixed(2) + " GB") : ((bytes / 1048576).toFixed(0) + " MB")
+    }
+    readonly property bool hasMediaInfo: !!(detail && detail.mediaStreams && detail.mediaStreams.length > 0)
+    readonly property bool hasLinks: !!(detail && detail.externalUrls && detail.externalUrls.length > 0)
 
     Connections {
         target: screen.client
@@ -88,6 +112,7 @@ Item {
                     screen.client.fetchByPerson(screen.detail.id, "d:filmography:" + screen.itemId)
                 } else {
                     screen.client.fetchSimilar(screen.itemId, "d:similar:" + screen.itemId)
+                    screen.client.fetchSpecialFeatures(screen.itemId, "d:extras:" + screen.itemId)
                     if (screen.isSeries)
                         screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
                 }
@@ -100,6 +125,12 @@ Item {
                 screen.similar = items
             } else if (tag === "d:filmography:" + screen.itemId) {
                 screen.filmography = items
+            } else if (tag === "d:extras:" + screen.itemId) {
+                screen.extras = items
+            } else if (tag === "d:playlists") {
+                screen.playlists = items
+            } else if (tag === "d:collectionsList") {
+                screen.collectionsList = items
             }
         }
     }
@@ -127,6 +158,55 @@ Item {
             color: parent.primary ? Theme.accentText : Theme.textPrimary
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    // picker popup: choose an existing playlist/collection or create a new one
+    component AddToPicker: Popup {
+        property var options: []
+        property string heading: ""
+        signal pickExisting(string id)
+        signal createNew(string name)
+        width: 280
+        padding: 8
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        property bool creating: false
+        onClosed: creating = false
+        contentItem: ColumnLayout {
+            spacing: 2
+            Text { text: heading; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontNormal; Layout.leftMargin: 6; Layout.bottomMargin: 4 }
+            Repeater {
+                model: options
+                ItemDelegate {
+                    required property var modelData
+                    Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
+                    onClicked: { pickExisting(modelData.id); close() }
+                    contentItem: Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                    background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
+                }
+            }
+            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
+            ItemDelegate {
+                visible: !creating
+                Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
+                onClicked: creating = true
+                contentItem: Text { text: qsTr("＋ New…"); color: Theme.accent; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
+            }
+            RowLayout {
+                visible: creating
+                Layout.fillWidth: true
+                TextField {
+                    id: newName
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Name")
+                    color: Theme.textPrimary
+                    placeholderTextColor: Theme.textDisabled
+                    background: Rectangle { implicitHeight: 32; radius: Theme.radius; color: Theme.background; border.color: Theme.accent; border.width: 1 }
+                }
+                JIconButton { text: "✓"; implicitWidth: 34; implicitHeight: 34; onClicked: { if (newName.text.length) { createNew(newName.text); newName.clear(); close() } } }
+            }
         }
     }
 
@@ -325,15 +405,30 @@ Item {
                                 onClicked: { screen.played = !screen.played; screen.client.setWatched(screen.detail.id, screen.played) }
                             }
                             JIconButton {
+                                id: moreBtn
                                 text: "⋯"
                                 onClicked: moreMenu.popup()
                                 DarkMenu {
                                     id: moreMenu
-                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists }
-                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections }
+                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists; onTriggered: { screen.client.fetchPlaylists("d:playlists"); playlistPicker.open() } }
+                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections; onTriggered: { screen.client.fetchCollections("d:collectionsList"); collectionPicker.open() } }
                                     DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
                                     DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
                                     DarkMenuItem { text: qsTr("Refresh metadata"); enabled: Features.metadataEdit }
+                                }
+                                AddToPicker {
+                                    id: playlistPicker
+                                    x: moreBtn.width - width; y: moreBtn.height + 4
+                                    heading: qsTr("Add to playlist"); options: screen.playlists
+                                    onPickExisting: (id) => screen.client.addToPlaylist(id, screen.detail.id)
+                                    onCreateNew: (name) => screen.client.createPlaylist(name, screen.detail.id)
+                                }
+                                AddToPicker {
+                                    id: collectionPicker
+                                    x: moreBtn.width - width; y: moreBtn.height + 4
+                                    heading: qsTr("Add to collection"); options: screen.collectionsList
+                                    onPickExisting: (id) => screen.client.addToCollection(id, screen.detail.id)
+                                    onCreateNew: (name) => screen.client.createCollection(name, screen.detail.id)
                                 }
                             }
                         }
@@ -358,6 +453,50 @@ Item {
                     visible: text.length > 0
                     color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
                     wrapMode: Text.Wrap; Layout.fillWidth: true; lineHeight: 1.25
+                }
+            }
+
+            // --- external links + media info ---
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.pagePad
+                Layout.rightMargin: Theme.pagePad
+                spacing: Theme.spacingSmall
+                visible: screen.hasMediaInfo || screen.hasLinks
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    visible: screen.hasLinks
+                    Repeater {
+                        model: screen.detail ? (screen.detail.externalUrls || []) : []
+                        Rectangle {
+                            required property var modelData
+                            implicitWidth: lt.implicitWidth + 20; implicitHeight: 30; radius: Theme.radius
+                            color: lh.hovered ? Theme.surfaceHover : Theme.surface
+                            border.color: Theme.divider; border.width: 1
+                            Text { id: lt; anchors.centerIn: parent; text: modelData.name; color: Theme.accent; font.pixelSize: Theme.fontSmall }
+                            HoverHandler { id: lh }
+                            TapHandler { onTapped: Qt.openUrlExternally(modelData.url) }
+                        }
+                    }
+                }
+
+                Text { visible: screen.hasMediaInfo; text: qsTr("Media Info"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                Repeater {
+                    model: screen.hasMediaInfo ? [
+                        { k: qsTr("Video"), v: screen.videoLine() },
+                        { k: qsTr("Audio"), v: screen.audioText() },
+                        { k: qsTr("Subtitles"), v: screen.subText() },
+                        { k: qsTr("Container"), v: ((screen.detail.container || "") + "").toUpperCase() },
+                        { k: qsTr("Size"), v: screen.fmtSize(screen.detail.sizeBytes) }
+                    ].filter(r => r.v && r.v.length > 0) : []
+                    RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Text { text: modelData.k; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 110 }
+                        Text { text: modelData.v; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                    }
                 }
             }
 
@@ -438,6 +577,16 @@ Item {
                         TapHandler { onTapped: castList.contentX = Math.min(castArea.maxX, castList.contentX + castList.width * 0.8) }
                     }
                 }
+            }
+
+            // --- extras / special features ---
+            MediaRow {
+                title: qsTr("Extras")
+                model: screen.extras
+                client: screen.client
+                shape: "thumb"
+                onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.play(it)
             }
 
             // --- filmography (person pages) ---

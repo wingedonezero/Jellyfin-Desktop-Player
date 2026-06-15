@@ -26,7 +26,7 @@ const QString kImageTypes = QStringLiteral("EnableImageTypes=Primary,Thumb,Backd
 // Fuller field set for a single detail page (cast, studios, tagline, etc.).
 const QString kDetailFields = QStringLiteral(
     "Fields=Overview,Genres,People,Studios,Taglines,RunTimeTicks,ProductionYear,"
-    "CommunityRating,OfficialRating,SeriesName");
+    "CommunityRating,OfficialRating,SeriesName,MediaSources,ExternalUrls");
 
 // A stable per-machine device id so the server recognises this client across runs.
 QString makeDeviceId()
@@ -333,6 +333,51 @@ void JellyfinClient::fetchUpcoming(const QString &requestTag)
                  requestTag);
 }
 
+void JellyfinClient::fetchSpecialFeatures(const QString &itemId, const QString &requestTag)
+{
+    // returns a bare array; parseItems handles that
+    requestItems(QStringLiteral("/Users/%1/Items/%2/SpecialFeatures").arg(m_userId, itemId), requestTag);
+}
+
+void JellyfinClient::fetchPlaylists(const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=Playlist"
+                                "&SortBy=SortName&%2&%3")
+                     .arg(m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::addToPlaylist(const QString &playlistId, const QString &itemId)
+{
+    QNetworkReply *reply = post(QStringLiteral("/Playlists/%1/Items?ids=%2&userId=%3")
+                                    .arg(playlistId, itemId, m_userId),
+                                QByteArray());
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::createPlaylist(const QString &name, const QString &itemId)
+{
+    QNetworkReply *reply = post(QStringLiteral("/Playlists?Name=%1&Ids=%2&userId=%3")
+                                    .arg(QString::fromUtf8(QUrl::toPercentEncoding(name)), itemId, m_userId),
+                                QByteArray());
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::addToCollection(const QString &collectionId, const QString &itemId)
+{
+    QNetworkReply *reply = post(QStringLiteral("/Collections/%1/Items?ids=%2").arg(collectionId, itemId),
+                                QByteArray());
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::createCollection(const QString &name, const QString &itemId)
+{
+    QNetworkReply *reply = post(QStringLiteral("/Collections?Name=%1&Ids=%2")
+                                    .arg(QString::fromUtf8(QUrl::toPercentEncoding(name)), itemId),
+                                QByteArray());
+    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
 void JellyfinClient::fetchRecommendations(const QString &parentId, const QString &requestTag)
 {
     QNetworkReply *reply = get(QStringLiteral("/Movies/Recommendations?userId=%1&parentId=%2"
@@ -435,6 +480,38 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     m[QStringLiteral("studios")] = studios;
     const QJsonArray taglines = o.value(QStringLiteral("Taglines")).toArray();
     m[QStringLiteral("tagline")] = taglines.isEmpty() ? QString() : taglines.first().toString();
+
+    // external links (IMDb/TMDb/…) for the detail page
+    QVariantList externalUrls;
+    const QJsonArray urlArr = o.value(QStringLiteral("ExternalUrls")).toArray();
+    for (const QJsonValue &lv : urlArr) {
+        const QJsonObject l = lv.toObject();
+        externalUrls.append(QVariantMap{{QStringLiteral("name"), l.value(QStringLiteral("Name")).toString()},
+                                        {QStringLiteral("url"), l.value(QStringLiteral("Url")).toString()}});
+    }
+    m[QStringLiteral("externalUrls")] = externalUrls;
+
+    // media info (container/size + video/audio/subtitle streams) from first source
+    const QJsonArray sources = o.value(QStringLiteral("MediaSources")).toArray();
+    if (!sources.isEmpty()) {
+        const QJsonObject src = sources.first().toObject();
+        m[QStringLiteral("container")] = src.value(QStringLiteral("Container")).toString();
+        m[QStringLiteral("sizeBytes")] = src.value(QStringLiteral("Size")).toDouble();
+        QVariantList streams;
+        const QJsonArray streamArr = src.value(QStringLiteral("MediaStreams")).toArray();
+        for (const QJsonValue &sv : streamArr) {
+            const QJsonObject s = sv.toObject();
+            streams.append(QVariantMap{
+                {QStringLiteral("type"), s.value(QStringLiteral("Type")).toString()},
+                {QStringLiteral("codec"), s.value(QStringLiteral("Codec")).toString()},
+                {QStringLiteral("title"), s.value(QStringLiteral("DisplayTitle")).toString()},
+                {QStringLiteral("language"), s.value(QStringLiteral("Language")).toString()},
+                {QStringLiteral("width"), s.value(QStringLiteral("Width")).toInt()},
+                {QStringLiteral("height"), s.value(QStringLiteral("Height")).toInt()},
+                {QStringLiteral("channels"), s.value(QStringLiteral("Channels")).toInt()}});
+        }
+        m[QStringLiteral("mediaStreams")] = streams;
+    }
 
     // people (cast & crew) for detail pages
     QVariantList people;

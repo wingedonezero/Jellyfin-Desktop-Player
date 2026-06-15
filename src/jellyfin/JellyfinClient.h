@@ -106,6 +106,15 @@ public:
     Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard
     Q_INVOKABLE void changePassword(const QString &currentPw, const QString &newPw);
 
+    // --- detail extras + collection/playlist actions ---
+    Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
+                                          const QString &requestTag = QStringLiteral("extras"));
+    Q_INVOKABLE void fetchPlaylists(const QString &requestTag = QStringLiteral("playlists"));
+    Q_INVOKABLE void addToPlaylist(const QString &playlistId, const QString &itemId);
+    Q_INVOKABLE void createPlaylist(const QString &name, const QString &itemId);
+    Q_INVOKABLE void addToCollection(const QString &collectionId, const QString &itemId);
+    Q_INVOKABLE void createCollection(const QString &name, const QString &itemId);
+
 Q_SIGNALS:
     void serverUrlChanged();
     void authenticatedChanged();
