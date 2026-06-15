@@ -8,7 +8,7 @@ project(jellyfin-desktop
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # The mpv engine itself — our one core dependency. Everything else is ours.
@@ -27,11 +27,13 @@ qt_add_qml_module(jellyfin-desktop
     SOURCES
         src/mpv/MpvVideoItem.h
         src/mpv/MpvVideoItem.cpp
+        src/jellyfin/JellyfinClient.h
+        src/jellyfin/JellyfinClient.cpp
 )
 
-# src/mpv is on the include path so the generated QML type-registration file
-# (which does `#include <MpvVideoItem.h>` by basename) can find our headers.
-target_include_directories(jellyfin-desktop PRIVATE src src/mpv)
+# Header dirs are on the include path so the generated QML type-registration
+# file (which does `#include <Basename.h>`) can find our QML_ELEMENT headers.
+target_include_directories(jellyfin-desktop PRIVATE src src/mpv src/jellyfin)
 
 target_compile_definitions(jellyfin-desktop PRIVATE
     PROJECT_VERSION="${PROJECT_VERSION}"
@@ -41,5 +43,6 @@ target_link_libraries(jellyfin-desktop PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Gui
+    Qt6::Network
     PkgConfig::Mpv
 )
