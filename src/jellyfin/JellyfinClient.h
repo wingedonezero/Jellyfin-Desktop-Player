@@ -57,7 +57,8 @@ public:
     Q_INVOKABLE void fetchItems(const QString &parentId,
                                 const QString &requestTag = QStringLiteral("items"),
                                 const QString &sortBy = QStringLiteral("SortName"),
-                                const QString &sortOrder = QStringLiteral("Ascending"));
+                                const QString &sortOrder = QStringLiteral("Ascending"),
+                                const QString &extraQuery = QString()); // &Filters=/&GenreIds=/&Recursive=true/...
     Q_INVOKABLE void fetchItem(const QString &itemId,
                                const QString &requestTag = QStringLiteral("item"));
     Q_INVOKABLE void fetchSeasons(const QString &seriesId,
@@ -73,10 +74,13 @@ public:
                                    const QString &requestTag = QStringLiteral("person"));
     Q_INVOKABLE void fetchGenres(const QString &parentId,
                                  const QString &requestTag = QStringLiteral("genres"));
-    Q_INVOKABLE void fetchItemsInGenre(const QString &parentId, const QString &genreId,
-                                       const QString &requestTag = QStringLiteral("genreItems"),
-                                       const QString &sortBy = QStringLiteral("SortName"),
-                                       const QString &sortOrder = QStringLiteral("Ascending"));
+    Q_INVOKABLE void fetchStudios(const QString &parentId,
+                                  const QString &requestTag = QStringLiteral("studios"));
+    Q_INVOKABLE void fetchCollections(const QString &requestTag = QStringLiteral("collections"));
+    Q_INVOKABLE void fetchUpcoming(const QString &requestTag = QStringLiteral("upcoming"));
+    // /Movies/Recommendations → emits categoriesReady(tag, [{title, items:[...]}, ...])
+    Q_INVOKABLE void fetchRecommendations(const QString &parentId,
+                                          const QString &requestTag = QStringLiteral("recommendations"));
 
     // --- url helpers (usable directly from QML Image / the player) ---
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,
@@ -109,6 +113,7 @@ Q_SIGNALS:
     void itemsReady(const QString &requestTag, const QVariantList &items);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);
+    void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
     void errorOccurred(const QString &message);
 

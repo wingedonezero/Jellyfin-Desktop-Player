@@ -230,10 +230,12 @@ void JellyfinClient::fetchLatest(const QString &parentId, const QString &request
 }
 
 void JellyfinClient::fetchItems(const QString &parentId, const QString &requestTag,
-                                const QString &sortBy, const QString &sortOrder)
+                                const QString &sortBy, const QString &sortOrder,
+                                const QString &extraQuery)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6")
-                     .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder).arg(kItemFields).arg(kImageTypes),
+    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6%7")
+                     .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
+                     .arg(kItemFields).arg(kImageTypes).arg(extraQuery),
                  requestTag);
 }
 
@@ -309,15 +311,69 @@ void JellyfinClient::fetchGenres(const QString &parentId, const QString &request
                  requestTag);
 }
 
-void JellyfinClient::fetchItemsInGenre(const QString &parentId, const QString &genreId,
-                                       const QString &requestTag, const QString &sortBy,
-                                       const QString &sortOrder)
+void JellyfinClient::fetchStudios(const QString &parentId, const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&GenreIds=%3&Recursive=true"
-                                "&SortBy=%4&SortOrder=%5&%6&%7")
-                     .arg(m_userId).arg(parentId).arg(genreId).arg(sortBy).arg(sortOrder)
-                     .arg(kItemFields).arg(kImageTypes),
+    requestItems(QStringLiteral("/Studios?parentId=%1&userId=%2&%3")
+                     .arg(parentId, m_userId, kImageTypes),
                  requestTag);
+}
+
+void JellyfinClient::fetchCollections(const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=BoxSet"
+                                "&SortBy=SortName&SortOrder=Ascending&%2&%3")
+                     .arg(m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchUpcoming(const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Shows/Upcoming?userId=%1&Limit=40&%2&%3")
+                     .arg(m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchRecommendations(const QString &parentId, const QString &requestTag)
+{
+    QNetworkReply *reply = get(QStringLiteral("/Movies/Recommendations?userId=%1&parentId=%2"
+                                              "&categoryLimit=6&itemLimit=16&%3&%4")
+                                   .arg(m_userId, parentId, kItemFields, kImageTypes));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            Q_EMIT errorOccurred(reply->errorString());
+            return;
+        }
+        const QJsonArray cats = QJsonDocument::fromJson(reply->readAll()).array();
+        QVariantList out;
+        for (const QJsonValue &cv : cats) {
+            const QJsonObject c = cv.toObject();
+            QVariantList items;
+            const QJsonArray arr = c.value(QStringLiteral("Items")).toArray();
+            for (const QJsonValue &iv : arr) {
+                items.append(parseItem(iv.toObject()));
+            }
+            if (items.isEmpty()) {
+                continue;
+            }
+            const QString rt = c.value(QStringLiteral("RecommendationType")).toString();
+            const QString base = c.value(QStringLiteral("BaselineItemName")).toString();
+            QString title;
+            if (rt.contains(QLatin1String("Director")) && !base.isEmpty())
+                title = tr("Directed by %1").arg(base);
+            else if (rt.contains(QLatin1String("Actor")) && !base.isEmpty())
+                title = tr("Starring %1").arg(base);
+            else if (!base.isEmpty())
+                title = tr("Because you watched %1").arg(base);
+            else
+                title = tr("Recommended");
+            QVariantMap cat;
+            cat[QStringLiteral("title")] = title;
+            cat[QStringLiteral("items")] = items;
+            out.append(cat);
+        }
+        Q_EMIT categoriesReady(requestTag, out);
+    });
 }
 
 QVariantList JellyfinClient::parseItems(const QByteArray &json)

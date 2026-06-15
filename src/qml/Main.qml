@@ -27,7 +27,7 @@ ApplicationWindow {
 
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }
-    function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name }) }
+    function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name, collectionType: lib.collectionType || "" }) }
     function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
     function openSearch() { stack.push(searchComp) }
     function openSettings() { stack.push(settingsComp) }
