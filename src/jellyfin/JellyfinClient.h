@@ -9,6 +9,7 @@
 
 class QNetworkAccessManager;
 class QNetworkReply;
+class QJsonObject;
 
 // ----------------------------------------------------------------------------
 // JellyfinClient — our own Jellyfin client over Qt's networking. No SDK.
@@ -44,13 +45,19 @@ public:
     // --- browse (each emits itemsReady with a requestTag to route the result) ---
     Q_INVOKABLE void fetchUserViews(const QString &requestTag = QStringLiteral("views"));
     Q_INVOKABLE void fetchResume(const QString &requestTag = QStringLiteral("resume"));
+    Q_INVOKABLE void fetchNextUp(const QString &requestTag = QStringLiteral("nextup"));
+    Q_INVOKABLE void fetchLatest(const QString &parentId,
+                                 const QString &requestTag = QStringLiteral("latest"));
     Q_INVOKABLE void fetchItems(const QString &parentId,
-                                const QString &requestTag = QStringLiteral("items"));
+                                const QString &requestTag = QStringLiteral("items"),
+                                const QString &sortBy = QStringLiteral("SortName"),
+                                const QString &sortOrder = QStringLiteral("Ascending"));
 
     // --- url helpers (usable directly from QML Image / the player) ---
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,
                               const QString &imageType = QStringLiteral("Primary"),
-                              int maxHeight = 0) const;
+                              int maxHeight = 0,
+                              const QString &tag = QString()) const;
     Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
 
     // --- playback progress reporting ---
@@ -76,6 +83,7 @@ private:
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     static QVariantList parseItems(const QByteArray &json);
+    static QVariantMap parseItem(const QJsonObject &o);
 
     QNetworkAccessManager *m_net;
     QString m_serverUrl; // no trailing slash

@@ -14,4 +14,6 @@ QtObject {
     readonly property bool cast:             false // casting out to Chromecast/DLNA
     readonly property bool syncPlay:         false // watch-together (Jellyfin SyncPlay)
     readonly property bool trickplay:        false // scrubber thumbnail previews
+    readonly property bool libraryFilters:   false // library filter panel (genre/year/unwatched/...)
+    readonly property bool adminDashboard:   false // native server admin (huge; web-only for now)
 }
