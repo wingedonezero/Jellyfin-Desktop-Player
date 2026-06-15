@@ -16,6 +16,8 @@ Item {
     property bool favorite: false
     property int repeatMode: 0 // 0 none, 1 one, 2 all
     property int maxBitrate: 0 // 0 = Auto (direct play)
+    property int skipBack: 10
+    property int skipForward: 30
 
     signal back()
     signal toggleFullscreen()
@@ -306,13 +308,13 @@ Item {
                 spacing: Theme.spacingTiny
 
                 IconButton { text: "⏮"; enabled: Features.playQueue; onClicked: root.previous() } // ⏮ previous
-                IconButton { text: "⏪"; onClicked: root.player.skip(-10) }            // ⏪ back 10s
+                IconButton { text: "⏪"; onClicked: root.player.skip(-root.skipBack) }  // ⏪ skip back
                 IconButton {
                     text: root.player.paused ? "▶" : "⏸"                          // ▶ / ⏸
                     font.pixelSize: 22
                     onClicked: root.player.setPaused(!root.player.paused)
                 }
-                IconButton { text: "⏩"; onClicked: root.player.skip(30) }             // ⏩ forward 30s
+                IconButton { text: "⏩"; onClicked: root.player.skip(root.skipForward) } // ⏩ skip forward
                 IconButton { text: "⏭"; enabled: Features.playQueue; onClicked: root.next() } // ⏭ next
 
                 Label {

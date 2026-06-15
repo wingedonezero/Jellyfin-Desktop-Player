@@ -593,3 +593,20 @@ void JellyfinClient::copyStreamUrl(const QString &itemId) const
     if (QClipboard *cb = QGuiApplication::clipboard())
         cb->setText(streamUrl(itemId).toString());
 }
+
+void JellyfinClient::changePassword(const QString &currentPw, const QString &newPw)
+{
+    const QJsonObject body{
+        {QStringLiteral("CurrentPw"), currentPw},
+        {QStringLiteral("NewPw"), newPw},
+    };
+    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Password").arg(m_userId),
+                                QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError)
+            Q_EMIT passwordChanged(false, reply->errorString());
+        else
+            Q_EMIT passwordChanged(true, tr("Password updated"));
+    });
+}

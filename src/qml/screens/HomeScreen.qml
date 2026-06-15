@@ -9,6 +9,7 @@ import JellyfinDesktop
 Item {
     id: screen
     property var client
+    property var config: null
     property string pageTitle: qsTr("Home")
 
     signal itemActivated(var item)   // play
@@ -20,10 +21,22 @@ Item {
     property var librariesModel: []
     property var latestByLib: ({})
 
+    // home row visibility (from Settings → Home; read at load)
+    property bool showContinue: true
+    property bool showNextUp: true
+    property bool showLatest: true
+
     // The Home page is the StackView's initial item, so it exists before login
     // finishes — only fetch once the client is authenticated (and again if auth
     // changes, e.g. re-login).
-    Component.onCompleted: maybeReload()
+    Component.onCompleted: {
+        if (config) {
+            showContinue = config.value("home/continueWatching", true)
+            showNextUp = config.value("home/nextUp", true)
+            showLatest = config.value("home/latest", true)
+        }
+        maybeReload()
+    }
     function maybeReload() { if (client && client.authenticated) reload() }
     function reload() {
         if (!client) return
@@ -68,6 +81,7 @@ Item {
 
             MediaRow {
                 title: qsTr("Continue Watching")
+                visible: screen.showContinue && screen.resumeModel.length > 0
                 model: screen.resumeModel
                 client: screen.client
                 shape: "thumb"
@@ -76,6 +90,7 @@ Item {
             }
             MediaRow {
                 title: qsTr("Next Up")
+                visible: screen.showNextUp && screen.nextUpModel.length > 0
                 model: screen.nextUpModel
                 client: screen.client
                 shape: "thumb"
@@ -95,6 +110,7 @@ Item {
                 MediaRow {
                     required property var modelData
                     title: qsTr("Latest %1").arg(modelData.name)
+                    visible: screen.showLatest && (screen.latestByLib[modelData.id] || []).length > 0
                     model: screen.latestByLib[modelData.id] || []
                     client: screen.client
                     shape: "poster"

@@ -92,6 +92,7 @@ ApplicationWindow {
         id: homeComp
         HomeScreen {
             client: jellyfin
+            config: appConfig
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
             onOpenLibrary: (lib) => win.openLibrary(lib)

@@ -20,9 +20,17 @@ Item {
     property int queueIndex: -1
     property int repeatMode: 0 // 0 none, 1 one, 2 all
     property int maxBitrate: 0 // 0 = Auto (direct play); >0 caps quality (transcode)
+    property bool autoPlayNext: true
+    property int skipBack: 10
+    property int skipForward: 30
     property real _resumeSeconds: 0
 
-    Component.onCompleted: if (config) maxBitrate = config.value("playback/maxBitrate", 0)
+    Component.onCompleted: if (config) {
+        maxBitrate = config.value("playback/maxBitrate", 0)
+        autoPlayNext = config.value("playback/autoPlayNext", true)
+        skipBack = config.value("playback/skipBack", 10)
+        skipForward = config.value("playback/skipForward", 30)
+    }
 
     function playItem(item) { playQueue([item], 0) }
 
@@ -120,13 +128,15 @@ Item {
             if (root.config) {
                 const sc = root.config.value("subtitles/scale", 0)
                 if (sc > 0) player.setOption("sub-scale", "" + sc)
+                const sp = root.config.value("subtitles/pos", -1)
+                if (sp >= 0) player.setOption("sub-pos", "" + sp)
             }
         }
         onEndFile: (reason) => {
             // mpv reasons: 0 eof, 2 stop (our loadfile/stop), 4 error.
             console.log("[mpv] end-file, reason:", reason)
             if (reason === "0")
-                root.playNext()          // natural end: advance / repeat / stop
+                (root.autoPlayNext || root.repeatMode !== 0) ? root.playNext() : root.stop()
             else if (reason !== "2")
                 root.stop()              // error etc.; (transcode fallback lands later)
         }
@@ -150,6 +160,8 @@ Item {
         favorite: root.favorite
         repeatMode: root.repeatMode
         maxBitrate: root.maxBitrate
+        skipBack: root.skipBack
+        skipForward: root.skipForward
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }

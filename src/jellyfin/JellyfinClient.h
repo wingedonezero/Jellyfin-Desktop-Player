@@ -95,6 +95,7 @@ public:
     Q_INVOKABLE void setFavorite(const QString &itemId, bool favorite);
     Q_INVOKABLE void setWatched(const QString &itemId, bool watched);
     Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard
+    Q_INVOKABLE void changePassword(const QString &currentPw, const QString &newPw);
 
 Q_SIGNALS:
     void serverUrlChanged();
@@ -102,6 +103,7 @@ Q_SIGNALS:
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
     void streamReady(const QString &requestTag, const QVariantMap &info);
+    void passwordChanged(bool ok, const QString &message);
     void errorOccurred(const QString &message);
 
 private:
