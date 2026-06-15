@@ -188,6 +188,11 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_observe_property(handle, 0, "volume", MPV_FORMAT_DOUBLE);
     mpv_observe_property(handle, 0, "mute", MPV_FORMAT_FLAG);
     mpv_observe_property(handle, 0, "track-list", MPV_FORMAT_NODE);
+    mpv_observe_property(handle, 0, "speed", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "chapter", MPV_FORMAT_INT64);
+    mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
+    mpv_observe_property(handle, 0, "sub-delay", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "audio-delay", MPV_FORMAT_DOUBLE);
 
     mpv_set_wakeup_callback(handle, onMpvWakeup, this);
 
@@ -256,6 +261,38 @@ void MpvVideoItem::setAudioTrack(int id)
 void MpvVideoItem::setSubtitleTrack(int id)
 {
     setOption(QStringLiteral("sid"), id < 0 ? QStringLiteral("no") : QString::number(id));
+}
+
+void MpvVideoItem::setSpeed(double speed)
+{
+    if (m_mpv && m_mpv->handle) {
+        double v = speed;
+        mpv_set_property(m_mpv->handle, "speed", MPV_FORMAT_DOUBLE, &v);
+    }
+}
+
+void MpvVideoItem::setChapter(int index)
+{
+    if (m_mpv && m_mpv->handle) {
+        int64_t v = index;
+        mpv_set_property(m_mpv->handle, "chapter", MPV_FORMAT_INT64, &v);
+    }
+}
+
+void MpvVideoItem::setSubDelay(double seconds)
+{
+    if (m_mpv && m_mpv->handle) {
+        double v = seconds;
+        mpv_set_property(m_mpv->handle, "sub-delay", MPV_FORMAT_DOUBLE, &v);
+    }
+}
+
+void MpvVideoItem::setAudioDelay(double seconds)
+{
+    if (m_mpv && m_mpv->handle) {
+        double v = seconds;
+        mpv_set_property(m_mpv->handle, "audio-delay", MPV_FORMAT_DOUBLE, &v);
+    }
 }
 
 void MpvVideoItem::command(const QStringList &args)
@@ -362,7 +399,35 @@ void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
         Q_EMIT mutedChanged();
     } else if (name == "track-list" && prop->format == MPV_FORMAT_NODE) {
         updateTracks(nodeToVariant(static_cast<mpv_node *>(prop->data)).toList());
+    } else if (name == "speed" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_speed = *static_cast<double *>(prop->data);
+        Q_EMIT speedChanged();
+    } else if (name == "chapter" && prop->format == MPV_FORMAT_INT64) {
+        m_chapter = static_cast<int>(*static_cast<int64_t *>(prop->data));
+        Q_EMIT chapterChanged();
+    } else if (name == "chapter-list" && prop->format == MPV_FORMAT_NODE) {
+        updateChapters(nodeToVariant(static_cast<mpv_node *>(prop->data)).toList());
+    } else if (name == "sub-delay" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_subDelay = *static_cast<double *>(prop->data);
+        Q_EMIT subDelayChanged();
+    } else if (name == "audio-delay" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_audioDelay = *static_cast<double *>(prop->data);
+        Q_EMIT audioDelayChanged();
     }
+}
+
+void MpvVideoItem::updateChapters(const QVariantList &chapterList)
+{
+    m_chapters.clear();
+    m_chapters.reserve(chapterList.size());
+    for (const QVariant &cv : chapterList) {
+        const QVariantMap c = cv.toMap();
+        QVariantMap chapter;
+        chapter[QStringLiteral("title")] = c.value(QStringLiteral("title")).toString();
+        chapter[QStringLiteral("time")] = c.value(QStringLiteral("time")).toDouble();
+        m_chapters.append(chapter);
+    }
+    Q_EMIT chaptersChanged();
 }
 
 void MpvVideoItem::updateTracks(const QVariantList &trackList)

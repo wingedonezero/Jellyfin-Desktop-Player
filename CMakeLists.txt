@@ -21,20 +21,44 @@ qt_add_executable(jellyfin-desktop
     src/core/Paths.cpp
 )
 
+# Singletons (theme tokens + feature flags) — must be marked before the module
+# is declared so the QML type is registered as a singleton.
+set_source_files_properties(src/qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(src/qml/theme/Features.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(jellyfin-desktop
     URI JellyfinDesktop
     VERSION 1.0
     QML_FILES
+        # theme (singletons)
+        src/qml/theme/Theme.qml
+        src/qml/theme/Features.qml
+        # reusable components
+        src/qml/components/JIconButton.qml
+        src/qml/components/DarkMenu.qml
+        src/qml/components/DarkMenuItem.qml
+        src/qml/components/MediaCard.qml
+        src/qml/components/MediaRow.qml
+        src/qml/components/AppBar.qml
+        src/qml/components/NavDrawer.qml
+        # screens
         src/qml/Main.qml
-        src/qml/LoginView.qml
-        src/qml/BrowseView.qml
-        src/qml/PlayerView.qml
-        src/qml/PlayerControls.qml
+        src/qml/screens/LoginView.qml
+        src/qml/screens/HomeScreen.qml
+        src/qml/screens/LibraryScreen.qml
+        src/qml/screens/DetailScreen.qml
+        src/qml/screens/SearchScreen.qml
+        src/qml/screens/SettingsScreen.qml
+        src/qml/screens/AdminScreen.qml
+        src/qml/screens/PlayerView.qml
+        src/qml/screens/PlayerControls.qml
     SOURCES
         src/mpv/MpvVideoItem.h
         src/mpv/MpvVideoItem.cpp
         src/jellyfin/JellyfinClient.h
         src/jellyfin/JellyfinClient.cpp
+        src/core/AppConfig.h
+        src/core/AppConfig.cpp
 )
 
 # Header dirs are on the include path so the generated QML type-registration

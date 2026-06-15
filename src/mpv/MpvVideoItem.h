@@ -76,6 +76,11 @@ class MpvVideoItem : public QQuickFramebufferObject
     Q_PROPERTY(bool muted READ muted NOTIFY mutedChanged)
     Q_PROPERTY(QVariantList audioTracks READ audioTracks NOTIFY tracksChanged)
     Q_PROPERTY(QVariantList subtitleTracks READ subtitleTracks NOTIFY tracksChanged)
+    Q_PROPERTY(double speed READ speed NOTIFY speedChanged)
+    Q_PROPERTY(QVariantList chapters READ chapters NOTIFY chaptersChanged)
+    Q_PROPERTY(int chapter READ chapter NOTIFY chapterChanged)
+    Q_PROPERTY(double subDelay READ subDelay NOTIFY subDelayChanged)
+    Q_PROPERTY(double audioDelay READ audioDelay NOTIFY audioDelayChanged)
 
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
@@ -90,6 +95,11 @@ public:
     bool muted() const { return m_muted; }
     QVariantList audioTracks() const { return m_audioTracks; }
     QVariantList subtitleTracks() const { return m_subtitleTracks; }
+    double speed() const { return m_speed; }
+    QVariantList chapters() const { return m_chapters; }
+    int chapter() const { return m_chapter; }
+    double subDelay() const { return m_subDelay; }
+    double audioDelay() const { return m_audioDelay; }
 
     // --- playback control ---
     Q_INVOKABLE void play(const QString &url);
@@ -100,6 +110,10 @@ public:
     Q_INVOKABLE void setMuted(bool muted);
     Q_INVOKABLE void setAudioTrack(int id);
     Q_INVOKABLE void setSubtitleTrack(int id); // id < 0 => off
+    Q_INVOKABLE void setSpeed(double speed);
+    Q_INVOKABLE void setChapter(int index);
+    Q_INVOKABLE void setSubDelay(double seconds);   // + => subtitles later
+    Q_INVOKABLE void setAudioDelay(double seconds); // + => audio later
 
     // --- low-level passthrough (typed API grows on top of these) ---
     Q_INVOKABLE void command(const QStringList &args);
@@ -115,6 +129,11 @@ Q_SIGNALS:
     void volumeChanged();
     void mutedChanged();
     void tracksChanged();
+    void speedChanged();
+    void chaptersChanged();
+    void chapterChanged();
+    void subDelayChanged();
+    void audioDelayChanged();
 
 private:
     static void onMpvWakeup(void *ctx); // called from an mpv-owned thread
@@ -122,6 +141,7 @@ private:
     Q_INVOKABLE void scheduleUpdate();  // runs on the GUI thread
     void handlePropertyChange(mpv_event_property *prop);
     void updateTracks(const QVariantList &trackList);
+    void updateChapters(const QVariantList &chapterList);
 
     double m_position = 0.0;
     double m_duration = 0.0;
@@ -130,6 +150,11 @@ private:
     bool m_muted = false;
     QVariantList m_audioTracks;
     QVariantList m_subtitleTracks;
+    double m_speed = 1.0;
+    QVariantList m_chapters;
+    int m_chapter = -1;
+    double m_subDelay = 0.0;
+    double m_audioDelay = 0.0;
 
     std::shared_ptr<MpvHandle> m_mpv;
     std::shared_ptr<MpvRenderResources> m_resources;
