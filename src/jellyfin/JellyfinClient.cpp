@@ -20,6 +20,11 @@ const QString kItemFields = QStringLiteral(
     "OfficialRating,SeriesName,Overview");
 const QString kImageTypes = QStringLiteral("EnableImageTypes=Primary,Thumb,Backdrop");
 
+// Fuller field set for a single detail page (cast, studios, tagline, etc.).
+const QString kDetailFields = QStringLiteral(
+    "Fields=Overview,Genres,People,Studios,Taglines,RunTimeTicks,ProductionYear,"
+    "CommunityRating,OfficialRating,SeriesName");
+
 // A stable per-machine device id so the server recognises this client across runs.
 QString makeDeviceId()
 {
@@ -175,6 +180,62 @@ void JellyfinClient::fetchItems(const QString &parentId, const QString &requestT
                  requestTag);
 }
 
+void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
+{
+    // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
+    // one-element list so the UI consumes it via the same itemsReady path.
+    QNetworkReply *reply = get(QStringLiteral("/Users/%1/Items/%2?%3&%4")
+                                   .arg(m_userId, itemId, kDetailFields, kImageTypes));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            Q_EMIT errorOccurred(reply->errorString());
+            return;
+        }
+        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
+        Q_EMIT itemsReady(requestTag, QVariantList{parseItem(o)});
+    });
+}
+
+void JellyfinClient::fetchSeasons(const QString &seriesId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Shows/%1/Seasons?userId=%2&%3")
+                     .arg(seriesId, m_userId, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId,
+                                   const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Shows/%1/Episodes?seasonId=%2&userId=%3&%4&%5")
+                     .arg(seriesId).arg(seasonId).arg(m_userId).arg(kItemFields).arg(kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchSimilar(const QString &itemId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Items/%1/Similar?userId=%2&Limit=14&%3&%4")
+                     .arg(itemId, m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchFavorites(const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?Filters=IsFavorite&Recursive=true&SortBy=SortName"
+                                "&IncludeItemTypes=Movie,Series,Episode&%2&%3")
+                     .arg(m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::search(const QString &query, const QString &requestTag)
+{
+    const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
+    requestItems(QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=48"
+                                "&IncludeItemTypes=Movie,Series,Episode&%3&%4")
+                     .arg(m_userId, q, kItemFields, kImageTypes),
+                 requestTag);
+}
+
 QVariantList JellyfinClient::parseItems(const QByteArray &json)
 {
     // Most endpoints return {Items:[...]}; /Items/Latest returns a bare array.
@@ -224,6 +285,16 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
         genres.append(g.toString());
     }
     m[QStringLiteral("genres")] = genres;
+
+    // studios + tagline (detail)
+    QVariantList studios;
+    const QJsonArray studioArr = o.value(QStringLiteral("Studios")).toArray();
+    for (const QJsonValue &s : studioArr) {
+        studios.append(s.toObject().value(QStringLiteral("Name")).toString());
+    }
+    m[QStringLiteral("studios")] = studios;
+    const QJsonArray taglines = o.value(QStringLiteral("Taglines")).toArray();
+    m[QStringLiteral("tagline")] = taglines.isEmpty() ? QString() : taglines.first().toString();
 
     // people (cast & crew) for detail pages
     QVariantList people;

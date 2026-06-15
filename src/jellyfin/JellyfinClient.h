@@ -52,6 +52,17 @@ public:
                                 const QString &requestTag = QStringLiteral("items"),
                                 const QString &sortBy = QStringLiteral("SortName"),
                                 const QString &sortOrder = QStringLiteral("Ascending"));
+    Q_INVOKABLE void fetchItem(const QString &itemId,
+                               const QString &requestTag = QStringLiteral("item"));
+    Q_INVOKABLE void fetchSeasons(const QString &seriesId,
+                                  const QString &requestTag = QStringLiteral("seasons"));
+    Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId,
+                                   const QString &requestTag = QStringLiteral("episodes"));
+    Q_INVOKABLE void fetchSimilar(const QString &itemId,
+                                  const QString &requestTag = QStringLiteral("similar"));
+    Q_INVOKABLE void fetchFavorites(const QString &requestTag = QStringLiteral("favorites"));
+    Q_INVOKABLE void search(const QString &query,
+                            const QString &requestTag = QStringLiteral("search"));
 
     // --- url helpers (usable directly from QML Image / the player) ---
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,

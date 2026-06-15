@@ -26,11 +26,13 @@ ApplicationWindow {
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }
     function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name }) }
+    function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
+    function openSearch() { stack.push(searchComp) }
     function openDetail(item) {
-        // Detail pages land in the next commit; until then folders open as a
-        // library grid and playable items play directly.
-        if (item.isFolder) stack.push(libraryComp, { parentId: item.id, pageTitle: item.name })
-        else playItem(item)
+        if (item.type === "CollectionFolder" || item.type === "UserView")
+            openLibrary(item)
+        else
+            stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
 
@@ -57,8 +59,8 @@ ApplicationWindow {
             onMenuClicked: drawer.open()
             onBackClicked: stack.pop()
             onHomeClicked: win.goHome()
-            onSearchClicked: {} // search screen lands next commit
-            onSettingsClicked: {} // settings screen lands next commit
+            onSearchClicked: win.openSearch()
+            onSettingsClicked: {} // settings screen lands in a later pass
             onLogoutClicked: jellyfin.logout()
         }
 
@@ -74,9 +76,9 @@ ApplicationWindow {
         client: jellyfin
         libraries: win.libraries
         onNavHome: win.goHome()
-        onNavFavorites: {} // Favorites screen lands next commit
+        onNavFavorites: win.openFavorites()
         onNavLibrary: (lib) => win.openLibrary(lib)
-        onNavSettings: {}
+        onNavSettings: {} // settings screen lands in a later pass
         onNavAdmin: {}
         onDoLogout: jellyfin.logout()
     }
@@ -94,6 +96,22 @@ ApplicationWindow {
     Component {
         id: libraryComp
         LibraryScreen {
+            client: jellyfin
+            onItemActivated: (it) => win.playItem(it)
+            onItemOpenDetail: (it) => win.openDetail(it)
+        }
+    }
+    Component {
+        id: detailComp
+        DetailScreen {
+            client: jellyfin
+            onPlay: (it) => win.playItem(it)
+            onOpenDetail: (it) => win.openDetail(it)
+        }
+    }
+    Component {
+        id: searchComp
+        SearchScreen {
             client: jellyfin
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)

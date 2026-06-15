@@ -14,17 +14,23 @@ Item {
     signal itemActivated(var item)
     signal itemOpenDetail(var item)
 
+    property bool favorites: false   // when true, shows the user's favorites instead of a parent's children
     property var items: []
     property string sortBy: "SortName"
     property string sortOrder: "Ascending"
+    readonly property string reqTag: favorites ? "lib:favorites" : ("lib:" + parentId)
 
     Component.onCompleted: reload()
-    function reload() { if (client && parentId) client.fetchItems(parentId, "lib:" + parentId, sortBy, sortOrder) }
+    function reload() {
+        if (!client) return
+        if (favorites) client.fetchFavorites(reqTag)
+        else if (parentId) client.fetchItems(parentId, reqTag, sortBy, sortOrder)
+    }
     function setSort(s) { sortBy = s; reload() }
 
     Connections {
         target: screen.client
-        function onItemsReady(tag, its) { if (tag === "lib:" + screen.parentId) screen.items = its }
+        function onItemsReady(tag, its) { if (tag === screen.reqTag) screen.items = its }
     }
 
     ColumnLayout {

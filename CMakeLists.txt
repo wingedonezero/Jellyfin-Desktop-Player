@@ -46,6 +46,8 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/screens/LoginView.qml
         src/qml/screens/HomeScreen.qml
         src/qml/screens/LibraryScreen.qml
+        src/qml/screens/DetailScreen.qml
+        src/qml/screens/SearchScreen.qml
         src/qml/screens/PlayerView.qml
         src/qml/screens/PlayerControls.qml
     SOURCES

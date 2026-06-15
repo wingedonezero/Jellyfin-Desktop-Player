@@ -16,4 +16,8 @@ QtObject {
     readonly property bool trickplay:        false // scrubber thumbnail previews
     readonly property bool libraryFilters:   false // library filter panel (genre/year/unwatched/...)
     readonly property bool adminDashboard:   false // native server admin (huge; web-only for now)
+    readonly property bool playlists:        false // add to / manage playlists
+    readonly property bool collections:      false // add to / manage collections
+    readonly property bool downloads:        false // download for offline
+    readonly property bool metadataEdit:     false // edit / refresh item metadata
 }
