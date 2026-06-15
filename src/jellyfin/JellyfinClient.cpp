@@ -40,6 +40,10 @@ void JellyfinClient::setServerUrl(const QString &url)
     while (trimmed.endsWith(QLatin1Char('/'))) {
         trimmed.chop(1);
     }
+    if (!trimmed.isEmpty() && !trimmed.startsWith(QLatin1String("http://"))
+        && !trimmed.startsWith(QLatin1String("https://"))) {
+        trimmed.prepend(QStringLiteral("http://"));
+    }
     if (trimmed == m_serverUrl) {
         return;
     }
