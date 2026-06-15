@@ -150,6 +150,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (jellyfin.restoreSession()) // saved login: skip re-auth
+            return
         if (typeof initialUser !== "undefined" && initialUser.length > 0)
             jellyfin.authenticate(initialUser, initialPass)
     }

@@ -14,6 +14,7 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("jellyfin-desktop"));
+    QGuiApplication::setOrganizationName(QStringLiteral("jellyfin-desktop")); // QSettings path
     QGuiApplication::setApplicationVersion(QStringLiteral(PROJECT_VERSION));
 
     // libmpv requires LC_NUMERIC to be "C", but QGuiApplication initialises the

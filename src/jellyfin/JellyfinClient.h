@@ -41,6 +41,7 @@ public:
     // --- auth ---
     Q_INVOKABLE void authenticate(const QString &username, const QString &password);
     Q_INVOKABLE void logout();
+    Q_INVOKABLE bool restoreSession(); // load a saved server+token; true if signed back in
 
     // --- browse (each emits itemsReady with a requestTag to route the result) ---
     Q_INVOKABLE void fetchUserViews(const QString &requestTag = QStringLiteral("views"));
@@ -100,6 +101,7 @@ private:
     QNetworkReply *post(const QString &pathWithQuery, const QByteArray &json) const;
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
+    void saveSession() const;  // persist server+token to QSettings
     static QVariantList parseItems(const QByteArray &json);
     static QVariantMap parseItem(const QJsonObject &o);
     QJsonObject deviceProfile() const; // capabilities sent to PlaybackInfo

@@ -7,6 +7,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSettings>
 #include <QSysInfo>
 #include <QUrlQuery>
 
@@ -118,6 +119,7 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
             return;
         }
+        saveSession();
         Q_EMIT authenticatedChanged();
     });
 }
@@ -127,7 +129,41 @@ void JellyfinClient::logout()
     m_token.clear();
     m_userId.clear();
     m_userName.clear();
+    QSettings().remove(QStringLiteral("session"));
     Q_EMIT authenticatedChanged();
+}
+
+void JellyfinClient::saveSession() const
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("session"));
+    s.setValue(QStringLiteral("server"), m_serverUrl);
+    s.setValue(QStringLiteral("token"), m_token);
+    s.setValue(QStringLiteral("userId"), m_userId);
+    s.setValue(QStringLiteral("userName"), m_userName);
+    s.endGroup();
+}
+
+bool JellyfinClient::restoreSession()
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("session"));
+    const QString server = s.value(QStringLiteral("server")).toString();
+    const QString token = s.value(QStringLiteral("token")).toString();
+    const QString userId = s.value(QStringLiteral("userId")).toString();
+    const QString userName = s.value(QStringLiteral("userName")).toString();
+    s.endGroup();
+
+    if (server.isEmpty() || token.isEmpty() || userId.isEmpty())
+        return false;
+
+    m_serverUrl = server;
+    m_token = token;
+    m_userId = userId;
+    m_userName = userName;
+    Q_EMIT serverUrlChanged();
+    Q_EMIT authenticatedChanged();
+    return true;
 }
 
 // --- browse -----------------------------------------------------------------
