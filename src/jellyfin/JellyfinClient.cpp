@@ -1,6 +1,8 @@
 #include "JellyfinClient.h"
 
+#include <QClipboard>
 #include <QCryptographicHash>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -584,4 +586,10 @@ void JellyfinClient::setWatched(const QString &itemId, bool watched)
     const QString path = QStringLiteral("/Users/%1/PlayedItems/%2").arg(m_userId, itemId);
     QNetworkReply *reply = watched ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+}
+
+void JellyfinClient::copyStreamUrl(const QString &itemId) const
+{
+    if (QClipboard *cb = QGuiApplication::clipboard())
+        cb->setText(streamUrl(itemId).toString());
 }

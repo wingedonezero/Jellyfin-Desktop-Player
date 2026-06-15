@@ -20,4 +20,5 @@ QtObject {
     readonly property bool collections:      false // add to / manage collections
     readonly property bool downloads:        false // download for offline
     readonly property bool metadataEdit:     false // edit / refresh item metadata
+    readonly property bool deleteMedia:      false // delete media from the server
 }

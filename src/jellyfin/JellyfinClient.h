@@ -94,6 +94,7 @@ public:
     // --- user data (fire-and-forget; UI updates optimistically) ---
     Q_INVOKABLE void setFavorite(const QString &itemId, bool favorite);
     Q_INVOKABLE void setWatched(const QString &itemId, bool watched);
+    Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard
 
 Q_SIGNALS:
     void serverUrlChanged();

@@ -142,17 +142,18 @@ Item {
             color: Theme.surface
             clip: true
             Image {
+                id: pimg
                 anchors.fill: parent
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true; cache: true
-                source: pt.modelData.imageTag
-                        ? screen.client.imageUrl(pt.modelData.id, "Primary", 160, pt.modelData.imageTag)
-                        : ""
+                // People[] omits PrimaryImageTag even when the person item HAS an
+                // image, so request by id unconditionally and fall back on 404.
+                source: screen.client ? screen.client.imageUrl(pt.modelData.id, "Primary", 160, pt.modelData.imageTag || "") : ""
                 visible: status === Image.Ready
             }
             Text {
                 anchors.centerIn: parent
-                visible: !pt.modelData.imageTag
+                visible: pimg.status !== Image.Ready
                 text: "\u{1F464}"; font.pixelSize: 30; color: Theme.textDisabled
             }
         }

@@ -177,4 +177,29 @@ Item {
 
     // click anywhere on the card (except the play button) → open detail
     TapHandler { onTapped: card.openDetail(card.item) }
+
+    // right-click → context menu (jellyfin-web item menu)
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: ctxMenu.popup() }
+    DarkMenu {
+        id: ctxMenu
+        DarkMenuItem { text: qsTr("Play"); visible: card.playable; onTriggered: card.activated(card.item) }
+        DarkMenuItem {
+            text: (card.item && card.item.isFavorite) ? qsTr("Remove from favorites") : qsTr("Add to favorites")
+            onTriggered: if (card.client) card.client.setFavorite(card.item.id, !(card.item.isFavorite === true))
+        }
+        DarkMenuItem {
+            text: (card.item && card.item.played) ? qsTr("Mark as unplayed") : qsTr("Mark as played")
+            onTriggered: if (card.client) card.client.setWatched(card.item.id, !(card.item.played === true))
+        }
+        DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections }
+        DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists }
+        DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
+        DarkMenuItem { text: qsTr("Copy stream URL"); visible: card.playable; onTriggered: if (card.client) card.client.copyStreamUrl(card.item.id) }
+        DarkMenuItem { text: qsTr("Delete media"); enabled: Features.deleteMedia }
+        DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
+        DarkMenuItem { text: qsTr("Edit images"); enabled: Features.metadataEdit }
+        DarkMenuItem { text: qsTr("Edit subtitles"); enabled: Features.metadataEdit }
+        DarkMenuItem { text: qsTr("Identify"); enabled: Features.metadataEdit }
+        DarkMenuItem { text: qsTr("Refresh metadata"); enabled: Features.metadataEdit }
+    }
 }
