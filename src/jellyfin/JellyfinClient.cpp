@@ -165,6 +165,9 @@ QVariantList JellyfinClient::parseItems(const QByteArray &json)
         // primary image tag, if present, lets us request the right cached image
         const QJsonObject tags = o.value(QStringLiteral("ImageTags")).toObject();
         m[QStringLiteral("imageTag")] = tags.value(QStringLiteral("Primary")).toString();
+        // resume position (ticks; 1 tick = 100ns) for continue-watching
+        const QJsonObject userData = o.value(QStringLiteral("UserData")).toObject();
+        m[QStringLiteral("playbackTicks")] = userData.value(QStringLiteral("PlaybackPositionTicks")).toDouble();
         out.append(m);
     }
     return out;

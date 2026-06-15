@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Item {
     id: root
     required property var client
-    signal playRequested(string itemId)
+    signal playRequested(var item)
 
     // Breadcrumb of folders we've descended into: [{ id, title }, ...]
     property var path: []
@@ -105,7 +105,7 @@ Item {
             root.path = root.path.concat([{ id: item.id, title: item.name }])
             client.fetchItems(item.id, "browse")
         } else {
-            root.playRequested(item.id)
+            root.playRequested(item)
         }
     }
 

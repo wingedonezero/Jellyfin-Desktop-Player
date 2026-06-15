@@ -145,6 +145,11 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     // a stray `vo=` in the user's mpv.conf can't break embedding.
     mpv_set_property_string(handle, "vo", "libmpv");
 
+    // Observe the playback state we expose as bindable properties.
+    mpv_observe_property(handle, 0, "time-pos", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "duration", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "pause", MPV_FORMAT_FLAG);
+
     mpv_set_wakeup_callback(handle, onMpvWakeup, this);
 
     m_mpv = std::make_shared<MpvHandle>(handle);
@@ -168,6 +173,19 @@ QQuickFramebufferObject::Renderer *MpvVideoItem::createRenderer() const
 void MpvVideoItem::play(const QString &url)
 {
     command({QStringLiteral("loadfile"), url});
+}
+
+void MpvVideoItem::seek(double seconds)
+{
+    command({QStringLiteral("seek"), QString::number(seconds), QStringLiteral("absolute")});
+}
+
+void MpvVideoItem::setPaused(bool paused)
+{
+    if (m_mpv && m_mpv->handle) {
+        int flag = paused ? 1 : 0;
+        mpv_set_property(m_mpv->handle, "pause", MPV_FORMAT_FLAG, &flag);
+    }
 }
 
 void MpvVideoItem::command(const QStringList &args)
@@ -237,6 +255,9 @@ void MpvVideoItem::pumpEvents()
             Q_EMIT endFile(ef ? QString::number(ef->reason) : QString());
             break;
         }
+        case MPV_EVENT_PROPERTY_CHANGE:
+            handlePropertyChange(static_cast<mpv_event_property *>(event->data));
+            break;
         default:
             break;
         }
@@ -246,4 +267,22 @@ void MpvVideoItem::pumpEvents()
 void MpvVideoItem::scheduleUpdate()
 {
     update();
+}
+
+void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
+{
+    if (!prop) {
+        return;
+    }
+    const QByteArray name(prop->name);
+    if (name == "time-pos" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_position = *static_cast<double *>(prop->data);
+        Q_EMIT positionChanged();
+    } else if (name == "duration" && prop->format == MPV_FORMAT_DOUBLE) {
+        m_duration = *static_cast<double *>(prop->data);
+        Q_EMIT durationChanged();
+    } else if (name == "pause" && prop->format == MPV_FORMAT_FLAG) {
+        m_paused = (*static_cast<int *>(prop->data) != 0);
+        Q_EMIT pausedChanged();
+    }
 }

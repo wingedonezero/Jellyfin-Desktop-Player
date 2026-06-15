@@ -22,7 +22,7 @@ ApplicationWindow {
     // Login / browse — hidden while a video is playing.
     Loader {
         anchors.fill: parent
-        active: !player.playing
+        active: !playerView.playing
         sourceComponent: jellyfin.authenticated ? browseComponent : loginComponent
     }
     Component { id: loginComponent; LoginView { client: jellyfin } }
@@ -30,57 +30,15 @@ ApplicationWindow {
         id: browseComponent
         BrowseView {
             client: jellyfin
-            onPlayRequested: (itemId) => win.playItem(itemId)
+            onPlayRequested: (item) => playerView.playItem(item)
         }
     }
 
-    // Video surface — fills the window while playing.
-    MpvVideoItem {
-        id: player
+    PlayerView {
+        id: playerView
         anchors.fill: parent
         visible: playing
-
-        property bool playing: false
-        property string currentId: ""
-
-        onFileLoaded: console.log("[mpv] file loaded — streaming OK")
-        onEndFile: (reason) => {
-            console.log("[mpv] end-file, reason:", reason)
-            win.stopPlayback()
-        }
-
-        MouseArea {
-            anchors.fill: parent
-            enabled: player.playing
-            onClicked: player.command(["cycle", "pause"])
-        }
-    }
-
-    Button {
-        visible: player.playing
-        text: qsTr("◀  Back")
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.margins: 12
-        onClicked: win.stopPlayback()
-    }
-
-    function playItem(itemId) {
-        player.currentId = itemId
-        player.playing = true
-        player.play(jellyfin.streamUrl(itemId))
-        jellyfin.reportPlaybackStart(itemId)
-        console.log("[jf] play", itemId)
-    }
-
-    function stopPlayback() {
-        if (!player.playing)
-            return
-        if (player.currentId.length > 0)
-            jellyfin.reportPlaybackStopped(player.currentId, 0)
-        player.playing = false
-        player.currentId = ""
-        player.command(["stop"])
+        client: jellyfin
     }
 
     // --- dev/test: auto-login + auto-play, gated by env context properties ---
@@ -99,7 +57,7 @@ ApplicationWindow {
                 return
             if (tag === "auto-resume") {
                 if (items.length > 0)
-                    win.playItem(items[0].id)
+                    playerView.playItem(items[0])
                 else
                     jellyfin.fetchUserViews("auto-views")
             } else if (tag === "auto-views" && items.length > 0) {
@@ -107,7 +65,7 @@ ApplicationWindow {
             } else if (tag === "auto-items") {
                 for (let i = 0; i < items.length; i++) {
                     if (!items[i].isFolder) {
-                        win.playItem(items[i].id)
+                        playerView.playItem(items[i])
                         break
                     }
                 }

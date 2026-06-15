@@ -28,6 +28,8 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/Main.qml
         src/qml/LoginView.qml
         src/qml/BrowseView.qml
+        src/qml/PlayerView.qml
+        src/qml/PlayerControls.qml
     SOURCES
         src/mpv/MpvVideoItem.h
         src/mpv/MpvVideoItem.cpp
