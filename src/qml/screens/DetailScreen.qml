@@ -27,13 +27,14 @@ Item {
     property var similar: []
 
     readonly property bool isSeries: detail && detail.type === "Series"
+    readonly property bool isPerson: detail && detail.type === "Person"
+    property var filmography: []
 
     Component.onCompleted: load()
     onItemIdChanged: load()
     function load() {
         if (!client || !itemId) return
-        client.fetchItem(itemId, "d:item:" + itemId)
-        client.fetchSimilar(itemId, "d:similar:" + itemId)
+        client.fetchItem(itemId, "d:item:" + itemId) // type-specific fetches follow once it returns
     }
     function selectSeason(s) {
         selectedSeasonId = s.id
@@ -83,8 +84,13 @@ Item {
                 screen.favorite = screen.detail.isFavorite === true
                 screen.played = screen.detail.played === true
                 screen.cast = screen.detail.people || []
-                if (screen.isSeries)
-                    screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
+                if (screen.isPerson) {
+                    screen.client.fetchByPerson(screen.detail.id, "d:filmography:" + screen.itemId)
+                } else {
+                    screen.client.fetchSimilar(screen.itemId, "d:similar:" + screen.itemId)
+                    if (screen.isSeries)
+                        screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
+                }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
                 if (items.length > 0) screen.selectSeason(items[0])
@@ -92,6 +98,8 @@ Item {
                 screen.episodes = items
             } else if (tag === "d:similar:" + screen.itemId) {
                 screen.similar = items
+            } else if (tag === "d:filmography:" + screen.itemId) {
+                screen.filmography = items
             }
         }
     }
@@ -127,6 +135,7 @@ Item {
         required property var modelData
         width: 96
         spacing: Theme.spacingTiny
+        TapHandler { onTapped: screen.openDetail(pt.modelData) } // open the person page
         Rectangle {
             Layout.alignment: Qt.AlignHCenter
             width: 80; height: 80; radius: 40
@@ -299,6 +308,7 @@ Item {
                             Layout.topMargin: Theme.spacingSmall
                             ActionButton {
                                 primary: true
+                                visible: !screen.isPerson
                                 text: (screen.detail && screen.detail.playbackTicks > 0) ? qsTr("▶  Resume") : qsTr("▶  Play")
                                 enabled: !screen.isSeries || screen.episodes.length > 0
                                 onClicked: screen.playPrimary()
@@ -403,6 +413,16 @@ Item {
                     delegate: PersonTile {}
                     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                 }
+            }
+
+            // --- filmography (person pages) ---
+            MediaRow {
+                title: qsTr("Filmography")
+                model: screen.filmography
+                client: screen.client
+                shape: "poster"
+                onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.openDetail(it)
             }
 
             // --- more like this ---

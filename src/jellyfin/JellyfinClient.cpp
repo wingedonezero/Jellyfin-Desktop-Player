@@ -272,6 +272,33 @@ void JellyfinClient::search(const QString &query, const QString &requestTag)
                  requestTag);
 }
 
+void JellyfinClient::fetchByPerson(const QString &personId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?personIds=%2&Recursive=true"
+                                "&SortBy=PremiereDate&SortOrder=Descending"
+                                "&IncludeItemTypes=Movie,Series&%3&%4")
+                     .arg(m_userId, personId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchGenres(const QString &parentId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Genres?parentId=%1&userId=%2&SortBy=SortName&%3")
+                     .arg(parentId, m_userId, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::fetchItemsInGenre(const QString &parentId, const QString &genreId,
+                                       const QString &requestTag, const QString &sortBy,
+                                       const QString &sortOrder)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&GenreIds=%3&Recursive=true"
+                                "&SortBy=%4&SortOrder=%5&%6&%7")
+                     .arg(m_userId).arg(parentId).arg(genreId).arg(sortBy).arg(sortOrder)
+                     .arg(kItemFields).arg(kImageTypes),
+                 requestTag);
+}
+
 QVariantList JellyfinClient::parseItems(const QByteArray &json)
 {
     // Most endpoints return {Items:[...]}; /Items/Latest returns a bare array.

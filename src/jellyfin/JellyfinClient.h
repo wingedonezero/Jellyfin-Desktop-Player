@@ -64,6 +64,14 @@ public:
     Q_INVOKABLE void fetchFavorites(const QString &requestTag = QStringLiteral("favorites"));
     Q_INVOKABLE void search(const QString &query,
                             const QString &requestTag = QStringLiteral("search"));
+    Q_INVOKABLE void fetchByPerson(const QString &personId,
+                                   const QString &requestTag = QStringLiteral("person"));
+    Q_INVOKABLE void fetchGenres(const QString &parentId,
+                                 const QString &requestTag = QStringLiteral("genres"));
+    Q_INVOKABLE void fetchItemsInGenre(const QString &parentId, const QString &genreId,
+                                       const QString &requestTag = QStringLiteral("genreItems"),
+                                       const QString &sortBy = QStringLiteral("SortName"),
+                                       const QString &sortOrder = QStringLiteral("Ascending"));
 
     // --- url helpers (usable directly from QML Image / the player) ---
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,
