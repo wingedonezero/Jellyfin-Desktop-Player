@@ -9,9 +9,20 @@ import JellyfinDesktop
 Item {
     id: screen
     property var client
+    property var config: null
     property string itemId: ""
     property var detail: ({})
     property string pageTitle: (detail && detail.name) ? detail.name : qsTr("Details")
+
+    // Settings → Display: show the details-page banner backdrop. QSettings can
+    // hand back bools as "true"/"false" strings, so coerce. (Read on open; a
+    // change applies the next time a detail page is opened.)
+    function cfgBool(key, def) {
+        var v = config ? config.value(key, def) : def
+        return v === true || v === "true" || v === 1 || v === "1"
+    }
+    readonly property bool showBackdrop: cfgBool("display/backdrops", true)
+                                         && cfgBool("display/detailsBanner", true)
 
     signal play(var item)
     signal playQueue(var items, int index)
@@ -311,7 +322,7 @@ Item {
                     anchors.fill: parent
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true; cache: true
-                    source: (screen.detail && screen.detail.hasBackdrop)
+                    source: (screen.showBackdrop && screen.detail && screen.detail.hasBackdrop)
                             ? screen.client.imageUrl(screen.detail.id, "Backdrop", 720, "")
                             : ""
                     visible: status === Image.Ready
@@ -571,7 +582,7 @@ Item {
                         leftMargin: Theme.pagePad; rightMargin: Theme.pagePad
                         boundsBehavior: Flickable.StopAtBounds
                         model: screen.cast
-                        Behavior on contentX { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        Behavior on contentX { NumberAnimation { duration: Theme.animMedium; easing.type: Easing.OutCubic } }
                         delegate: PersonTile {}
                     }
                     HoverHandler { id: castHover }

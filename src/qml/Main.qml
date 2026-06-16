@@ -132,6 +132,7 @@ ApplicationWindow {
         id: detailComp
         DetailScreen {
             client: jellyfin
+            config: appConfig
             onPlay: (it) => win.playItem(it)
             onPlayQueue: (items, index) => win.playQueue(items, index)
             onOpenDetail: (it) => win.openDetail(it)
@@ -270,6 +271,10 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        // apply client-local display prefs that affect the whole UI
+        var fa = appConfig.value("display/fastAnimations", false)
+        Theme.fastAnimations = (fa === true || fa === "true" || fa === 1 || fa === "1")
+
         if (jellyfin.restoreSession()) // saved login: skip re-auth
             return
         if (typeof initialUser !== "undefined" && initialUser.length > 0)

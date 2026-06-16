@@ -11,6 +11,7 @@ Item {
     required property var item        // QVariantMap from JellyfinClient
     property var client
     property string shape: "poster"   // "poster" | "thumb"
+    property bool episodeImages: true // Next Up/Resume: episode still vs show image
 
     signal activated(var item)        // play
     signal openDetail(var item)       // open detail page
@@ -41,6 +42,10 @@ Item {
     function imageSource() {
         if (!item || !client) return ""
         if (shape === "thumb") {
+            // Settings → Display "Use episode images in Next Up & Resume": when off,
+            // show the parent show's poster instead of the per-episode still.
+            if (isEpisode && !episodeImages && item.seriesId)
+                return client.imageUrl(item.seriesId, "Primary", artHeight * 2, "")
             if (item.imageTagThumb) return client.imageUrl(item.id, "Thumb", artHeight * 2, item.imageTagThumb)
             if (item.hasBackdrop)   return client.imageUrl(item.id, "Backdrop", artHeight * 2, "")
         }
@@ -88,7 +93,7 @@ Item {
                 source: card.imageSource()
                 visible: status === Image.Ready
                 scale: hover.hovered ? 1.06 : 1.0
-                Behavior on scale { NumberAnimation { duration: 130 } }
+                Behavior on scale { NumberAnimation { duration: Theme.animFast } }
             }
             // fallback when no/loading artwork
             Text {

@@ -24,6 +24,13 @@ Item {
     property var librariesModel: []
     property var latestByLib: ({})
 
+    // Settings → Display: use episode stills vs the show poster in Next Up / Resume
+    function cfgBool(key, def) {
+        var v = config ? config.value(key, def) : def
+        return v === true || v === "true" || v === 1 || v === "1"
+    }
+    readonly property bool useEpisodeImages: cfgBool("display/episodeImagesNextUp", true)
+
     // ordered list of home section keys (from Settings → Home; read at load)
     property var homeSections: []
     function loadSections() {
@@ -84,7 +91,7 @@ Item {
         id: resumeRow
         MediaRow {
             title: qsTr("Continue Watching"); model: screen.resumeModel
-            client: screen.client; shape: "thumb"
+            client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
             onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
@@ -95,7 +102,7 @@ Item {
         id: nextUpRow
         MediaRow {
             title: qsTr("Next Up"); model: screen.nextUpModel
-            client: screen.client; shape: "thumb"
+            client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
             onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)

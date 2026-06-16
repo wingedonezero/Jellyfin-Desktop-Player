@@ -56,6 +56,11 @@ QtObject {
     readonly property int cardThumbWidth:   272
     readonly property int cardThumbHeight:  153
 
+    // --- animation (faster = the display/fastAnimations pref, set from Main) ---
+    property bool fastAnimations: false
+    readonly property int animFast:   fastAnimations ? 60 : 130   // card hover zoom
+    readonly property int animMedium: fastAnimations ? 110 : 220  // row / carousel scroll
+
     // --- typography ---
     readonly property string fontFamily: "Noto Sans" // jellyfin-web face; falls back to system sans
     readonly property int fontTiny:   11

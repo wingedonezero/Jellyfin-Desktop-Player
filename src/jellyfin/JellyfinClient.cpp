@@ -2,6 +2,7 @@
 
 #include <QClipboard>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -357,8 +358,20 @@ void JellyfinClient::fetchResume(const QString &requestTag)
 
 void JellyfinClient::fetchNextUp(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Shows/NextUp?userId=%1&Limit=24&%2&%3")
-                     .arg(m_userId, kItemFields, kImageTypes),
+    // Honor the user's Display prefs (Settings → Display): cap how far back a
+    // show stays in Next Up, and optionally keep already-watched episodes.
+    // These live in the shared QSettings the QML AppConfig writes.
+    const QSettings cfg;
+    QString extra;
+    const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 0).toInt();
+    if (maxDays > 0)
+        extra += QStringLiteral("&NextUpDateCutoff=%1")
+                     .arg(QDateTime::currentDateTimeUtc().addDays(-maxDays).toString(Qt::ISODate));
+    if (cfg.value(QStringLiteral("display/rewatchingNextUp"), false).toBool())
+        extra += QStringLiteral("&EnableRewatching=true");
+
+    requestItems(QStringLiteral("/Shows/NextUp?userId=%1&Limit=24&%2&%3%4")
+                     .arg(m_userId, kItemFields, kImageTypes, extra),
                  requestTag);
 }
 
