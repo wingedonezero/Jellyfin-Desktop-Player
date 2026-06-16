@@ -35,11 +35,11 @@ Item {
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "stub" },
-        { group: qsTr("Devices"),  label: qsTr("Devices"),       kind: "list", ep: "/Devices", primary: "Name", secondary: "LastUserName" },
-        { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", primary: "Name", secondary: "Type" },
+        { group: qsTr("Devices"),  label: qsTr("Devices"),       kind: "list", ep: "/Devices", fmt: "devices" },
+        { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", fmt: "activity" },
         { group: qsTr("Live TV"),  label: qsTr("Live TV"),       kind: "stub" },
         { group: qsTr("Live TV"),  label: qsTr("DVR"),           kind: "stub" },
-        { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "list", ep: "/Plugins", primary: "Name", secondary: "Version" },
+        { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "list", ep: "/Plugins", fmt: "plugins" },
         { group: qsTr("Advanced"), label: qsTr("Networking"),    kind: "stub" },
         { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", primary: "AppName", secondary: "DateCreated" },
         { group: qsTr("Advanced"), label: qsTr("Backups"),       kind: "stub" },
@@ -102,6 +102,20 @@ Item {
         return d.Items || []
     }
     function listRows(d) { return asArray(d) }
+    function listTitle(entry, item) {
+        if (!item) return "—"
+        if (entry.fmt === "devices") return ("" + (item.CustomName || item.Name || "—"))
+        return ("" + (item.Name || item[entry.primary] || "—"))
+    }
+    function listSub(entry, item) {
+        if (!item) return ""
+        var parts = []
+        if (entry.fmt === "activity") parts = [relTime(item.Date), item.Severity, item.ShortOverview]
+        else if (entry.fmt === "devices") parts = [item.AppName, item.LastUserName, item.DateLastActivity ? relTime(item.DateLastActivity) : ""]
+        else if (entry.fmt === "plugins") parts = [item.Version ? ("v" + item.Version) : "", item.Status, item.Description]
+        else return entry.secondary ? ("" + (item[entry.secondary] || "")) : ""
+        return parts.filter(function (x) { return x }).join("  ·  ")
+    }
 
     Connections {
         target: screen.client
@@ -426,28 +440,30 @@ Item {
                     }
                 }
 
-                // list (rows)
+                // list (rows) — 2-line, formatted per panel via listTitle/listSub
                 Repeater {
                     model: screen.selEntry.kind === "list" ? screen.listRows(screen.panelData) : []
                     Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
-                        implicitHeight: 48
+                        implicitHeight: 52
                         radius: Theme.radius
                         color: Theme.surface
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: Theme.spacing
-                            anchors.rightMargin: Theme.spacing
+                        ColumnLayout {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing
+                            spacing: 2
                             Text {
-                                text: ("" + (modelData[screen.selEntry.primary] || modelData.Name || "—"))
+                                text: screen.listTitle(screen.selEntry, modelData)
                                 color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
                                 Layout.fillWidth: true; elide: Text.ElideRight
                             }
                             Text {
-                                text: screen.selEntry.secondary ? ("" + (modelData[screen.selEntry.secondary] || "")) : ""
-                                color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
-                                elide: Text.ElideRight; Layout.maximumWidth: 320
+                                text: screen.listSub(screen.selEntry, modelData)
+                                visible: text.length > 0
+                                color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
+                                Layout.fillWidth: true; elide: Text.ElideRight
                             }
                         }
                     }
