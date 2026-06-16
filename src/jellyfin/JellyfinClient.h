@@ -123,6 +123,8 @@ public:
     Q_INVOKABLE void stopScheduledTask(const QString &taskId);
     Q_INVOKABLE void setUserPolicy(const QString &userId, const QVariantMap &policy);
     Q_INVOKABLE void deleteUser(const QString &userId);
+    Q_INVOKABLE void createUser(const QString &name, const QString &password); // POST /Users/New
+    Q_INVOKABLE void setUserPassword(const QString &userId, const QString &newPw, bool reset); // admin set/reset another user's password
     // Generic JSON POST — server-config editors POST the WHOLE config object back.
     Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
 

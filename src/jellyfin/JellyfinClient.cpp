@@ -250,6 +250,22 @@ void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &pol
                        QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
 }
 void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
+void JellyfinClient::createUser(const QString &name, const QString &password)
+{
+    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Password"), password}};
+    fireAndForget(post(QStringLiteral("/Users/New"), QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::setUserPassword(const QString &userId, const QString &newPw, bool reset)
+{
+    QJsonObject body;
+    if (reset) {
+        body[QStringLiteral("ResetPassword")] = true;
+    } else {
+        body[QStringLiteral("CurrentPw")] = QString(); // admins can set without the current password
+        body[QStringLiteral("NewPw")] = newPw;
+    }
+    fireAndForget(post(QStringLiteral("/Users/%1/Password").arg(userId), QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
 void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
 {
     fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));

@@ -23,6 +23,23 @@ Item {
     property var selectedUser: null
     property var editPolicy: ({})
     property string editUserName: ""
+    property bool userAddMode: false
+    property string newUserName: ""
+    property string newUserPw: ""
+    property var mediaFoldersData: []   // [{id,name}] for the Access section
+    property var channelsData: []
+    property var devicesData: []
+    property var parentalRatings: []    // grouped [{name, score, subScore}] for the Parental section
+    readonly property var parentalOptions: {
+        var o = [{value: -1, text: qsTr("None")}]
+        for (var i = 0; i < parentalRatings.length; i++) o.push({value: i, text: parentalRatings[i].name})
+        return o
+    }
+    readonly property var unratedTypes: [{id: "Movie", name: qsTr("Movies")}, {id: "Series", name: qsTr("Shows")}, {id: "Music", name: qsTr("Music")}, {id: "Trailer", name: qsTr("Trailers")}, {id: "Book", name: qsTr("Books")}, {id: "LiveTvChannel", name: qsTr("Live TV")}, {id: "ChannelContent", name: qsTr("Channels")}]
+    readonly property var dayOptions: [{value: "Everyday", text: qsTr("Every day")}, {value: "Sunday", text: qsTr("Sunday")}, {value: "Monday", text: qsTr("Monday")}, {value: "Tuesday", text: qsTr("Tuesday")}, {value: "Wednesday", text: qsTr("Wednesday")}, {value: "Thursday", text: qsTr("Thursday")}, {value: "Friday", text: qsTr("Friday")}, {value: "Saturday", text: qsTr("Saturday")}]
+    property string schedDay: "Everyday"
+    property int schedStart: 0
+    property int schedEnd: 24
     readonly property var syncPlayOptions: [{value: "CreateAndJoinGroups", text: qsTr("Allow creating and joining groups")}, {value: "JoinGroups", text: qsTr("Allow joining groups")}, {value: "None", text: qsTr("No access")}]
     property var serverConfig: null
     property var editConfig: ({})
@@ -275,7 +292,7 @@ Item {
             tasksData = []
             client.getJson("/ScheduledTasks", "admin:tasks")
         } else if (entry.kind === "users") {
-            usersData = []; selectedUser = null
+            usersData = []; selectedUser = null; userAddMode = false
             client.getJson("/Users", "admin:users")
         } else if (entry.kind === "libraries") {
             librariesData = []; selectedLib = null; addMode = false; dynOptions = ({})
@@ -370,6 +387,19 @@ Item {
             else if (tag === "admin:dash:sessions") screen.dashSessions = screen.asArray(data)
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
+            else if (tag === "u:folders") { var fa = screen.asArray(data); var fo = []; for (var fi = 0; fi < fa.length; fi++) fo.push({id: fa[fi].Id, name: fa[fi].Name}); screen.mediaFoldersData = fo }
+            else if (tag === "u:channels") { var ca = screen.asArray(data); var co = []; for (var ci = 0; ci < ca.length; ci++) co.push({id: ca[ci].Id, name: ca[ci].Name}); screen.channelsData = co }
+            else if (tag === "u:devices") { var da = screen.asArray(data); var dvo = []; for (var di = 0; di < da.length; di++) { var dv = da[di]; var nm = ("" + (dv.CustomName || dv.Name || "")); if (dv.AppName) nm += " - " + dv.AppName; dvo.push({id: dv.Id, name: nm}) } screen.devicesData = dvo }
+            else if (tag === "u:ratings") {
+                var ra = screen.asArray(data); var grouped = []
+                for (var rri = 0; rri < ra.length; rri++) {
+                    var rr = ra[rri]; if (!rr.RatingScore) continue       // skip "Unrated" (no score)
+                    var sc = rr.RatingScore.score, ssc = rr.RatingScore.subScore
+                    if (grouped.length) { var last = grouped[grouped.length - 1]; if (last.score === sc && last.subScore === ssc) { last.name += "/" + rr.Name; continue } }
+                    grouped.push({name: ("" + rr.Name), score: sc, subScore: ssc})
+                }
+                screen.parentalRatings = grouped
+            }
             else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
             else if (tag === "admin:libs") {
                 screen.librariesData = screen.asArray(data)
@@ -409,14 +439,55 @@ Item {
         selectedUser = u
         editUserName = ("" + (u && u.Name ? u.Name : ""))
         editPolicy = (u && u.Policy) ? JSON.parse(JSON.stringify(u.Policy)) : ({})
+        mediaFoldersData = []; channelsData = []; devicesData = []; parentalRatings = []
+        if (client) {
+            client.getJson("/Library/MediaFolders?IsHidden=false", "u:folders")
+            client.getJson("/Channels", "u:channels")
+            client.getJson("/Devices", "u:devices")
+            client.getJson("/Localization/ParentalRatings", "u:ratings")
+        }
     }
+    // Parental: index of the grouped rating matching the user's max (exact score+sub, else highest <=score)
+    function parentalSelectedIndex() {
+        var um = editPolicy.MaxParentalRating
+        if (um === undefined || um === null) return -1
+        var us = editPolicy.MaxParentalSubRating
+        var idx = -1
+        for (var i = 0; i < parentalRatings.length; i++) if (parentalRatings[i].score === um && parentalRatings[i].subScore === us) idx = i
+        if (idx < 0) for (var j = 0; j < parentalRatings.length; j++) if (parentalRatings[j].score != null && parentalRatings[j].score <= um) idx = j
+        return idx
+    }
+    function setMaxParental(index) {
+        var p = JSON.parse(JSON.stringify(editPolicy))
+        if (index < 0) { p.MaxParentalRating = null; p.MaxParentalSubRating = null }
+        else { p.MaxParentalRating = parentalRatings[index].score; p.MaxParentalSubRating = parentalRatings[index].subScore }
+        editPolicy = p
+    }
+    function addTag(flag, tag) { var p = JSON.parse(JSON.stringify(editPolicy)); var a = p[flag] || []; if (tag && a.indexOf(tag) < 0) a.push(tag); p[flag] = a; editPolicy = p }
+    function removeTag(flag, tag) { var p = JSON.parse(JSON.stringify(editPolicy)); p[flag] = (p[flag] || []).filter(function (t) { return t !== tag }); editPolicy = p }
+    function addSchedule() {
+        var p = JSON.parse(JSON.stringify(editPolicy)); var a = p.AccessSchedules || []
+        a.push({DayOfWeek: schedDay, StartHour: schedStart, EndHour: schedEnd}); p.AccessSchedules = a; editPolicy = p
+    }
+    function removeSchedule(i) { var p = JSON.parse(JSON.stringify(editPolicy)); var a = p.AccessSchedules || []; a.splice(i, 1); p.AccessSchedules = a; editPolicy = p }
     function setFlag(key, val) { var p = Object.assign({}, editPolicy); p[key] = val; editPolicy = p }
+    // Access lists: membership of an id in an editPolicy array (EnabledFolders/Channels/Devices)
+    function inEnabled(listKey, id) { var a = editPolicy[listKey]; return !!a && a.indexOf(id) >= 0 }
+    function toggleEnabled(listKey, id) {
+        var p = JSON.parse(JSON.stringify(editPolicy)); var a = p[listKey] || []
+        var i = a.indexOf(id); if (i >= 0) a.splice(i, 1); else a.push(id)
+        p[listKey] = a; editPolicy = p
+    }
     // save a user: name via POST /Users/{id} (whole dto), policy via POST /Users/{id}/Policy — mirrors web's Profile save
     function saveUser() {
         var u = selectedUser; if (!u || !client) return
-        var dto = JSON.parse(JSON.stringify(u)); dto.Name = editUserName; dto.Policy = editPolicy
+        var pol = JSON.parse(JSON.stringify(editPolicy))
+        if (pol.EnableAllFolders) pol.EnabledFolders = []          // mirror web: clear the list when "all" is on
+        if (pol.EnableAllChannels) pol.EnabledChannels = []
+        if (pol.EnableAllDevices) pol.EnabledDevices = []
+        var dto = JSON.parse(JSON.stringify(u)); dto.Name = editUserName; dto.Policy = pol
         client.postJson("/Users/" + u.Id, dto)
-        client.setUserPolicy(u.Id, editPolicy)
+        client.setUserPolicy(u.Id, pol)
     }
 
     // ---- LibraryOptions provider tables — mirrors components/libraryoptionseditor ----
@@ -590,9 +661,13 @@ Item {
     component PolicySelect: RowLayout {
         id: psel
         property string label: ""
-        property string flag: ""
+        property string flag: ""               // bind to editPolicy[flag], OR…
+        property var currentValue: undefined   // …use currentValue + changed() when flag is empty
+        signal changed(var value)
         property var options: []
-        function sync() { for (var i = 0; i < psel.options.length; i++) if (String(psel.options[i].value) === String(screen.editPolicy[psel.flag])) { pbox.currentIndex = i; return } pbox.currentIndex = -1 }
+        function sync() { var cur = psel.flag ? screen.editPolicy[psel.flag] : psel.currentValue; for (var i = 0; i < psel.options.length; i++) if (String(psel.options[i].value) === String(cur)) { pbox.currentIndex = i; return } pbox.currentIndex = -1 }
+        onCurrentValueChanged: sync()
+        onOptionsChanged: sync()
         Connections { target: screen; function onEditPolicyChanged() { psel.sync() } }
         Layout.fillWidth: true
         Text { text: psel.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
@@ -601,7 +676,7 @@ Item {
             Layout.preferredWidth: 280; implicitHeight: 34
             model: psel.options; textRole: "text"
             Component.onCompleted: psel.sync()
-            onActivated: (idx) => screen.setFlag(psel.flag, psel.options[idx].value)
+            onActivated: (idx) => { if (psel.flag) screen.setFlag(psel.flag, psel.options[idx].value); else psel.changed(psel.options[idx].value) }
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: pbox.activeFocus || pbox.hovered ? Theme.accent : Theme.divider; border.width: 1 }
             contentItem: Text { text: pbox.currentIndex >= 0 ? pbox.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
             indicator: Text { x: pbox.width - width - 10; y: (pbox.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
@@ -617,6 +692,66 @@ Item {
                 contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
                 background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
             }
+        }
+    }
+
+    // a checkbox list whose checked ids live in an editPolicy array (Enabled{Folders,Channels,Devices})
+    component AccessCheckList: ColumnLayout {
+        id: acl
+        property var items: []       // [{id, name}]
+        property string listKey: ""
+        Layout.fillWidth: true; spacing: 2
+        Repeater {
+            model: acl.items
+            Rectangle {
+                required property var modelData
+                Layout.fillWidth: true; implicitHeight: 34; radius: Theme.radius; color: Theme.surface
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: Theme.spacingSmall; anchors.rightMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                    Rectangle {
+                        id: aclChk
+                        readonly property bool on: screen.inEnabled(acl.listKey, modelData.id)
+                        width: 20; height: 20; radius: 4
+                        color: on ? Theme.accent : Theme.elevated; border.color: Theme.divider; border.width: 1
+                        Text { anchors.centerIn: parent; text: aclChk.on ? "✓" : ""; color: Theme.accentText; font.pixelSize: Theme.fontSmall; font.bold: true }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.toggleEnabled(acl.listKey, modelData.id) }
+                    }
+                    Text { text: ("" + modelData.name); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideRight }
+                }
+            }
+        }
+    }
+
+    // editable list of string tags (AllowedTags / BlockedTags)
+    component TagEditor: ColumnLayout {
+        id: te
+        property string flag: ""
+        Layout.fillWidth: true; spacing: 4
+        Flow {
+            Layout.fillWidth: true; spacing: Theme.spacingSmall
+            Repeater {
+                model: screen.editPolicy[te.flag] || []
+                Rectangle {
+                    required property var modelData
+                    implicitWidth: chipRow.implicitWidth + 16; implicitHeight: 28; radius: Theme.radius; color: Theme.surface; border.color: Theme.divider; border.width: 1
+                    RowLayout {
+                        id: chipRow
+                        anchors.centerIn: parent; spacing: 6
+                        Text { text: ("" + modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                        Text { text: "✕"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; TapHandler { onTapped: screen.removeTag(te.flag, modelData) } }
+                    }
+                }
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true; spacing: Theme.spacingSmall
+            TextField {
+                id: tagInput
+                Layout.preferredWidth: 220; placeholderText: qsTr("Add tag…"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                onAccepted: { if (text.length) { screen.addTag(te.flag, text); clear() } }
+                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
+            }
+            DashButton { text: qsTr("Add"); onClicked: { if (tagInput.text.length) { screen.addTag(te.flag, tagInput.text); tagInput.clear() } } }
         }
     }
 
@@ -1141,8 +1276,9 @@ Item {
                     visible: screen.selEntry.kind === "users"
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
+                    DashButton { visible: screen.selectedUser === null && !screen.userAddMode; text: qsTr("＋  Add user"); onClicked: { screen.newUserName = ""; screen.newUserPw = ""; screen.userAddMode = true } }
                     Repeater {
-                        model: screen.selectedUser === null ? screen.usersData : []
+                        model: (screen.selectedUser === null && !screen.userAddMode) ? screen.usersData : []
                         Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: ma2.containsMouse ? Theme.surfaceHover : Theme.surface
@@ -1159,6 +1295,34 @@ Item {
                             }
                         }
                     }
+                    // add user
+                    ColumnLayout {
+                        visible: screen.userAddMode
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.userAddMode = false }
+                            Text { text: qsTr("Add user"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
+                            Text { text: qsTr("Name"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 280; text: screen.newUserName; onTextEdited: screen.newUserName = text; placeholderText: qsTr("Username"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Password (optional)"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 280; text: screen.newUserPw; onTextEdited: screen.newUserPw = text; echoMode: TextInput.Password; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing
+                            DashButton { text: qsTr("Create user"); onClicked: screen.confirm(qsTr("Create the user “%1”?").arg(screen.newUserName || qsTr("(unnamed)")), function() { screen.client.createUser(screen.newUserName, screen.newUserPw); screen.userAddMode = false; screen.usersReloadTimer.restart() }) }
+                        }
+                    }
+
+                    // per-user detail
                     ColumnLayout {
                         visible: screen.selectedUser !== null
                         Layout.fillWidth: true; spacing: Theme.spacingSmall
@@ -1198,16 +1362,83 @@ Item {
                         PolicyToggle { label: qsTr("Allow media deletion from all libraries"); flag: "EnableContentDeletion" }
                         PolicyToggle { label: qsTr("Allow this user to remote-control other users"); flag: "EnableRemoteControlOfOtherUsers" }
                         PolicyToggle { label: qsTr("Allow remote control of shared devices"); flag: "EnableSharedDeviceControl" }
-                        Text {
-                            text: qsTr("Library access: %1").arg((screen.editPolicy.EnableAllFolders === true) ? qsTr("all libraries") : qsTr("%1 selected").arg((screen.editPolicy.EnabledFolders || []).length))
-                            color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall
-                        }
+
+                        Text { text: qsTr("Library access"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Enable access to all libraries"); flag: "EnableAllFolders" }
+                        AccessCheckList { visible: screen.editPolicy.EnableAllFolders !== true; items: screen.mediaFoldersData; listKey: "EnabledFolders" }
+
+                        Text { visible: screen.channelsData.length > 0; text: qsTr("Channel access"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { visible: screen.channelsData.length > 0; label: qsTr("Enable access to all channels"); flag: "EnableAllChannels" }
+                        AccessCheckList { visible: screen.channelsData.length > 0 && screen.editPolicy.EnableAllChannels !== true; items: screen.channelsData; listKey: "EnabledChannels" }
+
+                        Text { visible: screen.editPolicy.IsAdministrator !== true; text: qsTr("Device access"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { visible: screen.editPolicy.IsAdministrator !== true; label: qsTr("Enable access from all devices"); flag: "EnableAllDevices" }
+                        AccessCheckList { visible: screen.editPolicy.IsAdministrator !== true && screen.editPolicy.EnableAllDevices !== true; items: screen.devicesData; listKey: "EnabledDevices" }
 
                         Text { text: qsTr("Account status"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
                         PolicyToggle { label: qsTr("Disable this user"); flag: "IsDisabled" }
                         PolicyToggle { label: qsTr("Hide this user from the login screen"); flag: "IsHidden" }
                         PolicyNumber { label: qsTr("Login attempts before lockout (-1 default, 0 never)"); flag: "LoginAttemptsBeforeLockout" }
                         PolicyNumber { label: qsTr("Maximum active sessions (0 = unlimited)"); flag: "MaxActiveSessions" }
+
+                        Text { text: qsTr("Parental control"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicySelect { label: qsTr("Maximum allowed parental rating"); options: screen.parentalOptions; currentValue: screen.parentalSelectedIndex(); onChanged: (v) => screen.setMaxParental(v) }
+                        Text { text: qsTr("Content with a higher rating will be hidden from this user."); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; Layout.leftMargin: 4; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                        Text { text: qsTr("Block items with no or unrecognized rating"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall; Layout.leftMargin: 4 }
+                        AccessCheckList { items: screen.unratedTypes; listKey: "BlockUnratedItems" }
+                        Text { text: qsTr("Allow items with tags"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall; Layout.leftMargin: 4 }
+                        TagEditor { flag: "AllowedTags" }
+                        Text { text: qsTr("Block items with tags"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall; Layout.leftMargin: 4 }
+                        TagEditor { flag: "BlockedTags" }
+
+                        Text { visible: screen.editPolicy.IsAdministrator !== true; text: qsTr("Access schedules"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        ColumnLayout {
+                            visible: screen.editPolicy.IsAdministrator !== true
+                            Layout.fillWidth: true; spacing: 2
+                            Repeater {
+                                model: screen.editPolicy.AccessSchedules || []
+                                Rectangle {
+                                    required property var modelData
+                                    required property int index
+                                    Layout.fillWidth: true; implicitHeight: 34; radius: Theme.radius; color: Theme.surface
+                                    RowLayout {
+                                        anchors.fill: parent; anchors.leftMargin: Theme.spacingSmall; anchors.rightMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                                        Text { text: ("" + modelData.DayOfWeek) + "   " + modelData.StartHour + ":00 – " + modelData.EndHour + ":00"; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true }
+                                        DashButton { text: qsTr("Remove"); danger: true; onClicked: screen.removeSchedule(index) }
+                                    }
+                                }
+                            }
+                            PolicySelect { label: qsTr("Day"); options: screen.dayOptions; currentValue: screen.schedDay; onChanged: (v) => screen.schedDay = v }
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: Theme.spacingSmall
+                                Text { text: qsTr("From / to (hour)"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                                TextField { Layout.preferredWidth: 60; text: "" + screen.schedStart; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.schedStart = Math.max(0, Math.min(24, parseInt(text) || 0)); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                    background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                                TextField { Layout.preferredWidth: 60; text: "" + screen.schedEnd; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.schedEnd = Math.max(0, Math.min(24, parseInt(text) || 0)); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                    background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                                DashButton { text: qsTr("Add schedule"); onClicked: screen.addSchedule() }
+                            }
+                        }
+
+                        Text { text: qsTr("Password"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("New password"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { id: newPwField; Layout.preferredWidth: 220; echoMode: TextInput.Password; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Confirm password"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { id: confirmPwField; Layout.preferredWidth: 220; echoMode: TextInput.Password; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                            Text { id: pwMsg; text: ""; color: Theme.error; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter }
+                            DashButton { text: qsTr("Set password"); onClicked: { pwMsg.text = ""; if (newPwField.text !== confirmPwField.text) { pwMsg.text = qsTr("Passwords don't match.") } else screen.confirm(qsTr("Set a new password for “%1”?").arg(screen.selectedUser.Name), function() { screen.client.setUserPassword(screen.selectedUser.Id, newPwField.text, false); newPwField.text = ""; confirmPwField.text = "" }) } }
+                            DashButton { text: qsTr("Clear password"); danger: true; onClicked: screen.confirm(qsTr("Clear the password for “%1”? They will then sign in with no password.").arg(screen.selectedUser.Name), function() { screen.client.setUserPassword(screen.selectedUser.Id, "", true) }) }
+                        }
 
                         RowLayout {
                             Layout.topMargin: Theme.spacing; spacing: Theme.spacingSmall
