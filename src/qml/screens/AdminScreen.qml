@@ -40,8 +40,8 @@ Item {
     ]
     readonly property var brandingFields: [
         {label: qsTr("Enable splash screen"), key: "SplashscreenEnabled", type: "toggle"},
-        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text"},
-        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text"}
+        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text", help: qsTr("A message that will be displayed at the bottom of the login page.")},
+        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text", help: qsTr("Apply your custom CSS code for theming/branding on the web interface.")}
     ]
     readonly property var metadataFields: [
         {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
@@ -70,35 +70,35 @@ Item {
         {label: qsTr("Enable audio VBR"), key: "EnableAudioVbr", type: "toggle"}
     ]
     readonly property var resumeFields: [
-        {label: qsTr("Minimum resume percentage"), key: "MinResumePct", type: "number"},
-        {label: qsTr("Maximum resume percentage"), key: "MaxResumePct", type: "number"},
-        {label: qsTr("Minimum audiobook resume (%)"), key: "MinAudiobookResume", type: "number"},
-        {label: qsTr("Maximum audiobook resume (%)"), key: "MaxAudiobookResume", type: "number"},
-        {label: qsTr("Minimum resume duration (seconds)"), key: "MinResumeDurationSeconds", type: "number"}
+        {label: qsTr("Minimum resume percentage"), key: "MinResumePct", type: "number", help: qsTr("Titles are assumed unplayed if stopped before this time.")},
+        {label: qsTr("Maximum resume percentage"), key: "MaxResumePct", type: "number", help: qsTr("Titles are assumed fully played if stopped after this time.")},
+        {label: qsTr("Minimum audiobook resume (%)"), key: "MinAudiobookResume", type: "number", help: qsTr("Titles are assumed unplayed if stopped before this time.")},
+        {label: qsTr("Maximum audiobook resume (%)"), key: "MaxAudiobookResume", type: "number", help: qsTr("Titles are assumed fully played if stopped when the remaining duration is less than this value.")},
+        {label: qsTr("Minimum resume duration (seconds)"), key: "MinResumeDurationSeconds", type: "number", help: qsTr("The shortest video length in seconds that will save playback location and let you resume.")}
     ]
     readonly property var streamingFields: [
-        {label: qsTr("Remote client bitrate limit (Mbps, 0 = unlimited)"), key: "RemoteClientBitrateLimit", type: "number", scale: 1000000}
+        {label: qsTr("Remote client bitrate limit (Mbps, 0 = unlimited)"), key: "RemoteClientBitrateLimit", type: "number", scale: 1000000, help: qsTr("An optional per-stream bitrate limit for all out of network devices. This is useful to prevent devices from requesting a higher bitrate than your internet connection can handle. This may result in increased CPU load on your server in order to transcode videos on the fly to a lower bitrate.")}
     ]
     readonly property var nfoFields: [
-        {label: qsTr("Kodi metadata user"), key: "UserId", type: "select", optionsKey: "users"},
-        {label: qsTr("Save image paths in NFO"), key: "SaveImagePathsInNfo", type: "toggle"},
-        {label: qsTr("Enable path substitution"), key: "EnablePathSubstitution", type: "toggle"},
-        {label: qsTr("Duplicate extra thumbnails (extrafanart/extrathumbs)"), key: "EnableExtraThumbsDuplication", type: "toggle"}
+        {label: qsTr("Kodi metadata user"), key: "UserId", type: "select", optionsKey: "users", help: qsTr("Save watch data to NFO files for other applications to use.")},
+        {label: qsTr("Save image paths in NFO"), key: "SaveImagePathsInNfo", type: "toggle", help: qsTr("This is recommended if you have image file names that don't conform to Kodi guidelines.")},
+        {label: qsTr("Enable path substitution"), key: "EnablePathSubstitution", type: "toggle", help: qsTr("Enable path substitution of image paths using the server's path substitution settings.")},
+        {label: qsTr("Duplicate extra thumbnails (extrafanart/extrathumbs)"), key: "EnableExtraThumbsDuplication", type: "toggle", help: qsTr("When downloading images they can be saved into both extrafanart and extrathumbs for maximum Kodi skin compatibility.")}
     ]
     // Trickplay lives in the nested ServerConfiguration.TrickplayOptions object → dot-path keys.
     readonly property var trickplayFields: [
         {label: qsTr("Enable hardware decoding"), key: "TrickplayOptions.EnableHwAcceleration", type: "toggle"},
-        {label: qsTr("Enable hardware encoding"), key: "TrickplayOptions.EnableHwEncoding", type: "toggle"},
-        {label: qsTr("Key-frame-only extraction"), key: "TrickplayOptions.EnableKeyFrameOnlyExtraction", type: "toggle"},
-        {label: qsTr("Scan behavior"), key: "TrickplayOptions.ScanBehavior", type: "select", options: [{value: "NonBlocking", text: qsTr("Non-blocking")}, {value: "Blocking", text: qsTr("Blocking")}]},
-        {label: qsTr("Process priority"), key: "TrickplayOptions.ProcessPriority", type: "select", options: [{value: "High", text: qsTr("High")}, {value: "AboveNormal", text: qsTr("Above normal")}, {value: "Normal", text: qsTr("Normal")}, {value: "BelowNormal", text: qsTr("Below normal")}, {value: "Idle", text: qsTr("Idle")}]},
-        {label: qsTr("Image interval (ms)"), key: "TrickplayOptions.Interval", type: "number"},
-        {label: qsTr("Width resolutions (comma-separated)"), key: "TrickplayOptions.WidthResolutions", type: "csv"},
-        {label: qsTr("Tile width (images per tile)"), key: "TrickplayOptions.TileWidth", type: "number"},
-        {label: qsTr("Tile height (images per tile)"), key: "TrickplayOptions.TileHeight", type: "number"},
-        {label: qsTr("JPEG quality (1–100)"), key: "TrickplayOptions.JpegQuality", type: "number"},
-        {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number"},
-        {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number"}
+        {label: qsTr("Enable hardware encoding"), key: "TrickplayOptions.EnableHwEncoding", type: "toggle", help: qsTr("Currently only available on QSV, VA-API, VideoToolbox and RKMPP, this option has no effect on other hardware acceleration methods.")},
+        {label: qsTr("Key-frame-only extraction"), key: "TrickplayOptions.EnableKeyFrameOnlyExtraction", type: "toggle", help: qsTr("Extract key frames only for significantly faster processing with less accurate timing. If the configured hardware decoder does not support this mode, will use the software decoder instead.")},
+        {label: qsTr("Scan behavior"), key: "TrickplayOptions.ScanBehavior", type: "select", options: [{value: "NonBlocking", text: qsTr("Non-blocking")}, {value: "Blocking", text: qsTr("Blocking")}], help: qsTr("The default behavior is non blocking, which will add media to the library before trickplay generation is done. Blocking will ensure trickplay files are generated before media is added to the library, but will make scans significantly longer.")},
+        {label: qsTr("Process priority"), key: "TrickplayOptions.ProcessPriority", type: "select", options: [{value: "High", text: qsTr("High")}, {value: "AboveNormal", text: qsTr("Above normal")}, {value: "Normal", text: qsTr("Normal")}, {value: "BelowNormal", text: qsTr("Below normal")}, {value: "Idle", text: qsTr("Idle")}], help: qsTr("Setting this lower or higher will determine how the CPU prioritizes the ffmpeg trickplay generation process in relation to other processes. If you notice slowdown while generating trickplay images but don't want to fully stop their generation, try lowering this as well as the thread count.")},
+        {label: qsTr("Image interval (ms)"), key: "TrickplayOptions.Interval", type: "number", help: qsTr("Interval of time (ms) between each new trickplay image.")},
+        {label: qsTr("Width resolutions (comma-separated)"), key: "TrickplayOptions.WidthResolutions", type: "csv", help: qsTr("Comma separated list of the widths (px) that trickplay images will be generated at. All images should generate proportionally to the source, so a width of 320 on a 16:9 video ends up around 320x180.")},
+        {label: qsTr("Tile width (images per tile)"), key: "TrickplayOptions.TileWidth", type: "number", help: qsTr("Maximum number of images per tile in the X direction.")},
+        {label: qsTr("Tile height (images per tile)"), key: "TrickplayOptions.TileHeight", type: "number", help: qsTr("Maximum number of images per tile in the Y direction.")},
+        {label: qsTr("JPEG quality (1–100)"), key: "TrickplayOptions.JpegQuality", type: "number", help: qsTr("The JPEG compression quality for trickplay images.")},
+        {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number", help: qsTr("The quality scale of images output by ffmpeg, with 2 being the highest quality and 31 being the lowest.")},
+        {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number", help: qsTr("The number of threads to pass to the '-threads' argument of ffmpeg.")}
     ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
