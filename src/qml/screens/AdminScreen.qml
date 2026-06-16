@@ -189,24 +189,30 @@ Item {
     onSelChanged: loadSel()
     Component.onCompleted: loadSel()
     function loadSel() {
+        // Read the entry FRESH from navModel[sel]. We must NOT use the selEntry
+        // binding here: loadSel runs from onSelChanged (sel's change handler), and
+        // at that point the selEntry binding hasn't re-evaluated yet — it still
+        // holds the PREVIOUS tab's entry, which made every navigation load the
+        // wrong (off-by-one) tab and left the panel blank.
+        var entry = navModel[sel] || ({})
         panelData = null
         if (!client) return
-        if (selEntry.kind === "dashboard") {
+        if (entry.kind === "dashboard") {
             client.getJson("/System/Info", "admin:dash:info")
             client.getJson("/Items/Counts", "admin:dash:counts")
             client.getJson("/Sessions", "admin:dash:sessions")
-        } else if (selEntry.kind === "tasks") {
+        } else if (entry.kind === "tasks") {
             tasksData = []
             client.getJson("/ScheduledTasks", "admin:tasks")
-        } else if (selEntry.kind === "users") {
+        } else if (entry.kind === "users") {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
-        } else if (selEntry.kind === "config") {
+        } else if (entry.kind === "config") {
             serverConfig = null; editConfig = ({}); dynOptions = ({})
-            client.getJson(selEntry.ep, "admin:config")
-            fetchOptionSources(selEntry.fields)
-        } else if (selEntry.kind !== "stub") {
-            client.getJson(selEntry.ep, "admin:panel")
+            client.getJson(entry.ep, "admin:config")
+            fetchOptionSources(entry.fields)
+        } else if (entry.kind !== "stub") {
+            client.getJson(entry.ep, "admin:panel")
         }
     }
     // GET any dynamic dropdown option sources the field set needs (deduped); tagged admin:opt:<key>
