@@ -90,8 +90,8 @@ Item {
     ]
     readonly property var brandingFields: [
         {label: qsTr("Enable splash screen"), key: "SplashscreenEnabled", type: "toggle"},
-        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text", help: qsTr("A message that will be displayed at the bottom of the login page.")},
-        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text", help: qsTr("Apply your custom CSS code for theming/branding on the web interface.")}
+        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "multiline", help: qsTr("A message that will be displayed at the bottom of the login page.")},
+        {label: qsTr("Custom CSS"), key: "CustomCss", type: "multiline", help: qsTr("Apply your custom CSS code for theming/branding on the web interface.")}
     ]
     readonly property var metadataFields: [
         {group: qsTr("Preferred metadata language"), label: qsTr("Language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures", help: qsTr("These are your defaults and can be customized on a per-library basis.")},
@@ -971,6 +971,29 @@ Item {
         spacing: Theme.spacingSmall
         Component { id: cflField; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true; ro: parent.modelData.readonly === true } }
         Component { id: cflToggle; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
+        Component {
+            id: cflMultiline
+            ColumnLayout {
+                id: mlf
+                readonly property string fkey: parent.modelData.key
+                readonly property string flabel: parent.modelData.label
+                Layout.fillWidth: true; spacing: 4
+                Text { text: mlf.flabel; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.leftMargin: 4 }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.preferredHeight: 110; radius: Theme.radius; color: Theme.surface; border.color: mlArea.activeFocus ? Theme.accent : Theme.divider; border.width: 1
+                    ScrollView {
+                        anchors.fill: parent; anchors.margins: 6; clip: true
+                        TextArea {
+                            id: mlArea
+                            color: Theme.textPrimary; font.family: "monospace"; font.pixelSize: Theme.fontSmall; wrapMode: TextEdit.Wrap; selectByMouse: true
+                            Component.onCompleted: text = screen.cfgGet(mlf.fkey) || ""
+                            onActiveFocusChanged: if (!activeFocus) screen.setConfig(mlf.fkey, text)
+                            Connections { target: screen; function onEditConfigChanged() { if (!mlArea.activeFocus) mlArea.text = screen.cfgGet(mlf.fkey) || "" } }
+                        }
+                    }
+                }
+            }
+        }
         Component { id: cflSelect; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
         Repeater {
             model: cfl.fields
@@ -992,7 +1015,7 @@ Item {
                     property var modelData: fieldRow.modelData
                     Layout.fillWidth: true
                     Layout.preferredHeight: item ? item.implicitHeight : 0
-                    sourceComponent: modelData.type === "toggle" ? cflToggle : (modelData.type === "select" ? cflSelect : cflField)
+                    sourceComponent: modelData.type === "toggle" ? cflToggle : (modelData.type === "select" ? cflSelect : (modelData.type === "multiline" ? cflMultiline : cflField))
                 }
                 Text {
                     visible: !!fieldRow.modelData.help
@@ -1275,13 +1298,14 @@ Item {
                             }
                         }
                     }
-                    RowLayout {
+                    Flow {
                         Layout.fillWidth: true; spacing: Theme.spacingSmall
                         Repeater {
-                            model: [{k: "MovieCount", t: qsTr("Movies")}, {k: "SeriesCount", t: qsTr("Series")}, {k: "EpisodeCount", t: qsTr("Episodes")}, {k: "BoxSetCount", t: qsTr("Collections")}]
+                            model: [{k: "MovieCount", t: qsTr("Movies")}, {k: "SeriesCount", t: qsTr("Series")}, {k: "EpisodeCount", t: qsTr("Episodes")}, {k: "AlbumCount", t: qsTr("Albums")}, {k: "SongCount", t: qsTr("Songs")}, {k: "MusicVideoCount", t: qsTr("Music Videos")}, {k: "BoxSetCount", t: qsTr("Collections")}, {k: "BookCount", t: qsTr("Books")}]
                             Rectangle {
                                 required property var modelData
-                                Layout.fillWidth: true; implicitHeight: 64; radius: Theme.radius; color: Theme.surface
+                                visible: screen.dashCounts && (screen.dashCounts[modelData.k] || 0) > 0  // hide empty categories, like web
+                                width: 150; implicitHeight: 64; radius: Theme.radius; color: Theme.surface
                                 ColumnLayout {
                                     anchors.centerIn: parent; spacing: 0
                                     Text { text: screen.dashCounts ? ("" + (screen.dashCounts[modelData.k] || 0)) : "—"; color: Theme.accent; font.pixelSize: Theme.fontLarge; font.bold: true; Layout.alignment: Qt.AlignHCenter }
