@@ -265,8 +265,7 @@ Shape verified live by read-only GET; no save fired. **Note:** `CustomTagDelimit
 
 **Phase U — Users admin — ✅ DONE (2026-06-16)** — `1720fca` Profile tab (name + ~15 missing policy fields, two-endpoint save), `f92aacc` Access tab (library/channel/device allow-lists) + Parental tab (rating/block-unrated/tags/schedules) + Password (set/clear) + add-user. New client `createUser`/`setUserPassword`; reusable PolicyNumber/PolicySelect/AccessCheckList/TagEditor. Verified live; admin-gated sections (schedules, device access) correctly hidden.
 
-**Phase A — remaining admin actions** — Devices, API Keys, Logs viewer, Scheduled-task triggers,
-Admin Display page, per-library Scan, Dashboard cards; then Plugins catalog/install + Backups.
+**Phase A — remaining admin actions — ✅ DONE (2026-06-16)** — `1d00678` Devices rename/delete + API Keys create/revoke + Logs viewer + Plugins enable/disable/uninstall · `9b1a156` Display admin page + per-library Scan · `d19a782` config refinements (Metadata resolution dropdown+help, Networking blacklist select, Transcoding color-depth showWhen fix + thread select + FFmpeg path, Phase-C) · `0fb4d70` Scheduled-task triggers editor · `2c5b5a1` Dashboard item-counts (all categories) + Branding multiline · `92d91db` Plugins catalog/install + repositories. New client methods: renameDevice/deleteDevice/createApiKey/revokeApiKey/getText/updateTaskTriggers/refreshItem/setPluginEnabled/uninstallPlugin/installPackage/setRepositories. **Remaining admin polish (lower value):** Activity log filters; Networking Published-Server-URI (custom subnet encode); per-accel HW-decoding codec checkbox group (CSV works); Branding splashscreen upload. **N/A:** Backups (`/Backups` → 404 on this server version).
 
 **Phase C — config-editor refinements (Tier 3)** — Transcoding codec group/showWhen/thread/FFmpeg,
 Networking Published-URI, Metadata/Branding control types + multiline.
