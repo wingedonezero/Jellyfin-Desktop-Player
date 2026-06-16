@@ -38,6 +38,13 @@ Item {
     property var availOpts: null   // GET /Libraries/AvailableOptions (JSON-roundtripped to plain JS)
     property var subLangAll: []    // [{lang(3-letter), name}] from /Localization/Cultures
     property var provState: ({})   // provider-table working state (see rebuildProv)
+    // per-type "Fetcher settings" (ImageOptions) dialog state
+    property int fsIndex: -1
+    property string fsType: ""
+    property var fsSupported: []
+    property var fsLimits: ({})    // {imageType: bool}
+    property int fsMaxBackdrops: 0
+    property int fsMinBackdropWidth: 0
     readonly property var contentTypes: [{value: "movies", text: qsTr("Movies")}, {value: "tvshows", text: qsTr("Shows")}, {value: "music", text: qsTr("Music")}, {value: "homevideos", text: qsTr("Home Videos & Photos")}, {value: "musicvideos", text: qsTr("Music Videos")}, {value: "books", text: qsTr("Books")}, {value: "boxsets", text: qsTr("Collections")}, {value: "mixed", text: qsTr("Mixed Content")}]
     readonly property var selEntry: navModel[sel] || ({})
 
@@ -453,7 +460,9 @@ Item {
             var mf = mapChecked(t.MetadataFetchers, lt.MetadataFetcherOrder, lt.MetadataFetchers)
             if (mf.length) s.metadataFetchers.push({ type: t.Type, plural: pl, plugins: mf })
             var imf = mapChecked(t.ImageFetchers, lt.ImageFetcherOrder, lt.ImageFetchers)
-            if (imf.length) s.imageFetchers.push({ type: t.Type, plural: pl, plugins: imf, supportedImageTypes: t.SupportedImageTypes || [] })
+            if (imf.length) s.imageFetchers.push({ type: t.Type, plural: pl, plugins: imf,
+                supportedImageTypes: t.SupportedImageTypes || [], defaultImageOptions: t.DefaultImageOptions || [],
+                savedImageOptions: lt.ImageOptions || null, imageOptions: null }) // imageOptions: null = untouched (preserve saved)
             var sip = mapChecked(t.SimilarItemProviders, lt.SimilarItemProviderOrder, lt.SimilarItemProviders)
             if (sip.length) s.similarItemProviders.push({ type: t.Type, plural: pl, plugins: sip })
         }
@@ -496,10 +505,45 @@ Item {
         var mf = s.metadataFetchers || []
         for (var x = 0; x < mf.length; x++) { var a = getTO(mf[x].type); a.MetadataFetchers = checkedNames(mf[x].plugins); a.MetadataFetcherOrder = allNames(mf[x].plugins) }
         var imf = s.imageFetchers || []
-        for (var y = 0; y < imf.length; y++) { var b = getTO(imf[y].type); b.ImageFetchers = checkedNames(imf[y].plugins); b.ImageFetcherOrder = allNames(imf[y].plugins) }
+        for (var y = 0; y < imf.length; y++) {
+            var b = getTO(imf[y].type); b.ImageFetchers = checkedNames(imf[y].plugins); b.ImageFetcherOrder = allNames(imf[y].plugins)
+            if (imf[y].imageOptions !== null && imf[y].imageOptions !== undefined) b.ImageOptions = imf[y].imageOptions // only when edited via Fetcher settings
+        }
         var sip = s.similarItemProviders || []
         for (var z = 0; z < sip.length; z++) { var c = getTO(sip[z].type); c.SimilarItemProviders = checkedNames(sip[z].plugins); c.SimilarItemProviderOrder = allNames(sip[z].plugins) }
         return opts
+    }
+    // per-type Fetcher settings (ImageOptions): which image types to fetch + backdrop count/min-width
+    function findOpt(arr, tp) { for (var i = 0; i < (arr || []).length; i++) if (arr[i].Type === tp) return arr[i]; return null }
+    function openFetcherSettings(idx) {
+        var e = provState.imageFetchers[idx]; if (!e) return
+        fsIndex = idx; fsType = e.type; fsSupported = e.supportedImageTypes || []
+        var base = e.imageOptions || e.savedImageOptions || []
+        var defs = e.defaultImageOptions || []
+        var lims = ({})
+        for (var i = 0; i < fsSupported.length; i++) {
+            var tp = fsSupported[i]
+            var cfg = findOpt(base, tp) || findOpt(defs, tp) || { Limit: (tp === "Primary" ? 1 : 0), MinWidth: 0 }
+            lims[tp] = (cfg.Limit || 0) > 0
+        }
+        fsLimits = lims
+        var bd = findOpt(base, "Backdrop") || findOpt(defs, "Backdrop") || { Limit: 0, MinWidth: 0 }
+        fsMaxBackdrops = bd.Limit || 0
+        fsMinBackdropWidth = bd.MinWidth || 0
+        fsDialog.open()
+    }
+    function fsSetLimit(tp, val) { var m = Object.assign({}, fsLimits); m[tp] = val; fsLimits = m }
+    function saveFetcherSettings() {
+        var s = provClone(); var e = s.imageFetchers[fsIndex]; if (!e) { fsDialog.close(); return }
+        var opts = []
+        for (var i = 0; i < fsSupported.length; i++) {
+            var tp = fsSupported[i]
+            if (tp === "Backdrop") continue
+            opts.push({ Type: tp, Limit: (fsLimits[tp] ? 1 : 0), MinWidth: 0 })
+        }
+        if (fsSupported.indexOf("Backdrop") >= 0)
+            opts.push({ Type: "Backdrop", Limit: fsMaxBackdrops, MinWidth: fsMinBackdropWidth })
+        e.imageOptions = opts; provState = s; fsDialog.close()
     }
 
     component PolicyToggle: RowLayout {
@@ -731,13 +775,19 @@ Item {
         property var rows: []
         property bool showCheck: true   // false = order-only list (e.g. metadata readers)
         property bool showOrder: true   // false = checkbox-only (savers, languages)
+        property bool showFetcherSettings: false
         signal toggled(int index)
         signal movedUp(int index)
         signal movedDown(int index)
+        signal fetcherSettings()
         visible: rows && rows.length > 0
         Layout.fillWidth: true
         spacing: 2
-        Text { text: ptbl.title; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+        RowLayout {
+            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
+            Text { text: ptbl.title; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter }
+            DashButton { visible: ptbl.showFetcherSettings; text: qsTr("Fetcher settings"); onClicked: ptbl.fetcherSettings() }
+        }
         Repeater {
             model: ptbl.rows
             Rectangle {
@@ -782,6 +832,54 @@ Item {
                 Layout.alignment: Qt.AlignRight; spacing: Theme.spacingSmall
                 DashButton { text: qsTr("Cancel"); onClicked: confirmPopup.close() }
                 DashButton { text: qsTr("Confirm"); danger: true; onClicked: { confirmPopup.close(); if (screen.pendingAction) screen.pendingAction() } }
+            }
+        }
+    }
+
+    // per-type image "Fetcher settings" (ImageOptions) — mirrors imageOptionsEditor
+    Popup {
+        id: fsDialog
+        x: (screen.width - width) / 2; y: (screen.height - height) / 2
+        modal: true; dim: true; width: 440; padding: Theme.spacing
+        background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        contentItem: ColumnLayout {
+            spacing: Theme.spacingSmall
+            Text { text: qsTr("Image fetcher settings — %1").arg(screen.typePlural(screen.fsType)); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true }
+            Text { text: qsTr("Choose which image types to download."); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; Layout.fillWidth: true; Layout.bottomMargin: Theme.spacingSmall }
+            Repeater {
+                model: screen.fsSupported
+                RowLayout {
+                    required property var modelData
+                    visible: modelData !== "Backdrop"
+                    Layout.fillWidth: true
+                    Text { text: qsTr("Fetch %1 images").arg(modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                    Rectangle {
+                        id: fsTog
+                        readonly property bool on: screen.fsLimits[modelData] === true
+                        width: 44; height: 24; radius: 12; color: on ? Theme.accent : Theme.elevated
+                        Rectangle { width: 18; height: 18; radius: 9; y: 3; x: fsTog.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.fsSetLimit(modelData, !fsTog.on) }
+                    }
+                }
+            }
+            RowLayout {
+                visible: screen.fsSupported.indexOf("Backdrop") >= 0
+                Layout.fillWidth: true
+                Text { text: qsTr("Maximum backdrops"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                TextField { Layout.preferredWidth: 120; text: "" + screen.fsMaxBackdrops; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.fsMaxBackdrops = parseInt(text) || 0; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                    background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+            }
+            RowLayout {
+                visible: screen.fsSupported.indexOf("Backdrop") >= 0
+                Layout.fillWidth: true
+                Text { text: qsTr("Minimum backdrop download width"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                TextField { Layout.preferredWidth: 120; text: "" + screen.fsMinBackdropWidth; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.fsMinBackdropWidth = parseInt(text) || 0; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                    background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight; Layout.topMargin: Theme.spacing; spacing: Theme.spacingSmall
+                DashButton { text: qsTr("Cancel"); onClicked: fsDialog.close() }
+                DashButton { text: qsTr("Apply"); onClicked: screen.saveFetcherSettings() }
             }
         }
     }
@@ -1211,9 +1309,11 @@ Item {
                                 title: qsTr("Image fetchers (%1)").arg(modelData.plural)
                                 help: qsTr("Enable and rank your preferred image fetchers in order of priority.")
                                 rows: modelData.plugins
+                                showFetcherSettings: modelData.supportedImageTypes && (modelData.supportedImageTypes.length > 1 || (modelData.supportedImageTypes.length === 1 && modelData.supportedImageTypes[0] !== "Primary"))
                                 onToggled: (i) => screen.provToggle("imageFetchers", index, i)
                                 onMovedUp: (i) => screen.provMove("imageFetchers", index, i, -1)
                                 onMovedDown: (i) => screen.provMove("imageFetchers", index, i, 1)
+                                onFetcherSettings: screen.openFetcherSettings(index)
                             }
                         }
                         PluginTable {
