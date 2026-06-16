@@ -111,6 +111,27 @@ Item {
         osdTimer.restart()
     }
 
+    // Apply the saved subtitle appearance to mpv. Styling mode maps to mpv's
+    // sub-ass-override: Native = keep the file's own styling, Auto = keep it but
+    // honour our size, Custom = force our look (best for plain SRT). The colour/
+    // font/edge options affect plain-text subs always, and ASS only in Custom.
+    function applySubtitleStyle() {
+        if (!config) return
+        const mode = "" + config.value("subtitles/styleMode", "auto")
+        player.setOption("sub-ass-override", mode === "native" ? "no" : (mode === "custom" ? "force" : "scale"))
+        player.setOption("sub-scale", "" + config.value("subtitles/scale", 1.0))
+        player.setOption("sub-pos", "" + config.value("subtitles/pos", 100))
+        const boldV = config.value("subtitles/bold", false)
+        player.setOption("sub-bold", (boldV === true || boldV === "true") ? "yes" : "no")
+        const font = "" + config.value("subtitles/font", "")
+        player.setOption("sub-font", font.length ? font : "sans-serif")
+        player.setOption("sub-color", "" + config.value("subtitles/color", "#FFFFFF"))
+        player.setOption("sub-outline-color", "#000000")
+        const edge = "" + config.value("subtitles/edge", "outline")
+        player.setOption("sub-outline-size", edge === "outline" ? "3" : (edge === "both" ? "2.5" : "0"))
+        player.setOption("sub-shadow-offset", edge === "shadow" ? "2.5" : (edge === "both" ? "2" : "0"))
+    }
+
     MpvVideoItem {
         id: player
         anchors.fill: parent
@@ -125,12 +146,7 @@ Item {
                 player.seek(pendingResume)
                 pendingResume = 0
             }
-            if (root.config) {
-                const sc = root.config.value("subtitles/scale", 0)
-                if (sc > 0) player.setOption("sub-scale", "" + sc)
-                const sp = root.config.value("subtitles/pos", -1)
-                if (sp >= 0) player.setOption("sub-pos", "" + sp)
-            }
+            root.applySubtitleStyle()
         }
         onEndFile: (reason) => {
             // mpv reasons: 0 eof, 2 stop (our loadfile/stop), 4 error.

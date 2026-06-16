@@ -25,6 +25,11 @@ Item {
     property int defaultBitrate: 0
     property real subScale: 1.0
     property int subPos: 100
+    property string subStyle: "auto"
+    property bool subBold: false
+    property string subFont: ""
+    property string subColor: "#FFFFFF"
+    property string subEdge: "outline"
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
@@ -34,6 +39,7 @@ Item {
 
     function pref(key, def) { return config ? config.value(key, def) : def }
     function setPref(key, v) { if (config) config.setValue(key, v) }
+    function prefBool(key, def) { const v = pref(key, def); return v === true || v === "true" || v === 1 || v === "1" }
     function fmtBitrate(bps) {
         if (!bps || bps <= 0) return qsTr("Auto (direct play)")
         return (bps >= 1000000) ? ((Math.round(bps / 100000) / 10) + " Mbps") : (Math.round(bps / 1000) + " kbps")
@@ -43,6 +49,11 @@ Item {
         defaultBitrate = pref("playback/maxBitrate", 0)
         subScale = pref("subtitles/scale", 1.0)
         subPos = pref("subtitles/pos", 100)
+        subStyle = pref("subtitles/styleMode", "auto")
+        subBold = prefBool("subtitles/bold", false)
+        subFont = pref("subtitles/font", "")
+        subColor = pref("subtitles/color", "#FFFFFF")
+        subEdge = pref("subtitles/edge", "outline")
         autoPlayNext = pref("playback/autoPlayNext", true)
         skipBack = pref("playback/skipBack", 10)
         skipForward = pref("playback/skipForward", 30)
@@ -76,9 +87,9 @@ Item {
         property string label: ""
         property bool on: false
         property bool stub: false
-        signal toggled(bool value)
+        signal switched(bool value)
         hoverEnabled: true; Layout.fillWidth: true; implicitHeight: 46; enabled: !stub
-        onClicked: if (!stub) tr.toggled(!tr.on)
+        onClicked: if (!stub) tr.switched(!tr.on)
         contentItem: RowLayout {
             Text { text: tr.label; color: tr.enabled ? Theme.textPrimary : Theme.textDisabled; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
             Rectangle {
@@ -105,6 +116,60 @@ Item {
         JIconButton { text: "−"; implicitWidth: 36; implicitHeight: 36; onClicked: sr.changed(Math.max(sr.minValue, sr.value - sr.step)) }
         Text { text: sr.value + sr.suffix; color: Theme.textSecondary; horizontalAlignment: Text.AlignHCenter; Layout.preferredWidth: 56 }
         JIconButton { text: "+"; implicitWidth: 36; implicitHeight: 36; onClicked: sr.changed(Math.min(sr.maxValue, sr.value + sr.step)) }
+    }
+    // a compact segmented selector: label + a pill per option, the current one filled
+    component ChoiceRow: RowLayout {
+        id: chrow
+        property string label: ""
+        property var options: []        // [{value, text}]
+        property var value
+        signal picked(var value)
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Text { text: chrow.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        Repeater {
+            model: chrow.options
+            Button {
+                id: pill
+                required property var modelData
+                text: modelData.text
+                hoverEnabled: true; implicitHeight: 32
+                readonly property bool sel: chrow.value === modelData.value
+                background: Rectangle {
+                    radius: Theme.radius
+                    color: pill.sel ? Theme.accent : (pill.hovered ? Theme.surfaceHover : Theme.surface)
+                    border.color: pill.sel ? Theme.transparent : Theme.divider; border.width: 1
+                }
+                contentItem: Text {
+                    text: pill.text; color: pill.sel ? Theme.accentText : Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall; leftPadding: 12; rightPadding: 12
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
+                }
+                onClicked: chrow.picked(modelData.value)
+            }
+        }
+    }
+    // a label + a row of selectable color swatches
+    component SwatchRow: RowLayout {
+        id: swrow
+        property string label: ""
+        property var options: []        // [{value, color}]
+        property var value
+        signal picked(var value)
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Text { text: swrow.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        Repeater {
+            model: swrow.options
+            Rectangle {
+                required property var modelData
+                readonly property bool sel: swrow.value === modelData.value
+                width: 30; height: 30; radius: 6
+                color: modelData.color
+                border.color: sel ? Theme.accent : Theme.divider; border.width: sel ? 3 : 1
+                TapHandler { onTapped: swrow.picked(modelData.value) }
+            }
+        }
     }
     component PanelButton: Button {
         property bool primary: false
@@ -217,9 +282,9 @@ Item {
             Panel {
                 SectionTitle { text: qsTr("Home") }
                 Hint { text: qsTr("Which rows appear on the home screen. Applies on next launch.") }
-                ToggleRow { label: qsTr("Continue Watching"); on: screen.homeContinue; onToggled: (v) => { screen.homeContinue = v; screen.setPref("home/continueWatching", v) } }
-                ToggleRow { label: qsTr("Next Up"); on: screen.homeNextUp; onToggled: (v) => { screen.homeNextUp = v; screen.setPref("home/nextUp", v) } }
-                ToggleRow { label: qsTr("Latest media"); on: screen.homeLatest; onToggled: (v) => { screen.homeLatest = v; screen.setPref("home/latest", v) } }
+                ToggleRow { label: qsTr("Continue Watching"); on: screen.homeContinue; onSwitched: (v) => { screen.homeContinue = v; screen.setPref("home/continueWatching", v) } }
+                ToggleRow { label: qsTr("Next Up"); on: screen.homeNextUp; onSwitched: (v) => { screen.homeNextUp = v; screen.setPref("home/nextUp", v) } }
+                ToggleRow { label: qsTr("Latest media"); on: screen.homeLatest; onSwitched: (v) => { screen.homeLatest = v; screen.setPref("home/latest", v) } }
             }
 
             // 3 — Playback
@@ -235,7 +300,7 @@ Item {
                     }
                 }
                 Item { Layout.preferredHeight: Theme.spacing }
-                ToggleRow { label: qsTr("Play next episode automatically"); on: screen.autoPlayNext; onToggled: (v) => { screen.autoPlayNext = v; screen.setPref("playback/autoPlayNext", v) } }
+                ToggleRow { label: qsTr("Play next episode automatically"); on: screen.autoPlayNext; onSwitched: (v) => { screen.autoPlayNext = v; screen.setPref("playback/autoPlayNext", v) } }
                 StepperRow { label: qsTr("Skip back interval"); value: screen.skipBack; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipBack = v; screen.setPref("playback/skipBack", v) } }
                 StepperRow { label: qsTr("Skip forward interval"); value: screen.skipForward; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipForward = v; screen.setPref("playback/skipForward", v) } }
                 Item { Layout.preferredHeight: Theme.spacing }
@@ -246,9 +311,35 @@ Item {
             // 4 — Subtitles
             Panel {
                 SectionTitle { text: qsTr("Subtitles") }
-                Hint { text: qsTr("Defaults applied when a video starts; you can also adjust live from the player.") }
-                StepperRow { label: qsTr("Subtitle size"); value: Math.round(screen.subScale * 100); step: 10; minValue: 50; maxValue: 300; suffix: "%"; onChanged: (v) => { screen.subScale = v / 100; screen.setPref("subtitles/scale", screen.subScale) } }
-                StepperRow { label: qsTr("Subtitle position"); value: screen.subPos; step: 5; minValue: 0; maxValue: 150; suffix: ""; onChanged: (v) => { screen.subPos = v; screen.setPref("subtitles/pos", v) } }
+                Hint { text: qsTr("Defaults applied when a video starts; size & delay can also be tweaked live from the player.") }
+                ChoiceRow {
+                    label: qsTr("Styling")
+                    options: [{value: "native", text: qsTr("Native")}, {value: "auto", text: qsTr("Auto")}, {value: "custom", text: qsTr("Custom")}]
+                    value: screen.subStyle
+                    onPicked: (v) => { screen.subStyle = v; screen.setPref("subtitles/styleMode", v) }
+                }
+                Hint { text: qsTr("Native keeps each subtitle's own look · Auto keeps the look but lets you resize · Custom forces the appearance below (best for plain SRT; overrides styled ASS/SSA).") }
+                StepperRow { label: qsTr("Size"); value: Math.round(screen.subScale * 100); step: 10; minValue: 50; maxValue: 300; suffix: "%"; onChanged: (v) => { screen.subScale = v / 100; screen.setPref("subtitles/scale", screen.subScale) } }
+                StepperRow { label: qsTr("Vertical position"); value: screen.subPos; step: 5; minValue: 0; maxValue: 150; suffix: ""; onChanged: (v) => { screen.subPos = v; screen.setPref("subtitles/pos", v) } }
+                ToggleRow { label: qsTr("Bold"); on: screen.subBold; onSwitched: (v) => { screen.subBold = v; screen.setPref("subtitles/bold", v) } }
+                ChoiceRow {
+                    label: qsTr("Font")
+                    options: [{value: "", text: qsTr("Default")}, {value: "sans-serif", text: qsTr("Sans")}, {value: "serif", text: qsTr("Serif")}, {value: "monospace", text: qsTr("Mono")}]
+                    value: screen.subFont
+                    onPicked: (v) => { screen.subFont = v; screen.setPref("subtitles/font", v) }
+                }
+                SwatchRow {
+                    label: qsTr("Text color")
+                    options: [{value: "#FFFFFF", color: "#FFFFFF"}, {value: "#FFFF00", color: "#FFFF00"}, {value: "#D3D3D3", color: "#D3D3D3"}, {value: "#00FFFF", color: "#00FFFF"}, {value: "#00FF00", color: "#00FF00"}, {value: "#FF0000", color: "#FF0000"}, {value: "#000000", color: "#000000"}]
+                    value: screen.subColor
+                    onPicked: (v) => { screen.subColor = v; screen.setPref("subtitles/color", v) }
+                }
+                ChoiceRow {
+                    label: qsTr("Edge")
+                    options: [{value: "none", text: qsTr("None")}, {value: "outline", text: qsTr("Outline")}, {value: "shadow", text: qsTr("Shadow")}, {value: "both", text: qsTr("Both")}]
+                    value: screen.subEdge
+                    onPicked: (v) => { screen.subEdge = v; screen.setPref("subtitles/edge", v) }
+                }
                 Item { Layout.preferredHeight: Theme.spacing }
                 OptionRow { text: qsTr("Subtitle mode"); stub: true }
                 OptionRow { text: qsTr("Preferred subtitle language"); stub: true }
