@@ -263,7 +263,7 @@ USER-VERIFY OWED (agent can't click/toggle): toggle each display/* pref + confir
 - ✅ `42be069` Last scalar field `DelimiterWhitelist` (music).
 Shape verified live by read-only GET; no save fired. **Note:** `CustomTagDelimiters` ours comma-splits, web char-splits (`.split('')`) — minor pre-existing fidelity gap on a niche music field.
 
-**Phase U — Users admin** (add-user, Access/Parental/Password tabs, full policy field set).
+**Phase U — Users admin — ✅ DONE (2026-06-16)** — `1720fca` Profile tab (name + ~15 missing policy fields, two-endpoint save), `f92aacc` Access tab (library/channel/device allow-lists) + Parental tab (rating/block-unrated/tags/schedules) + Password (set/clear) + add-user. New client `createUser`/`setUserPassword`; reusable PolicyNumber/PolicySelect/AccessCheckList/TagEditor. Verified live; admin-gated sections (schedules, device access) correctly hidden.
 
 **Phase A — remaining admin actions** — Devices, API Keys, Logs viewer, Scheduled-task triggers,
 Admin Display page, per-library Scan, Dashboard cards; then Plugins catalog/install + Backups.
