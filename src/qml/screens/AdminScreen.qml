@@ -15,11 +15,15 @@ Item {
 
     property int sel: 0
     property var panelData: null
+    property var dashInfo: null
+    property var dashCounts: null
+    property var dashSessions: []
+    property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
     // group | label | kind (info/list/stub) | endpoint | primary/secondary field
     readonly property var navModel: [
-        { group: qsTr("Server"),   label: qsTr("Dashboard"),     kind: "info", ep: "/System/Info" },
+        { group: qsTr("Server"),   label: qsTr("Dashboard"),     kind: "dashboard" },
         { group: qsTr("Server"),   label: qsTr("General"),       kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "list", ep: "/Users", primary: "Name", secondary: "Id" },
@@ -43,9 +47,17 @@ Item {
     Component.onCompleted: loadSel()
     function loadSel() {
         panelData = null
-        if (client && selEntry.kind !== "stub")
+        if (!client) return
+        if (selEntry.kind === "dashboard") {
+            client.getJson("/System/Info", "admin:dash:info")
+            client.getJson("/Items/Counts", "admin:dash:counts")
+            client.getJson("/Sessions", "admin:dash:sessions")
+        } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
+        }
     }
+    // confirm a destructive action before running it (server actions)
+    function confirm(msg, action) { confirmPopup.message = msg; pendingAction = action; confirmPopup.open() }
     function infoRows(d) {
         if (!d || typeof d !== "object") return []
         return Object.keys(d).map(function (k) {
@@ -60,7 +72,43 @@ Item {
 
     Connections {
         target: screen.client
-        function onJsonReady(tag, data) { if (tag === "admin:panel") screen.panelData = data }
+        function onJsonReady(tag, data) {
+            if (tag === "admin:panel") screen.panelData = data
+            else if (tag === "admin:dash:info") screen.dashInfo = data
+            else if (tag === "admin:dash:counts") screen.dashCounts = data
+            else if (tag === "admin:dash:sessions") screen.dashSessions = Array.isArray(data) ? data : []
+        }
+    }
+
+    component DashButton: Rectangle {
+        id: db
+        property string text: ""
+        property bool danger: false
+        signal clicked()
+        implicitHeight: 34; implicitWidth: lbl.implicitWidth + 28; radius: Theme.radius
+        color: ma.containsMouse ? Theme.surfaceHover : Theme.surface
+        border.color: danger ? Theme.error : Theme.divider; border.width: 1
+        Text { id: lbl; anchors.centerIn: parent; text: db.text; color: db.danger ? Theme.error : Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+        MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: db.clicked() }
+    }
+
+    Popup {
+        id: confirmPopup
+        property string message: ""
+        x: (screen.width - width) / 2
+        y: (screen.height - height) / 2
+        modal: true; dim: true
+        width: 380; padding: Theme.spacing
+        background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        contentItem: ColumnLayout {
+            spacing: Theme.spacing
+            Text { text: confirmPopup.message; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.preferredWidth: 340 }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight; spacing: Theme.spacingSmall
+                DashButton { text: qsTr("Cancel"); onClicked: confirmPopup.close() }
+                DashButton { text: qsTr("Confirm"); danger: true; onClicked: { confirmPopup.close(); if (screen.pendingAction) screen.pendingAction() } }
+            }
+        }
     }
 
     RowLayout {
@@ -146,6 +194,59 @@ Item {
                     Layout.bottomMargin: Theme.spacingSmall
                 }
 
+                // dashboard — formatted server card + library counts + sessions + actions
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "dashboard"
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Rectangle {
+                        Layout.fillWidth: true; radius: Theme.radius; color: Theme.surface
+                        implicitHeight: srv.implicitHeight + Theme.spacing * 2
+                        ColumnLayout {
+                            id: srv
+                            x: Theme.spacing; y: Theme.spacing; width: parent.width - Theme.spacing * 2
+                            spacing: 4
+                            Text { text: (screen.dashInfo ? screen.dashInfo.ServerName : qsTr("Server")) + "  ·  Jellyfin " + (screen.dashInfo ? screen.dashInfo.Version : "—"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true }
+                            Text { text: screen.dashInfo ? (screen.dashInfo.OperatingSystemDisplayName + " · " + screen.dashInfo.SystemArchitecture) : ""; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                            RowLayout {
+                                Layout.topMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                                DashButton { text: qsTr("Scan all libraries"); onClicked: screen.confirm(qsTr("Start a scan of all libraries now?"), function() { screen.client.scanAllLibraries() }) }
+                                DashButton { text: qsTr("Restart"); danger: true; onClicked: screen.confirm(qsTr("Restart the Jellyfin server now?"), function() { screen.client.restartServer() }) }
+                                DashButton { text: qsTr("Shut down"); danger: true; onClicked: screen.confirm(qsTr("Shut down the Jellyfin server now?"), function() { screen.client.shutdownServer() }) }
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        Repeater {
+                            model: [{k: "MovieCount", t: qsTr("Movies")}, {k: "SeriesCount", t: qsTr("Series")}, {k: "EpisodeCount", t: qsTr("Episodes")}, {k: "BoxSetCount", t: qsTr("Collections")}]
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 64; radius: Theme.radius; color: Theme.surface
+                                ColumnLayout {
+                                    anchors.centerIn: parent; spacing: 0
+                                    Text { text: screen.dashCounts ? ("" + (screen.dashCounts[modelData.k] || 0)) : "—"; color: Theme.accent; font.pixelSize: Theme.fontLarge; font.bold: true; Layout.alignment: Qt.AlignHCenter }
+                                    Text { text: modelData.t; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.alignment: Qt.AlignHCenter }
+                                }
+                            }
+                        }
+                    }
+                    Text { text: qsTr("Active devices (%1)").arg(screen.dashSessions.length); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                    Repeater {
+                        model: screen.dashSessions
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; implicitHeight: 44; radius: Theme.radius; color: Theme.surface
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                Text { text: ("" + (modelData.UserName || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 140; elide: Text.ElideRight }
+                                Text { text: ((modelData.Client || "") + " · " + (modelData.DeviceName || "")); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Text { text: (modelData.NowPlayingItem ? ("▶ " + modelData.NowPlayingItem.Name) : ""); color: Theme.accent; font.pixelSize: Theme.fontSmall; elide: Text.ElideRight; Layout.maximumWidth: 260 }
+                            }
+                        }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -156,7 +257,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }

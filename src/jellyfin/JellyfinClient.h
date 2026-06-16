@@ -115,6 +115,13 @@ public:
     // Quick Connect: authorize a code shown on another device (this user must be signed in).
     Q_INVOKABLE void authorizeQuickConnect(const QString &code);
 
+    // Server actions (admin) — destructive; the UI confirms before calling these.
+    Q_INVOKABLE void scanAllLibraries();
+    Q_INVOKABLE void restartServer();
+    Q_INVOKABLE void shutdownServer();
+    Q_INVOKABLE void runScheduledTask(const QString &taskId);
+    Q_INVOKABLE void stopScheduledTask(const QString &taskId);
+
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));

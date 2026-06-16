@@ -166,6 +166,14 @@ void JellyfinClient::fetchUserConfig()
         }
         const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        // Refresh admin status from the live policy — the value persisted at login
+        // can be stale (e.g. permissions changed server-side since) or absent.
+        const bool admin = user.value(QStringLiteral("Policy")).toObject()
+                               .value(QStringLiteral("IsAdministrator")).toBool();
+        if (admin != m_isAdmin) {
+            m_isAdmin = admin;
+            Q_EMIT authenticatedChanged(); // isAdmin is exposed via this NOTIFY
+        }
         Q_EMIT userConfigChanged();
     });
 }
@@ -201,6 +209,17 @@ void JellyfinClient::authorizeQuickConnect(const QString &code)
     });
 }
 
+// --- admin server actions (fire-and-forget; the UI confirms first) ----------
+static void fireAndForget(QNetworkReply *r)
+{
+    QObject::connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
+}
+void JellyfinClient::scanAllLibraries() { fireAndForget(post(QStringLiteral("/Library/Refresh"), QByteArray())); }
+void JellyfinClient::restartServer()    { fireAndForget(post(QStringLiteral("/System/Restart"), QByteArray())); }
+void JellyfinClient::shutdownServer()   { fireAndForget(post(QStringLiteral("/System/Shutdown"), QByteArray())); }
+void JellyfinClient::runScheduledTask(const QString &taskId)  { fireAndForget(post(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId), QByteArray())); }
+void JellyfinClient::stopScheduledTask(const QString &taskId) { fireAndForget(del(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId))); }
+
 void JellyfinClient::saveSession() const
 {
     QSettings s;
@@ -234,6 +253,7 @@ bool JellyfinClient::restoreSession()
     m_isAdmin = isAdmin;
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
+    fetchUserConfig(); // refresh isAdmin + user config (the saved isAdmin can be stale/absent)
     return true;
 }
 
