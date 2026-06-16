@@ -18,6 +18,7 @@ Item {
     property var dashInfo: null
     property var dashCounts: null
     property var dashSessions: []
+    property var tasksData: []
     property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
@@ -40,7 +41,7 @@ Item {
         { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", primary: "AppName", secondary: "DateCreated" },
         { group: qsTr("Advanced"), label: qsTr("Backups"),       kind: "stub" },
         { group: qsTr("Advanced"), label: qsTr("Logs"),          kind: "list", ep: "/System/Logs", primary: "Name", secondary: "Size" },
-        { group: qsTr("Advanced"), label: qsTr("Scheduled Tasks"), kind: "list", ep: "/ScheduledTasks", primary: "Name", secondary: "State" }
+        { group: qsTr("Advanced"), label: qsTr("Scheduled Tasks"), kind: "tasks" }
     ]
 
     onSelChanged: loadSel()
@@ -52,6 +53,9 @@ Item {
             client.getJson("/System/Info", "admin:dash:info")
             client.getJson("/Items/Counts", "admin:dash:counts")
             client.getJson("/Sessions", "admin:dash:sessions")
+        } else if (selEntry.kind === "tasks") {
+            tasksData = []
+            client.getJson("/ScheduledTasks", "admin:tasks")
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
         }
@@ -65,10 +69,15 @@ Item {
             return { k: k, v: (v !== null && typeof v === "object") ? JSON.stringify(v) : ("" + v) }
         })
     }
-    function listRows(d) {
+    // getJson hands back a QVariantList, which QML does NOT see as a native JS
+    // Array (Array.isArray is false) — detect list-like by .length, and unwrap
+    // the paged { Items: [...] } shape some endpoints use.
+    function asArray(d) {
         if (!d) return []
-        return Array.isArray(d) ? d : (d.Items || [])
+        if (d.length !== undefined) return d
+        return d.Items || []
     }
+    function listRows(d) { return asArray(d) }
 
     Connections {
         target: screen.client
@@ -76,7 +85,8 @@ Item {
             if (tag === "admin:panel") screen.panelData = data
             else if (tag === "admin:dash:info") screen.dashInfo = data
             else if (tag === "admin:dash:counts") screen.dashCounts = data
-            else if (tag === "admin:dash:sessions") screen.dashSessions = Array.isArray(data) ? data : []
+            else if (tag === "admin:dash:sessions") screen.dashSessions = screen.asArray(data)
+            else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
         }
     }
 
@@ -247,6 +257,38 @@ Item {
                     }
                 }
 
+                // scheduled tasks — grouped list with Run / Stop
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "tasks"
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    Repeater {
+                        model: screen.tasksData
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: Theme.surface
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 2
+                                    Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text {
+                                        text: {
+                                            var s = ("" + (modelData.Category || ""))
+                                            if (modelData.State === "Running") s += "  ·  " + qsTr("Running %1%").arg(Math.round(modelData.CurrentProgressPercentage || 0))
+                                            else if (modelData.LastExecutionResult && modelData.LastExecutionResult.Status) s += "  ·  " + qsTr("Last: %1").arg(modelData.LastExecutionResult.Status)
+                                            return s
+                                        }
+                                        color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; elide: Text.ElideRight; Layout.fillWidth: true
+                                    }
+                                }
+                                DashButton { visible: modelData.State !== "Running"; text: qsTr("Run"); onClicked: screen.confirm(qsTr("Run “%1” now?").arg(modelData.Name), function() { screen.client.runScheduledTask(modelData.Id) }) }
+                                DashButton { visible: modelData.State === "Running"; text: qsTr("Stop"); danger: true; onClicked: screen.client.stopScheduledTask(modelData.Id) }
+                            }
+                        }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -257,7 +299,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }

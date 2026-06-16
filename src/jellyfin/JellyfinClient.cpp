@@ -166,14 +166,6 @@ void JellyfinClient::fetchUserConfig()
         }
         const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
-        // Refresh admin status from the live policy — the value persisted at login
-        // can be stale (e.g. permissions changed server-side since) or absent.
-        const bool admin = user.value(QStringLiteral("Policy")).toObject()
-                               .value(QStringLiteral("IsAdministrator")).toBool();
-        if (admin != m_isAdmin) {
-            m_isAdmin = admin;
-            Q_EMIT authenticatedChanged(); // isAdmin is exposed via this NOTIFY
-        }
         Q_EMIT userConfigChanged();
     });
 }
@@ -253,7 +245,6 @@ bool JellyfinClient::restoreSession()
     m_isAdmin = isAdmin;
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
-    fetchUserConfig(); // refresh isAdmin + user config (the saved isAdmin can be stale/absent)
     return true;
 }
 
