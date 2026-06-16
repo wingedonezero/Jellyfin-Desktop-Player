@@ -35,6 +35,9 @@ Item {
     property string newLibType: "movies"
     property string newLibPath: ""
     property string renameValue: ""
+    property var availOpts: null   // GET /Libraries/AvailableOptions (JSON-roundtripped to plain JS)
+    property var subLangAll: []    // [{lang(3-letter), name}] from /Localization/Cultures
+    property var provState: ({})   // provider-table working state (see rebuildProv)
     readonly property var contentTypes: [{value: "movies", text: qsTr("Movies")}, {value: "tvshows", text: qsTr("Shows")}, {value: "music", text: qsTr("Music")}, {value: "homevideos", text: qsTr("Home Videos & Photos")}, {value: "musicvideos", text: qsTr("Music Videos")}, {value: "books", text: qsTr("Books")}, {value: "boxsets", text: qsTr("Collections")}, {value: "mixed", text: qsTr("Mixed Content")}]
     readonly property var selEntry: navModel[sel] || ({})
 
@@ -177,8 +180,9 @@ Item {
     // Per-library LibraryOptions (edited against a deep copy of the selected
     // library's options; Save → updateLibraryOptions). Mirrors web's
     // libraryoptionseditor: each field's `types` gates it to applicable content
-    // types (so e.g. Collections/boxsets shows only the basic settings). The
-    // per-type fetcher-order tables are out of scope. Reuses cultures/countries.
+    // types. These are the SCALAR options; the provider tables (savers /
+    // downloaders / image fetchers / …) are built separately from
+    // GET /Libraries/AvailableOptions (see rebuildProv). Reuses cultures/countries.
     readonly property var libraryOptionsFields: [
         {group: qsTr("Library"), label: qsTr("Enable the library"), key: "Enabled", type: "toggle", help: qsTr("Disabling the library will hide it from all user views.")},
         {label: qsTr("Download metadata and images from the internet"), key: "EnableInternetProviders", type: "toggle"},
@@ -290,7 +294,13 @@ Item {
     function openDirPicker(key) { _dirPickMode = "config"; _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
     function pickNewLibFolder() { _dirPickMode = "newlib"; dirPicker.openAt("") }
     function pickAddPathFolder() { _dirPickMode = "addpath"; dirPicker.openAt("") }
-    function selectLib(lib) { selectedLib = lib; renameValue = ("" + (lib.Name || "")); editConfig = lib.LibraryOptions ? JSON.parse(JSON.stringify(lib.LibraryOptions)) : ({}) }
+    function selectLib(lib) {
+        selectedLib = lib; renameValue = ("" + (lib.Name || ""))
+        editConfig = lib.LibraryOptions ? JSON.parse(JSON.stringify(lib.LibraryOptions)) : ({})
+        availOpts = null; provState = ({})
+        // fetch the provider catalogue for this content type (mixed = empty type)
+        client.getJson("/Libraries/AvailableOptions?libraryContentType=" + (lib.CollectionType || "") + "&isNewLibrary=false", "admin:availopts")
+    }
     function reloadLibs() { if (client) client.getJson("/Library/VirtualFolders", "admin:libs") }
     function relTime(iso) {
         if (!iso) return ""
@@ -358,13 +368,27 @@ Item {
                     for (var li = 0; li < ll.length; li++) if (ll[li].ItemId === screen.selectedLib.ItemId) { screen.selectedLib = ll[li]; break }
                 }
             }
+            else if (tag === "admin:availopts") {
+                screen.availOpts = data ? JSON.parse(JSON.stringify(data)) : null
+                screen.rebuildProv()
+            }
             else if (tag.indexOf("admin:opt:") === 0) {
                 var key = tag.substring(10)
                 var src = screen.asArray(data)
                 var opts = []
                 if (key === "users") { opts.push({value: "", text: qsTr("None")}); for (var i = 0; i < src.length; i++) opts.push({value: src[i].Id, text: src[i].Name}) }
                 else if (key === "uiCultures") { for (var j = 0; j < src.length; j++) opts.push({value: src[j].Value || "", text: src[j].Name}) }
-                else if (key === "cultures") { opts.push({value: "", text: qsTr("Any language")}); for (var m = 0; m < src.length; m++) opts.push({value: src[m].TwoLetterISOLanguageName || "", text: src[m].DisplayName || src[m].Name}) }
+                else if (key === "cultures") {
+                    opts.push({value: "", text: qsTr("Any language")})
+                    var langs = []
+                    for (var m = 0; m < src.length; m++) {
+                        opts.push({value: src[m].TwoLetterISOLanguageName || "", text: src[m].DisplayName || src[m].Name})
+                        var three = src[m].ThreeLetterISOLanguageName
+                        if (three) langs.push({lang: ("" + three).toLowerCase(), name: src[m].DisplayName || src[m].Name})
+                    }
+                    screen.subLangAll = langs
+                    screen.rebuildProv() // subtitle-language checklist needs the 3-letter codes
+                }
                 else if (key === "countries") { opts.push({value: "", text: qsTr("Any country")}); for (var n = 0; n < src.length; n++) opts.push({value: src[n].TwoLetterISORegionName || "", text: src[n].DisplayName || src[n].Name}) }
                 var dd = Object.assign({}, screen.dynOptions); dd[key] = opts; screen.dynOptions = dd
             }
@@ -376,6 +400,107 @@ Item {
         editPolicy = (u && u.Policy) ? JSON.parse(JSON.stringify(u.Policy)) : ({})
     }
     function setFlag(key, val) { var p = Object.assign({}, editPolicy); p[key] = val; editPolicy = p }
+
+    // ---- LibraryOptions provider tables — mirrors components/libraryoptionseditor ----
+    function typePlural(t) {
+        var m = { Movie: qsTr("Movies"), Series: qsTr("Shows"), Season: qsTr("Seasons"), Episode: qsTr("Episodes"),
+                  MusicAlbum: qsTr("Albums"), MusicArtist: qsTr("Artists"), Audio: qsTr("Songs"), MusicVideo: qsTr("Music Videos"),
+                  BoxSet: qsTr("Collections"), Book: qsTr("Books"), AudioBook: qsTr("Audiobooks"), Photo: qsTr("Photos"), Trailer: qsTr("Trailers") }
+        return m[t] || t
+    }
+    // sort plugins by their position in the configured order (web's getOrderedPlugins)
+    function orderedPlugins(plugins, order) {
+        var arr = (plugins || []).slice()
+        var ord = order || []
+        arr.sort(function (a, b) { return ord.indexOf(a.Name) - ord.indexOf(b.Name) })
+        return arr
+    }
+    // (re)build the provider working state from availOpts + the saved LibraryOptions
+    function rebuildProv() {
+        var a = availOpts
+        if (!a) { provState = ({}); return }
+        var saved = editConfig || ({})
+        function typeOpt(t) { var to = saved.TypeOptions || []; for (var i = 0; i < to.length; i++) if (to[i].Type === t) return to[i]; return ({}) }
+        // checked = in the saved list, else the plugin's DefaultEnabled (web's fallback)
+        function mapChecked(plugins, order, savedList) {
+            return orderedPlugins(plugins, order).map(function (p) {
+                return { name: p.Name, checked: savedList ? (savedList.indexOf(p.Name) >= 0) : !!p.DefaultEnabled }
+            })
+        }
+        // inverse: checked = NOT in the disabled list, else DefaultEnabled
+        function mapDisabled(plugins, order, disabledList) {
+            return orderedPlugins(plugins, order).map(function (p) {
+                return { name: p.Name, checked: disabledList ? (disabledList.indexOf(p.Name) < 0) : !!p.DefaultEnabled }
+            })
+        }
+        var s = ({})
+        s.metadataSavers = (a.MetadataSavers || []).map(function (p) {
+            return { name: p.Name, checked: saved.MetadataSavers ? (saved.MetadataSavers.indexOf(p.Name) >= 0) : !!p.DefaultEnabled }
+        })
+        var rdrs = orderedPlugins(a.MetadataReaders, saved.LocalMetadataReaderOrder) // order-only; web shows only when >= 2
+        s.metadataReaders = (rdrs.length >= 2) ? rdrs.map(function (p) { return p.Name }) : []
+        var hasSub = (a.SubtitleFetchers || []).length > 0
+        s.subtitleLanguages = hasSub ? subLangAll.map(function (c) {
+            return { lang: c.lang, name: c.name, checked: saved.SubtitleDownloadLanguages ? (saved.SubtitleDownloadLanguages.indexOf(c.lang) >= 0) : false }
+        }) : []
+        s.subtitleFetchers = mapDisabled(a.SubtitleFetchers, saved.SubtitleFetcherOrder, saved.DisabledSubtitleFetchers)
+        s.lyricFetchers = mapDisabled(a.LyricFetchers, saved.LyricFetcherOrder, saved.DisabledLyricFetchers)
+        s.mediaSegmentProviders = mapDisabled(a.MediaSegmentProviders, saved.MediaSegmentProviderOrder, saved.DisabledMediaSegmentProviders)
+        s.metadataFetchers = []; s.imageFetchers = []; s.similarItemProviders = []
+        var to = a.TypeOptions || []
+        for (var i = 0; i < to.length; i++) {
+            var t = to[i]; var lt = typeOpt(t.Type); var pl = typePlural(t.Type)
+            var mf = mapChecked(t.MetadataFetchers, lt.MetadataFetcherOrder, lt.MetadataFetchers)
+            if (mf.length) s.metadataFetchers.push({ type: t.Type, plural: pl, plugins: mf })
+            var imf = mapChecked(t.ImageFetchers, lt.ImageFetcherOrder, lt.ImageFetchers)
+            if (imf.length) s.imageFetchers.push({ type: t.Type, plural: pl, plugins: imf, supportedImageTypes: t.SupportedImageTypes || [] })
+            var sip = mapChecked(t.SimilarItemProviders, lt.SimilarItemProviderOrder, lt.SimilarItemProviders)
+            if (sip.length) s.similarItemProviders.push({ type: t.Type, plural: pl, plugins: sip })
+        }
+        provState = s
+    }
+    function provClone() { return provState ? JSON.parse(JSON.stringify(provState)) : ({}) }
+    function provToggle(table, typeIdx, i) {
+        var s = provClone(); var arr = (typeIdx < 0) ? s[table] : (s[table] && s[table][typeIdx] ? s[table][typeIdx].plugins : null)
+        if (!arr || !arr[i]) return; arr[i].checked = !arr[i].checked; provState = s
+    }
+    function provMove(table, typeIdx, i, dir) {
+        var s = provClone(); var arr = (typeIdx < 0) ? s[table] : (s[table] && s[table][typeIdx] ? s[table][typeIdx].plugins : null)
+        var j = i + dir; if (!arr || j < 0 || j >= arr.length) return
+        var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp; provState = s
+    }
+    function provMoveReader(i, dir) {
+        var s = provClone(); var arr = s.metadataReaders || []
+        var j = i + dir; if (j < 0 || j >= arr.length) return
+        var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp; provState = s
+    }
+    function provToggleLang(i) {
+        var s = provClone(); var arr = s.subtitleLanguages || []
+        if (!arr[i]) return; arr[i].checked = !arr[i].checked; provState = s
+    }
+    // serialize the provider tables back into a LibraryOptions object (web's getLibraryOptions)
+    function serializeProviders(opts) {
+        var s = provState || ({})
+        function checkedNames(arr) { return (arr || []).filter(function (p) { return p.checked }).map(function (p) { return p.name }) }
+        function uncheckedNames(arr) { return (arr || []).filter(function (p) { return !p.checked }).map(function (p) { return p.name }) }
+        function allNames(arr) { return (arr || []).map(function (p) { return p.name }) }
+        opts.MetadataSavers = checkedNames(s.metadataSavers)
+        if (s.metadataReaders && s.metadataReaders.length) opts.LocalMetadataReaderOrder = s.metadataReaders.slice()
+        if (s.subtitleLanguages && s.subtitleLanguages.length)
+            opts.SubtitleDownloadLanguages = s.subtitleLanguages.filter(function (l) { return l.checked }).map(function (l) { return l.lang })
+        if (s.subtitleFetchers && s.subtitleFetchers.length) { opts.DisabledSubtitleFetchers = uncheckedNames(s.subtitleFetchers); opts.SubtitleFetcherOrder = allNames(s.subtitleFetchers) }
+        if (s.lyricFetchers && s.lyricFetchers.length) { opts.DisabledLyricFetchers = uncheckedNames(s.lyricFetchers); opts.LyricFetcherOrder = allNames(s.lyricFetchers) }
+        if (s.mediaSegmentProviders && s.mediaSegmentProviders.length) { opts.DisabledMediaSegmentProviders = uncheckedNames(s.mediaSegmentProviders); opts.MediaSegmentProviderOrder = allNames(s.mediaSegmentProviders) }
+        if (!opts.TypeOptions) opts.TypeOptions = []
+        function getTO(t) { for (var i = 0; i < opts.TypeOptions.length; i++) if (opts.TypeOptions[i].Type === t) return opts.TypeOptions[i]; var n = { Type: t }; opts.TypeOptions.push(n); return n }
+        var mf = s.metadataFetchers || []
+        for (var x = 0; x < mf.length; x++) { var a = getTO(mf[x].type); a.MetadataFetchers = checkedNames(mf[x].plugins); a.MetadataFetcherOrder = allNames(mf[x].plugins) }
+        var imf = s.imageFetchers || []
+        for (var y = 0; y < imf.length; y++) { var b = getTO(imf[y].type); b.ImageFetchers = checkedNames(imf[y].plugins); b.ImageFetcherOrder = allNames(imf[y].plugins) }
+        var sip = s.similarItemProviders || []
+        for (var z = 0; z < sip.length; z++) { var c = getTO(sip[z].type); c.SimilarItemProviders = checkedNames(sip[z].plugins); c.SimilarItemProviderOrder = allNames(sip[z].plugins) }
+        return opts
+    }
 
     component PolicyToggle: RowLayout {
         id: pt
@@ -594,6 +719,51 @@ Item {
                     Layout.bottomMargin: Theme.spacingSmall
                 }
             }
+        }
+    }
+
+    // A provider "table": header + helper text + rows of [checkbox] name [▲ ▼].
+    // rows = [{name, checked}] for checkbox tables, or [name,…] for order-only.
+    component PluginTable: ColumnLayout {
+        id: ptbl
+        property string title: ""
+        property string help: ""
+        property var rows: []
+        property bool showCheck: true   // false = order-only list (e.g. metadata readers)
+        property bool showOrder: true   // false = checkbox-only (savers, languages)
+        signal toggled(int index)
+        signal movedUp(int index)
+        signal movedDown(int index)
+        visible: rows && rows.length > 0
+        Layout.fillWidth: true
+        spacing: 2
+        Text { text: ptbl.title; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+        Repeater {
+            model: ptbl.rows
+            Rectangle {
+                required property var modelData
+                required property int index
+                Layout.fillWidth: true; implicitHeight: 38; radius: Theme.radius; color: Theme.surface
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: Theme.spacingSmall; anchors.rightMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                    Rectangle {
+                        visible: ptbl.showCheck
+                        width: 22; height: 22; radius: 4
+                        color: (modelData.checked === true) ? Theme.accent : Theme.elevated
+                        border.color: Theme.divider; border.width: 1
+                        Text { anchors.centerIn: parent; text: (modelData.checked === true) ? "✓" : ""; color: Theme.accentText; font.pixelSize: Theme.fontSmall; font.bold: true }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: ptbl.toggled(index) }
+                    }
+                    Text { text: ptbl.showCheck ? ("" + modelData.name) : ("" + modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideRight; leftPadding: 2; verticalAlignment: Text.AlignVCenter }
+                    DashButton { visible: ptbl.showOrder && index > 0; text: "▲"; onClicked: ptbl.movedUp(index) }
+                    DashButton { visible: ptbl.showOrder && index < ptbl.rows.length - 1; text: "▼"; onClicked: ptbl.movedDown(index) }
+                }
+            }
+        }
+        Text {
+            visible: !!ptbl.help; text: ptbl.help
+            color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; wrapMode: Text.Wrap
+            Layout.fillWidth: true; Layout.maximumWidth: 760; Layout.leftMargin: 4; Layout.bottomMargin: Theme.spacingSmall
         }
     }
 
@@ -1001,9 +1171,97 @@ Item {
 
                         Text { text: qsTr("Library options"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingLarge }
                         ConfigFieldList { fields: screen.libraryOptionsFields }
+
+                        // --- provider tables (from GET /Libraries/AvailableOptions) ---
+                        Text {
+                            visible: !!screen.availOpts
+                            text: qsTr("Metadata & image providers"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingLarge
+                        }
+                        PluginTable {
+                            title: qsTr("Metadata savers"); showOrder: false
+                            help: qsTr("Pick the file formats to use when saving your metadata.")
+                            rows: screen.provState.metadataSavers || []
+                            onToggled: (i) => screen.provToggle("metadataSavers", -1, i)
+                        }
+                        PluginTable {
+                            title: qsTr("Metadata readers"); showCheck: false
+                            help: qsTr("Rank your preferred local metadata sources in order of priority. The first file found will be read.")
+                            rows: screen.provState.metadataReaders || []
+                            onMovedUp: (i) => screen.provMoveReader(i, -1)
+                            onMovedDown: (i) => screen.provMoveReader(i, 1)
+                        }
+                        Repeater {
+                            model: screen.provState.metadataFetchers || []
+                            PluginTable {
+                                required property var modelData
+                                required property int index
+                                title: qsTr("Metadata downloaders (%1)").arg(modelData.plural)
+                                help: qsTr("Enable and rank your preferred metadata downloaders in order of priority. Lower priority downloaders will only be used to fill in missing information.")
+                                rows: modelData.plugins
+                                onToggled: (i) => screen.provToggle("metadataFetchers", index, i)
+                                onMovedUp: (i) => screen.provMove("metadataFetchers", index, i, -1)
+                                onMovedDown: (i) => screen.provMove("metadataFetchers", index, i, 1)
+                            }
+                        }
+                        Repeater {
+                            model: screen.provState.imageFetchers || []
+                            PluginTable {
+                                required property var modelData
+                                required property int index
+                                title: qsTr("Image fetchers (%1)").arg(modelData.plural)
+                                help: qsTr("Enable and rank your preferred image fetchers in order of priority.")
+                                rows: modelData.plugins
+                                onToggled: (i) => screen.provToggle("imageFetchers", index, i)
+                                onMovedUp: (i) => screen.provMove("imageFetchers", index, i, -1)
+                                onMovedDown: (i) => screen.provMove("imageFetchers", index, i, 1)
+                            }
+                        }
+                        PluginTable {
+                            title: qsTr("Subtitle download languages"); showOrder: false
+                            rows: screen.provState.subtitleLanguages || []
+                            onToggled: (i) => screen.provToggleLang(i)
+                        }
+                        PluginTable {
+                            title: qsTr("Subtitle downloaders")
+                            help: qsTr("Enable and rank your preferred subtitle downloaders in order of priority.")
+                            rows: screen.provState.subtitleFetchers || []
+                            onToggled: (i) => screen.provToggle("subtitleFetchers", -1, i)
+                            onMovedUp: (i) => screen.provMove("subtitleFetchers", -1, i, -1)
+                            onMovedDown: (i) => screen.provMove("subtitleFetchers", -1, i, 1)
+                        }
+                        PluginTable {
+                            title: qsTr("Lyric downloaders")
+                            help: qsTr("Enable and rank your preferred lyric downloaders in order of priority.")
+                            rows: screen.provState.lyricFetchers || []
+                            onToggled: (i) => screen.provToggle("lyricFetchers", -1, i)
+                            onMovedUp: (i) => screen.provMove("lyricFetchers", -1, i, -1)
+                            onMovedDown: (i) => screen.provMove("lyricFetchers", -1, i, 1)
+                        }
+                        PluginTable {
+                            title: qsTr("Media segment providers")
+                            help: qsTr("Enable and rank your preferred media segment providers in order of priority.")
+                            rows: screen.provState.mediaSegmentProviders || []
+                            onToggled: (i) => screen.provToggle("mediaSegmentProviders", -1, i)
+                            onMovedUp: (i) => screen.provMove("mediaSegmentProviders", -1, i, -1)
+                            onMovedDown: (i) => screen.provMove("mediaSegmentProviders", -1, i, 1)
+                        }
+                        Repeater {
+                            model: screen.provState.similarItemProviders || []
+                            PluginTable {
+                                required property var modelData
+                                required property int index
+                                title: qsTr("Similar item providers (%1)").arg(modelData.plural)
+                                help: qsTr("Enable and rank your preferred similar item providers in order of priority.")
+                                rows: modelData.plugins
+                                onToggled: (i) => screen.provToggle("similarItemProviders", index, i)
+                                onMovedUp: (i) => screen.provMove("similarItemProviders", index, i, -1)
+                                onMovedDown: (i) => screen.provMove("similarItemProviders", index, i, 1)
+                            }
+                        }
+
                         RowLayout {
                             Layout.topMargin: Theme.spacing
-                            DashButton { text: qsTr("Save library options"); onClicked: screen.confirm(qsTr("Save library options for “%1”?").arg(screen.selectedLib.Name), function () { screen.client.updateLibraryOptions(screen.selectedLib.ItemId, screen.editConfig) }) }
+                            DashButton { text: qsTr("Save library options"); onClicked: screen.confirm(qsTr("Save library options for “%1”?").arg(screen.selectedLib.Name), function () { var opts = JSON.parse(JSON.stringify(screen.editConfig)); screen.serializeProviders(opts); screen.client.updateLibraryOptions(screen.selectedLib.ItemId, opts) }) }
                         }
 
                         RowLayout {
