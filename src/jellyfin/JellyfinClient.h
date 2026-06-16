@@ -90,6 +90,8 @@ public:
                               int maxHeight = 0,
                               const QString &tag = QString()) const;
     Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
+    // One trickplay tile sheet (a grid of thumbnails) at the given resolution width.
+    Q_INVOKABLE QUrl trickplayUrl(const QString &itemId, int width, int index) const;
 
     // Resolve a playable URL via /Items/{id}/PlaybackInfo: direct-play when the
     // source fits (maxBitrate <= 0 = Auto), otherwise an HLS transcode URL.

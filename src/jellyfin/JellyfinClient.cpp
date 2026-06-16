@@ -729,6 +729,10 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
         m[QStringLiteral("mediaStreams")] = streams;
     }
 
+    // trickplay sheets (scrubber hover previews): { mediaSourceId: { width: info } }
+    if (o.contains(QStringLiteral("Trickplay")))
+        m[QStringLiteral("trickplay")] = o.value(QStringLiteral("Trickplay")).toObject().toVariantMap();
+
     // people (cast & crew) for detail pages
     QVariantList people;
     const QJsonArray peopleArr = o.value(QStringLiteral("People")).toArray();
@@ -781,6 +785,20 @@ QUrl JellyfinClient::streamUrl(const QString &itemId) const
     q.addQueryItem(QStringLiteral("mediaSourceId"), itemId);
     q.addQueryItem(QStringLiteral("deviceId"), m_deviceId);
     q.addQueryItem(QStringLiteral("api_key"), m_token);
+    url.setQuery(q);
+    return url;
+}
+
+QUrl JellyfinClient::trickplayUrl(const QString &itemId, int width, int index) const
+{
+    // A single trickplay sheet: /Videos/{id}/Trickplay/{width}/{index}.jpg.
+    // Direct play uses the item id as the media source id (matches the server's
+    // Trickplay map key). The OSD clips one thumbnail out of the tiled sheet.
+    QUrl url{m_serverUrl + QStringLiteral("/Videos/%1/Trickplay/%2/%3.jpg")
+                               .arg(itemId).arg(width).arg(index)};
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("ApiKey"), m_token);
+    q.addQueryItem(QStringLiteral("MediaSourceId"), itemId);
     url.setQuery(q);
     return url;
 }

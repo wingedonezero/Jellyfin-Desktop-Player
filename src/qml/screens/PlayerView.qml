@@ -13,6 +13,7 @@ Item {
     property alias playing: player.playing
     property bool osdVisible: true
     property var currentItem: ({})
+    property var playerItem: ({})  // full item (trickplay/chapters), fetched on play
     property bool favorite: false
 
     // play queue
@@ -69,12 +70,16 @@ Item {
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.currentId = item.id
         root.currentItem = item
+        root.playerItem = item   // queue item may lack trickplay; enriched by the fetch below
         root.favorite = (item.isFavorite === true)
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         showOsd()
         // resolve direct-play vs transcode first; onStreamReady actually loads it
         client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        // fetch the full item so the OSD has trickplay sheets (the resume/episode
+        // list items don't carry them); merged in onItemsReady below
+        client.fetchItem(item.id, "player:item")
         console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", root._resumeSeconds)
     }
 
@@ -100,6 +105,30 @@ Item {
             client.reportPlaybackStart(player.currentId)
             console.log("[jf] stream", info.isTranscode ? "transcode" : "direct")
         }
+        function onItemsReady(tag, items) {
+            if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)
+                root.playerItem = items[0]
+        }
+    }
+
+    // Pick the trickplay resolution the way jellyfin-web does: the highest width
+    // that is still <= 20% of the screen width. Returns the info object
+    // {Width,Height,TileWidth,TileHeight,Interval,...} or null when unavailable.
+    function selectTrickplay(it) {
+        if (!it || !it.trickplay) return null
+        var byMs = it.trickplay[it.id]
+        if (!byMs) { for (var k in it.trickplay) { byMs = it.trickplay[k]; break } }
+        if (!byMs) return null
+        var maxW = Screen.width * Screen.devicePixelRatio * 0.2
+        var best = null
+        for (var w in byMs) {
+            var info = byMs[w]
+            if (!best
+                    || (info.Width < best.Width && best.Width > maxW)
+                    || (info.Width > best.Width && info.Width <= maxW))
+                best = info
+        }
+        return best
     }
 
     function playNext() {
@@ -199,8 +228,10 @@ Item {
     }
 
     PlayerControls {
+        id: controls
         anchors.fill: parent
         player: player
+        client: root.client
         title: root.composeTitle(root.currentItem)
         favorite: root.favorite
         repeatMode: root.repeatMode
@@ -208,6 +239,8 @@ Item {
         skipBack: root.skipBack
         skipForward: root.skipForward
         showRemaining: root.showRemaining
+        trickInfo: root.selectTrickplay(root.playerItem)
+        trickItemId: root.playerItem.id || ""
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
@@ -234,7 +267,8 @@ Item {
     Timer {
         id: osdTimer
         interval: 3000
-        onTriggered: root.osdVisible = false
+        // keep the OSD up while the user is hovering the scrubber (trickplay preview)
+        onTriggered: controls.scrubberHovered ? osdTimer.restart() : (root.osdVisible = false)
     }
 
     // Report real playback position so continue-watching / resume work.

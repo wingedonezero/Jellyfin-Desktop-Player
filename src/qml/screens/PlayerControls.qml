@@ -12,6 +12,10 @@ import JellyfinDesktop
 Item {
     id: root
     required property var player
+    property var client: null            // for building trickplay tile URLs
+    property var trickInfo: null         // selected trickplay resolution info, or null
+    property string trickItemId: ""      // item id for the trickplay sheet URL
+    property alias scrubberHovered: scrubHover.hovered
     property string title: ""
     property bool favorite: false
     property int repeatMode: 0 // 0 none, 1 one, 2 all
@@ -245,6 +249,9 @@ Item {
                     from: 0
                     to: Math.max(1, root.player.duration)
                     property bool seeking: false
+
+                    // passive hover tracking for the trickplay/time preview bubble
+                    HoverHandler { id: scrubHover; enabled: root.player.duration > 0 }
 
                     background: Rectangle {
                         x: scrubber.leftPadding
@@ -576,6 +583,94 @@ Item {
                 }
 
                 IconButton { text: "⛶"; onClicked: root.toggleFullscreen() } // ⛶
+            }
+        }
+    }
+
+    // ---- trickplay / time hover bubble -----------------------------------
+    // Mirrors web's updateTrickplayBubbleHtml: clip one thumbnail out of the
+    // tiled sheet for the hovered time, plus the running-time (and chapter name).
+    Item {
+        id: trickBubble
+        readonly property var info: root.trickInfo
+        readonly property real frac: Math.max(0, Math.min(1,
+            (scrubHover.point.position.x - scrubber.leftPadding) / Math.max(1, scrubber.availableWidth)))
+        readonly property real hoverSec: frac * root.player.duration
+        readonly property int curTile: info ? Math.floor((hoverSec * 1000) / Math.max(1, info.Interval)) : 0
+        readonly property int tileSz: info ? Math.max(1, info.TileWidth * info.TileHeight) : 1
+        readonly property int tileIndex: Math.floor(curTile / tileSz)
+        readonly property int tileOff: curTile % tileSz
+        readonly property int offX: info ? (tileOff % info.TileWidth) : 0
+        readonly property int offY: info ? Math.floor(tileOff / info.TileWidth) : 0
+
+        // current chapter name for the hovered time (from mpv's chapter list)
+        function chapterName(sec) {
+            var name = ""
+            var ch = root.player.chapters
+            for (var i = 0; i < ch.length; ++i) {
+                if (sec < ch[i].time) break
+                name = ch[i].title || ""
+            }
+            return name
+        }
+
+        visible: scrubHover.hovered && root.player.duration > 0
+        z: 50
+        width: contentCol.implicitWidth + 12
+        height: contentCol.implicitHeight + 10
+        x: {
+            var p = scrubber.mapToItem(root, scrubHover.point.position.x, 0)
+            return Math.max(8, Math.min(root.width - width - 8, p.x - width / 2))
+        }
+        y: scrubber.mapToItem(root, 0, 0).y - height - 10
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.surface
+            radius: Theme.radius
+            border.color: Theme.divider
+            border.width: 1
+        }
+        Column {
+            id: contentCol
+            anchors.centerIn: parent
+            spacing: 4
+            Rectangle { // thumbnail frame (clipped sub-image of the tile sheet)
+                visible: thumb.status === Image.Ready && trickBubble.info !== null
+                width: trickBubble.info ? trickBubble.info.Width : 0
+                height: trickBubble.info ? trickBubble.info.Height : 0
+                color: "black"
+                radius: 2
+                clip: true
+                Image {
+                    id: thumb
+                    anchors.fill: parent
+                    asynchronous: true
+                    cache: true
+                    source: (root.client && trickBubble.info && root.trickItemId.length)
+                            ? root.client.trickplayUrl(root.trickItemId, trickBubble.info.Width, trickBubble.tileIndex)
+                            : ""
+                    sourceClipRect: trickBubble.info
+                        ? Qt.rect(trickBubble.offX * trickBubble.info.Width,
+                                  trickBubble.offY * trickBubble.info.Height,
+                                  trickBubble.info.Width, trickBubble.info.Height)
+                        : Qt.rect(0, 0, 0, 0)
+                }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: text.length > 0
+                text: trickBubble.chapterName(trickBubble.hoverSec)
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: root.fmt(trickBubble.hoverSec)
+                color: Theme.textPrimary
+                font.pixelSize: Theme.fontSmall
+                font.bold: true
             }
         }
     }
