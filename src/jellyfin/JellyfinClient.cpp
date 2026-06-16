@@ -118,6 +118,7 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         m_userName = user.value(QStringLiteral("Name")).toString();
         m_isAdmin = user.value(QStringLiteral("Policy")).toObject()
                         .value(QStringLiteral("IsAdministrator")).toBool();
+        m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
@@ -125,6 +126,7 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         }
         saveSession();
         Q_EMIT authenticatedChanged();
+        Q_EMIT userConfigChanged();
     });
 }
 
@@ -149,6 +151,75 @@ void JellyfinClient::getJson(const QString &path, const QString &requestTag)
         }
         Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(reply->readAll()).toVariant());
     });
+}
+
+void JellyfinClient::fetchUserConfig()
+{
+    if (m_userId.isEmpty())
+        return;
+    QNetworkReply *reply = get(QStringLiteral("/Users/%1").arg(m_userId));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            Q_EMIT errorOccurred(reply->errorString());
+            return;
+        }
+        const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
+        m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        Q_EMIT userConfigChanged();
+    });
+}
+
+// Mutate one field of the cached UserConfiguration and POST the whole object
+// back (matches jellyfin-web's updateUserConfiguration). Optimistic: the UI sees
+// the change immediately via userConfigChanged.
+void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
+{
+    if (m_userId.isEmpty())
+        return;
+    m_userConfig.insert(key, value);
+    Q_EMIT userConfigChanged();
+    const QJsonObject body = QJsonObject::fromVariantMap(m_userConfig);
+    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Configuration").arg(m_userId),
+                                QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError)
+            Q_EMIT errorOccurred(reply->errorString());
+    });
+}
+
+void JellyfinClient::authorizeQuickConnect(const QString &code)
+{
+    const QString c = QString::fromUtf8(QUrl::toPercentEncoding(code));
+    QNetworkReply *reply = post(QStringLiteral("/QuickConnect/Authorize?code=%1").arg(c), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        Q_EMIT quickConnectResult(ok, ok ? tr("Device authorized — it can now sign in.")
+                                         : tr("Invalid or expired code."));
+    });
+}
+
+// --- admin server actions (fire-and-forget; the UI confirms first) ----------
+static void fireAndForget(QNetworkReply *r)
+{
+    QObject::connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
+}
+void JellyfinClient::scanAllLibraries() { fireAndForget(post(QStringLiteral("/Library/Refresh"), QByteArray())); }
+void JellyfinClient::restartServer()    { fireAndForget(post(QStringLiteral("/System/Restart"), QByteArray())); }
+void JellyfinClient::shutdownServer()   { fireAndForget(post(QStringLiteral("/System/Shutdown"), QByteArray())); }
+void JellyfinClient::runScheduledTask(const QString &taskId)  { fireAndForget(post(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId), QByteArray())); }
+void JellyfinClient::stopScheduledTask(const QString &taskId) { fireAndForget(del(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId))); }
+void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &policy)
+{
+    fireAndForget(post(QStringLiteral("/Users/%1/Policy").arg(userId),
+                       QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
+void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
+{
+    fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
 }
 
 void JellyfinClient::saveSession() const
@@ -571,8 +642,21 @@ QUrl JellyfinClient::streamUrl(const QString &itemId) const
 
 QJsonObject JellyfinClient::deviceProfile() const
 {
-    // mpv direct-plays essentially everything; the transcode target is HLS
-    // (h264/aac) so the server can downscale when a bitrate cap forces it.
+    // mpv direct-plays essentially everything; the transcode target (used only
+    // when a bitrate/resolution cap forces a server transcode) is configurable
+    // from Settings → Playback. Defaults reproduce the original safe h264/aac
+    // HLS pipeline, so an unconfigured client behaves exactly as before.
+    const QSettings cfg;
+    QString vCodec = cfg.value(QStringLiteral("playback/transcodeVideoCodec")).toString();
+    if (vCodec.isEmpty() || vCodec == QLatin1String("auto")) vCodec = QStringLiteral("h264");
+    QString aCodec = cfg.value(QStringLiteral("playback/transcodeAudioCodec")).toString();
+    if (aCodec.isEmpty() || aCodec == QLatin1String("auto")) aCodec = QStringLiteral("aac,mp3");
+    int channels = cfg.value(QStringLiteral("playback/audioChannels"), 2).toInt();
+    if (channels < 1) channels = 2;
+    const int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
+    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS.
+    const QString hlsContainer = (vCodec == QLatin1String("h264")) ? QStringLiteral("ts") : QStringLiteral("mp4");
+
     const QJsonObject videoDirect{
         {QStringLiteral("Container"), QStringLiteral("mp4,m4v,mkv,webm,avi,mov,ts,m2ts,flv,wmv,asf,mpg,mpeg,3gp,ogv")},
         {QStringLiteral("Type"), QStringLiteral("Video")}};
@@ -580,22 +664,36 @@ QJsonObject JellyfinClient::deviceProfile() const
         {QStringLiteral("Container"), QStringLiteral("mp3,aac,flac,alac,ogg,oga,wav,wma,opus,m4a,mka")},
         {QStringLiteral("Type"), QStringLiteral("Audio")}};
     const QJsonObject hls{
-        {QStringLiteral("Container"), QStringLiteral("ts")},
+        {QStringLiteral("Container"), hlsContainer},
         {QStringLiteral("Type"), QStringLiteral("Video")},
-        {QStringLiteral("AudioCodec"), QStringLiteral("aac,mp3")},
-        {QStringLiteral("VideoCodec"), QStringLiteral("h264")},
+        {QStringLiteral("AudioCodec"), aCodec},
+        {QStringLiteral("VideoCodec"), vCodec},
         {QStringLiteral("Context"), QStringLiteral("Streaming")},
         {QStringLiteral("Protocol"), QStringLiteral("hls")},
-        {QStringLiteral("MaxAudioChannels"), QStringLiteral("2")},
+        {QStringLiteral("MaxAudioChannels"), QString::number(channels)},
         {QStringLiteral("MinSegments"), 1},
         {QStringLiteral("BreakOnNonKeyFrames"), true}};
     const auto subtitle = [](const QString &fmt) {
         return QJsonObject{{QStringLiteral("Format"), fmt}, {QStringLiteral("Method"), QStringLiteral("External")}};
     };
+
+    // Resolution cap (only when set): ask the server to keep the transcode within
+    // the chosen width. Auto direct-play (the common path) bypasses this entirely.
+    QJsonArray codecProfiles;
+    if (maxResW > 0) {
+        codecProfiles.append(QJsonObject{
+            {QStringLiteral("Type"), QStringLiteral("Video")},
+            {QStringLiteral("Conditions"), QJsonArray{QJsonObject{
+                {QStringLiteral("Condition"), QStringLiteral("LessThanEqual")},
+                {QStringLiteral("Property"), QStringLiteral("Width")},
+                {QStringLiteral("Value"), QString::number(maxResW)},
+                {QStringLiteral("IsRequired"), false}}}}});
+    }
+
     QJsonObject p;
     p[QStringLiteral("DirectPlayProfiles")] = QJsonArray{videoDirect, audioDirect};
     p[QStringLiteral("TranscodingProfiles")] = QJsonArray{hls};
-    p[QStringLiteral("CodecProfiles")] = QJsonArray{};
+    p[QStringLiteral("CodecProfiles")] = codecProfiles;
     p[QStringLiteral("ContainerProfiles")] = QJsonArray{};
     p[QStringLiteral("ResponseProfiles")] = QJsonArray{};
     p[QStringLiteral("SubtitleProfiles")] = QJsonArray{

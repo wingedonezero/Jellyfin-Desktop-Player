@@ -25,6 +25,17 @@ Item {
     property int defaultBitrate: 0
     property real subScale: 1.0
     property int subPos: 100
+    property string subStyle: "auto"
+    property bool subBold: false
+    property string subFont: ""
+    property string subColor: "#FFFFFF"
+    property string subEdge: "outline"
+    property var audioLangs: []   // [{value, text}] built from /Localization/Cultures
+    property var subLangs: []
+    readonly property var bitrateOptions: bitrates.map(b => ({value: b, text: fmtBitrate(b)}))
+    readonly property var segmentActions: [{value: "None", text: qsTr("None")}, {value: "AskToSkip", text: qsTr("Ask to skip")}, {value: "Skip", text: qsTr("Skip automatically")}]
+    readonly property var homeSectionOptions: [{value: "none", text: qsTr("None")}, {value: "resume", text: qsTr("Continue Watching")}, {value: "nextup", text: qsTr("Next Up")}, {value: "mymedia", text: qsTr("My Media")}, {value: "latest", text: qsTr("Latest Media")}]
+    readonly property var homeSectionDefaults: ["resume", "nextup", "mymedia", "latest", "none", "none"]
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
@@ -32,8 +43,27 @@ Item {
     property bool homeNextUp: true
     property bool homeLatest: true
 
-    function pref(key, def) { return config ? config.value(key, def) : def }
-    function setPref(key, v) { if (config) config.setValue(key, v) }
+    property int prefRev: 0   // bump so pref()/prefBool()-bound controls re-evaluate
+    function pref(key, def) { prefRev; return config ? config.value(key, def) : def }
+    function setPref(key, v) { if (config) { config.setValue(key, v); prefRev++ } }
+    function prefBool(key, def) { const v = pref(key, def); return v === true || v === "true" || v === 1 || v === "1" }
+    // read a field of the server-side user Configuration (null/absent → default)
+    function cfg(key, def) {
+        const c = (client && client.userConfig) ? client.userConfig : ({})
+        const v = c[key]
+        return (v === undefined || v === null) ? def : v
+    }
+    function buildLangModels(cultures) {
+        const audio = [{value: "", text: qsTr("Any language")}, {value: "OriginalLanguage", text: qsTr("Play in original language")}]
+        const sub = [{value: "", text: qsTr("Any language")}]
+        for (var i = 0; i < cultures.length; i++) {
+            const code = cultures[i].ThreeLetterISOLanguageName
+            if (!code) continue
+            const name = cultures[i].DisplayName || cultures[i].Name || code
+            audio.push({value: code, text: name}); sub.push({value: code, text: name})
+        }
+        screen.audioLangs = audio; screen.subLangs = sub
+    }
     function fmtBitrate(bps) {
         if (!bps || bps <= 0) return qsTr("Auto (direct play)")
         return (bps >= 1000000) ? ((Math.round(bps / 100000) / 10) + " Mbps") : (Math.round(bps / 1000) + " kbps")
@@ -43,6 +73,11 @@ Item {
         defaultBitrate = pref("playback/maxBitrate", 0)
         subScale = pref("subtitles/scale", 1.0)
         subPos = pref("subtitles/pos", 100)
+        subStyle = pref("subtitles/styleMode", "auto")
+        subBold = prefBool("subtitles/bold", false)
+        subFont = pref("subtitles/font", "")
+        subColor = pref("subtitles/color", "#FFFFFF")
+        subEdge = pref("subtitles/edge", "outline")
         autoPlayNext = pref("playback/autoPlayNext", true)
         skipBack = pref("playback/skipBack", 10)
         skipForward = pref("playback/skipForward", 30)
@@ -50,6 +85,15 @@ Item {
         homeNextUp = pref("home/nextUp", true)
         homeLatest = pref("home/latest", true)
         mpvEditor.text = config ? config.readMpvConf() : ""
+        if (client && client.authenticated) {
+            client.fetchUserConfig()
+            client.getJson("/Localization/Cultures", "settings:cultures")
+        }
+    }
+
+    Connections {
+        target: screen.client
+        function onJsonReady(tag, data) { if (tag === "settings:cultures" && data) screen.buildLangModels(data) }
     }
 
     // ---- reusable bits ----
@@ -59,6 +103,10 @@ Item {
     }
     component Hint: Text {
         color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; wrapMode: Text.Wrap; Layout.fillWidth: true
+    }
+    component GroupLabel: Text {
+        color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+        Layout.topMargin: Theme.spacing; Layout.leftMargin: 8; Layout.bottomMargin: 2
     }
     component OptionRow: ItemDelegate {
         id: orow
@@ -76,9 +124,9 @@ Item {
         property string label: ""
         property bool on: false
         property bool stub: false
-        signal toggled(bool value)
+        signal switched(bool value)
         hoverEnabled: true; Layout.fillWidth: true; implicitHeight: 46; enabled: !stub
-        onClicked: if (!stub) tr.toggled(!tr.on)
+        onClicked: if (!stub) tr.switched(!tr.on)
         contentItem: RowLayout {
             Text { text: tr.label; color: tr.enabled ? Theme.textPrimary : Theme.textDisabled; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
             Rectangle {
@@ -105,6 +153,107 @@ Item {
         JIconButton { text: "−"; implicitWidth: 36; implicitHeight: 36; onClicked: sr.changed(Math.max(sr.minValue, sr.value - sr.step)) }
         Text { text: sr.value + sr.suffix; color: Theme.textSecondary; horizontalAlignment: Text.AlignHCenter; Layout.preferredWidth: 56 }
         JIconButton { text: "+"; implicitWidth: 36; implicitHeight: 36; onClicked: sr.changed(Math.min(sr.maxValue, sr.value + sr.step)) }
+    }
+    // a compact segmented selector: label + a pill per option, the current one filled
+    component ChoiceRow: RowLayout {
+        id: chrow
+        property string label: ""
+        property var options: []        // [{value, text}]
+        property var value
+        signal picked(var value)
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Text { text: chrow.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        Repeater {
+            model: chrow.options
+            Button {
+                id: pill
+                required property var modelData
+                text: modelData.text
+                hoverEnabled: true; implicitHeight: 32
+                readonly property bool sel: chrow.value === modelData.value
+                background: Rectangle {
+                    radius: Theme.radius
+                    color: pill.sel ? Theme.accent : (pill.hovered ? Theme.surfaceHover : Theme.surface)
+                    border.color: pill.sel ? Theme.transparent : Theme.divider; border.width: 1
+                }
+                contentItem: Text {
+                    text: pill.text; color: pill.sel ? Theme.accentText : Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall; leftPadding: 12; rightPadding: 12
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
+                }
+                onClicked: chrow.picked(modelData.value)
+            }
+        }
+    }
+    // a label + a row of selectable color swatches
+    component SwatchRow: RowLayout {
+        id: swrow
+        property string label: ""
+        property var options: []        // [{value, color}]
+        property var value
+        signal picked(var value)
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Text { text: swrow.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        Repeater {
+            model: swrow.options
+            Rectangle {
+                required property var modelData
+                readonly property bool sel: swrow.value === modelData.value
+                width: 30; height: 30; radius: 6
+                color: modelData.color
+                border.color: sel ? Theme.accent : Theme.divider; border.width: sel ? 3 : 1
+                TapHandler { onTapped: swrow.picked(modelData.value) }
+            }
+        }
+    }
+    // a themed dropdown for long lists (languages, etc.)
+    component ComboRow: RowLayout {
+        id: cr
+        property string label: ""
+        property var options: []        // [{value, text}]
+        property var value: ""
+        signal picked(var value)
+        function syncIndex() {
+            for (var i = 0; i < options.length; i++) if (String(options[i].value) === String(cr.value)) { combo.currentIndex = i; return }
+            combo.currentIndex = -1
+        }
+        onValueChanged: syncIndex()
+        onOptionsChanged: syncIndex()
+        Layout.fillWidth: true
+        Text { text: cr.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        ComboBox {
+            id: combo
+            Layout.preferredWidth: 280
+            implicitHeight: 36
+            model: cr.options
+            textRole: "text"
+            Component.onCompleted: cr.syncIndex()
+            onActivated: (idx) => cr.picked(cr.options[idx].value)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: combo.activeFocus || combo.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+            contentItem: Text { text: combo.currentIndex >= 0 ? combo.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            indicator: Text { x: combo.width - width - 10; y: (combo.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+            popup: Popup {
+                y: combo.height + 2; width: combo.width
+                implicitHeight: Math.min(list.contentHeight + 2, 300); padding: 1
+                background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                contentItem: ListView {
+                    id: list
+                    clip: true
+                    model: combo.popup.visible ? combo.delegateModel : null
+                    currentIndex: combo.highlightedIndex
+                    ScrollBar.vertical: ScrollBar { active: true }
+                }
+            }
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: combo.width; implicitHeight: 32; hoverEnabled: true
+                contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+            }
+        }
     }
     component PanelButton: Button {
         property bool primary: false
@@ -204,54 +353,141 @@ Item {
             // 1 — Display
             Panel {
                 SectionTitle { text: qsTr("Display") }
-                Hint { text: qsTr("Theme — the app is fully skinnable; the default replicates the Jellyfin web layout. More skins coming.") }
+
+                GroupLabel { text: qsTr("APPEARANCE") }
+                Hint { text: qsTr("The default skin replicates the Jellyfin web layout. Full theming / alternate skins are a separate future project.") }
                 OptionRow { text: qsTr("Jellyfin Web — Dark"); current: true }
                 OptionRow { text: qsTr("Jellyfin Web — Light"); stub: true }
-                Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Language"); stub: true }
-                OptionRow { text: qsTr("Show backdrops"); stub: true }
-                OptionRow { text: qsTr("Enable cinema mode"); stub: true }
+                OptionRow { text: qsTr("Display language"); stub: true }
+                OptionRow { text: qsTr("Layout mode"); stub: true }
+                ToggleRow { label: qsTr("Show backdrops"); on: screen.prefBool("display/backdrops", true); onSwitched: (v) => screen.setPref("display/backdrops", v) }
+                ToggleRow { label: qsTr("Show details banner on items"); on: screen.prefBool("display/detailsBanner", true); onSwitched: (v) => screen.setPref("display/detailsBanner", v) }
+                ToggleRow { label: qsTr("Faster animations"); on: screen.prefBool("display/fastAnimations", false); onSwitched: (v) => screen.setPref("display/fastAnimations", v) }
+                OptionRow { text: qsTr("BlurHash placeholders"); stub: true }
+
+                GroupLabel { text: qsTr("LIBRARY") }
+                StepperRow { label: qsTr("Library page size (0 = all)"); value: screen.pref("display/libraryPageSize", 100); step: 25; minValue: 0; maxValue: 500; suffix: ""; onChanged: (v) => screen.setPref("display/libraryPageSize", v) }
+                ToggleRow { label: qsTr("Display missing episodes within seasons"); on: screen.cfg("DisplayMissingEpisodes", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("DisplayMissingEpisodes", v) } }
+
+                GroupLabel { text: qsTr("NEXT UP") }
+                StepperRow { label: qsTr("Max days for Next Up"); value: screen.pref("display/maxDaysNextUp", 365); step: 30; minValue: 0; maxValue: 1000; suffix: ""; onChanged: (v) => screen.setPref("display/maxDaysNextUp", v) }
+                ToggleRow { label: qsTr("Enable rewatching in Next Up"); on: screen.prefBool("display/rewatchingNextUp", false); onSwitched: (v) => screen.setPref("display/rewatchingNextUp", v) }
+                ToggleRow { label: qsTr("Use episode images in Next Up & Resume"); on: screen.prefBool("display/episodeImagesNextUp", false); onSwitched: (v) => screen.setPref("display/episodeImagesNextUp", v) }
+
+                GroupLabel { text: qsTr("EXTRAS") }
+                Hint { text: qsTr("Web-specific or not yet wired for the native client.") }
+                OptionRow { text: qsTr("Theme songs"); stub: true }
+                OptionRow { text: qsTr("Theme videos"); stub: true }
+                OptionRow { text: qsTr("Screensaver"); stub: true }
+                OptionRow { text: qsTr("Custom CSS"); stub: true }
             }
 
             // 2 — Home
             Panel {
                 SectionTitle { text: qsTr("Home") }
-                Hint { text: qsTr("Which rows appear on the home screen. Applies on next launch.") }
-                ToggleRow { label: qsTr("Continue Watching"); on: screen.homeContinue; onToggled: (v) => { screen.homeContinue = v; screen.setPref("home/continueWatching", v) } }
-                ToggleRow { label: qsTr("Next Up"); on: screen.homeNextUp; onToggled: (v) => { screen.homeNextUp = v; screen.setPref("home/nextUp", v) } }
-                ToggleRow { label: qsTr("Latest media"); on: screen.homeLatest; onToggled: (v) => { screen.homeLatest = v; screen.setPref("home/latest", v) } }
+                Hint { text: qsTr("Choose what appears in each row of the home screen, top to bottom. Applies on next launch.") }
+                Repeater {
+                    model: 6
+                    ComboRow {
+                        required property int index
+                        label: qsTr("Row %1").arg(index + 1)
+                        options: screen.homeSectionOptions
+                        value: screen.pref("home/section" + index, screen.homeSectionDefaults[index])
+                        onPicked: (v) => screen.setPref("home/section" + index, v)
+                    }
+                }
             }
 
             // 3 — Playback
             Panel {
                 SectionTitle { text: qsTr("Playback") }
-                Hint { text: qsTr("Default streaming quality. Auto direct-plays the original file; a cap transcodes on the server. Applies to the next video.") }
-                Repeater {
-                    model: screen.bitrates
-                    OptionRow {
-                        text: screen.fmtBitrate(modelData)
-                        current: screen.defaultBitrate === modelData
-                        onClicked: { screen.defaultBitrate = modelData; screen.setPref("playback/maxBitrate", modelData) }
-                    }
-                }
-                Item { Layout.preferredHeight: Theme.spacing }
-                ToggleRow { label: qsTr("Play next episode automatically"); on: screen.autoPlayNext; onToggled: (v) => { screen.autoPlayNext = v; screen.setPref("playback/autoPlayNext", v) } }
+
+                GroupLabel { text: qsTr("QUALITY") }
+                Hint { text: qsTr("Auto direct-plays the original file (mpv handles every codec); a cap makes the server transcode. Applies to the next video.") }
+                ComboRow { label: qsTr("Max video quality (in-network)"); options: screen.bitrateOptions; value: screen.pref("playback/maxBitrate", 0); onPicked: (v) => screen.setPref("playback/maxBitrate", v) }
+                ComboRow { label: qsTr("Max video quality (internet)"); options: screen.bitrateOptions; value: screen.pref("playback/maxBitrateInternet", 0); onPicked: (v) => screen.setPref("playback/maxBitrateInternet", v) }
+
+                GroupLabel { text: qsTr("AUDIO") }
+                ComboRow { label: qsTr("Preferred audio language"); options: screen.audioLangs; value: screen.cfg("AudioLanguagePreference", ""); onPicked: (v) => { if (screen.client) screen.client.setUserConfig("AudioLanguagePreference", v) } }
+                ToggleRow { label: qsTr("Play default audio track regardless of language"); on: screen.cfg("PlayDefaultAudioTrack", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("PlayDefaultAudioTrack", v) } }
+                ComboRow { label: qsTr("Allowed audio channels"); options: [{value: 0, text: qsTr("Auto")}, {value: 2, text: qsTr("Stereo")}, {value: 6, text: qsTr("5.1")}, {value: 8, text: qsTr("7.1")}]; value: screen.pref("playback/audioChannels", 0); onPicked: (v) => screen.setPref("playback/audioChannels", v) }
+                ComboRow { label: qsTr("Audio normalization"); options: [{value: "TrackGain", text: qsTr("Track")}, {value: "AlbumGain", text: qsTr("Album")}, {value: "None", text: qsTr("Off")}]; value: screen.pref("playback/audioNormalization", "TrackGain"); onPicked: (v) => screen.setPref("playback/audioNormalization", v) }
+                ToggleRow { label: qsTr("Disable VBR audio encoding"); on: screen.prefBool("playback/disableVbrAudio", false); onSwitched: (v) => screen.setPref("playback/disableVbrAudio", v) }
+                ToggleRow { label: qsTr("Allow DTS (audio passthrough)"); on: screen.prefBool("playback/enableDts", false); onSwitched: (v) => screen.setPref("playback/enableDts", v) }
+                ToggleRow { label: qsTr("Allow TrueHD (audio passthrough)"); on: screen.prefBool("playback/enableTrueHd", false); onSwitched: (v) => screen.setPref("playback/enableTrueHd", v) }
+
+                GroupLabel { text: qsTr("VIDEO") }
+                ComboRow { label: qsTr("Max video resolution"); options: [{value: 0, text: qsTr("Auto (source)")}, {value: 3840, text: qsTr("4K — 2160p")}, {value: 2560, text: qsTr("1440p")}, {value: 1920, text: qsTr("1080p")}, {value: 1280, text: qsTr("720p")}, {value: 854, text: qsTr("480p")}]; value: screen.pref("playback/maxResolutionWidth", 0); onPicked: (v) => screen.setPref("playback/maxResolutionWidth", v) }
+                ToggleRow { label: qsTr("Limit to the display's resolution"); on: screen.prefBool("playback/limitResolution", false); onSwitched: (v) => screen.setPref("playback/limitResolution", v) }
+                ComboRow { label: qsTr("Preferred transcode video codec"); options: [{value: "", text: qsTr("Auto (H.264)")}, {value: "h264", text: "H.264"}, {value: "hevc", text: qsTr("HEVC (H.265)")}, {value: "av1", text: "AV1"}]; value: screen.pref("playback/transcodeVideoCodec", ""); onPicked: (v) => screen.setPref("playback/transcodeVideoCodec", v) }
+                ComboRow { label: qsTr("Preferred transcode audio codec"); options: [{value: "", text: qsTr("Auto (AAC)")}, {value: "aac", text: "AAC"}, {value: "ac3", text: "AC3"}, {value: "eac3", text: "E-AC3"}, {value: "flac", text: "FLAC"}]; value: screen.pref("playback/transcodeAudioCodec", ""); onPicked: (v) => screen.setPref("playback/transcodeAudioCodec", v) }
+                ToggleRow { label: qsTr("Allow 10-bit H.264 (Hi10P)"); on: screen.prefBool("playback/enableHi10p", true); onSwitched: (v) => screen.setPref("playback/enableHi10p", v) }
+                ToggleRow { label: qsTr("Prefer fMP4-HLS container"); on: screen.prefBool("playback/preferFmp4", false); onSwitched: (v) => screen.setPref("playback/preferFmp4", v) }
+
+                GroupLabel { text: qsTr("BEHAVIOUR") }
+                ToggleRow { label: qsTr("Play next episode automatically"); on: screen.autoPlayNext; onSwitched: (v) => { screen.autoPlayNext = v; screen.setPref("playback/autoPlayNext", v) } }
+                ToggleRow { label: qsTr("Remember audio selections"); on: screen.cfg("RememberAudioSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberAudioSelections", v) } }
+                ToggleRow { label: qsTr("Remember subtitle selections"); on: screen.cfg("RememberSubtitleSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberSubtitleSelections", v) } }
                 StepperRow { label: qsTr("Skip back interval"); value: screen.skipBack; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipBack = v; screen.setPref("playback/skipBack", v) } }
                 StepperRow { label: qsTr("Skip forward interval"); value: screen.skipForward; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipForward = v; screen.setPref("playback/skipForward", v) } }
-                Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Preferred audio language"); stub: true }
-                OptionRow { text: qsTr("Allow audio passthrough"); stub: true }
+                ToggleRow { label: qsTr("Enable cinema mode (trailers / intros)"); on: screen.prefBool("playback/cinemaMode", false); stub: true }
+                ToggleRow { label: qsTr("Show next-video info overlay"); on: screen.prefBool("playback/nextVideoOverlay", true); stub: true }
+                ToggleRow { label: qsTr("Enable external video players"); on: screen.prefBool("playback/externalPlayers", false); stub: true }
+
+                GroupLabel { text: qsTr("MEDIA SEGMENTS") }
+                Hint { text: qsTr("What to do at each marked segment. The skip behaviour isn't wired to the player yet.") }
+                ComboRow { enabled: false; label: qsTr("Intro"); options: screen.segmentActions; value: screen.pref("playback/segIntro", "None"); onPicked: (v) => screen.setPref("playback/segIntro", v) }
+                ComboRow { enabled: false; label: qsTr("Recap"); options: screen.segmentActions; value: screen.pref("playback/segRecap", "None"); onPicked: (v) => screen.setPref("playback/segRecap", v) }
+                ComboRow { enabled: false; label: qsTr("Preview"); options: screen.segmentActions; value: screen.pref("playback/segPreview", "None"); onPicked: (v) => screen.setPref("playback/segPreview", v) }
+                ComboRow { enabled: false; label: qsTr("Outro / Credits"); options: screen.segmentActions; value: screen.pref("playback/segOutro", "None"); onPicked: (v) => screen.setPref("playback/segOutro", v) }
+                ComboRow { enabled: false; label: qsTr("Commercial"); options: screen.segmentActions; value: screen.pref("playback/segCommercial", "None"); onPicked: (v) => screen.setPref("playback/segCommercial", v) }
             }
 
             // 4 — Subtitles
             Panel {
                 SectionTitle { text: qsTr("Subtitles") }
-                Hint { text: qsTr("Defaults applied when a video starts; you can also adjust live from the player.") }
-                StepperRow { label: qsTr("Subtitle size"); value: Math.round(screen.subScale * 100); step: 10; minValue: 50; maxValue: 300; suffix: "%"; onChanged: (v) => { screen.subScale = v / 100; screen.setPref("subtitles/scale", screen.subScale) } }
-                StepperRow { label: qsTr("Subtitle position"); value: screen.subPos; step: 5; minValue: 0; maxValue: 150; suffix: ""; onChanged: (v) => { screen.subPos = v; screen.setPref("subtitles/pos", v) } }
+                Hint { text: qsTr("Defaults applied when a video starts; size & delay can also be tweaked live from the player.") }
+                ChoiceRow {
+                    label: qsTr("Styling")
+                    options: [{value: "native", text: qsTr("Native")}, {value: "auto", text: qsTr("Auto")}, {value: "custom", text: qsTr("Custom")}]
+                    value: screen.subStyle
+                    onPicked: (v) => { screen.subStyle = v; screen.setPref("subtitles/styleMode", v) }
+                }
+                Hint { text: qsTr("Native keeps each subtitle's own look · Auto keeps the look but lets you resize · Custom forces the appearance below (best for plain SRT; overrides styled ASS/SSA).") }
+                StepperRow { label: qsTr("Size"); value: Math.round(screen.subScale * 100); step: 10; minValue: 50; maxValue: 300; suffix: "%"; onChanged: (v) => { screen.subScale = v / 100; screen.setPref("subtitles/scale", screen.subScale) } }
+                StepperRow { label: qsTr("Vertical position"); value: screen.subPos; step: 5; minValue: 0; maxValue: 150; suffix: ""; onChanged: (v) => { screen.subPos = v; screen.setPref("subtitles/pos", v) } }
+                ToggleRow { label: qsTr("Bold"); on: screen.subBold; onSwitched: (v) => { screen.subBold = v; screen.setPref("subtitles/bold", v) } }
+                ChoiceRow {
+                    label: qsTr("Font")
+                    options: [{value: "", text: qsTr("Default")}, {value: "sans-serif", text: qsTr("Sans")}, {value: "serif", text: qsTr("Serif")}, {value: "monospace", text: qsTr("Mono")}]
+                    value: screen.subFont
+                    onPicked: (v) => { screen.subFont = v; screen.setPref("subtitles/font", v) }
+                }
+                SwatchRow {
+                    label: qsTr("Text color")
+                    options: [{value: "#FFFFFF", color: "#FFFFFF"}, {value: "#FFFF00", color: "#FFFF00"}, {value: "#D3D3D3", color: "#D3D3D3"}, {value: "#00FFFF", color: "#00FFFF"}, {value: "#00FF00", color: "#00FF00"}, {value: "#FF0000", color: "#FF0000"}, {value: "#000000", color: "#000000"}]
+                    value: screen.subColor
+                    onPicked: (v) => { screen.subColor = v; screen.setPref("subtitles/color", v) }
+                }
+                ChoiceRow {
+                    label: qsTr("Edge")
+                    options: [{value: "none", text: qsTr("None")}, {value: "outline", text: qsTr("Outline")}, {value: "shadow", text: qsTr("Shadow")}, {value: "both", text: qsTr("Both")}]
+                    value: screen.subEdge
+                    onPicked: (v) => { screen.subEdge = v; screen.setPref("subtitles/edge", v) }
+                }
                 Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Subtitle mode"); stub: true }
-                OptionRow { text: qsTr("Preferred subtitle language"); stub: true }
+                ChoiceRow {
+                    label: qsTr("Subtitle mode")
+                    options: [{value: "Default", text: qsTr("Default")}, {value: "Smart", text: qsTr("Smart")}, {value: "OnlyForced", text: qsTr("Only forced")}, {value: "Always", text: qsTr("Always")}, {value: "None", text: qsTr("None")}]
+                    value: screen.cfg("SubtitleMode", "Default")
+                    onPicked: (v) => { if (screen.client) screen.client.setUserConfig("SubtitleMode", v) }
+                }
+                ComboRow {
+                    label: qsTr("Preferred subtitle language")
+                    options: screen.subLangs
+                    value: screen.cfg("SubtitleLanguagePreference", "")
+                    onPicked: (v) => { if (screen.client) screen.client.setUserConfig("SubtitleLanguagePreference", v) }
+                }
                 OptionRow { text: qsTr("Burn in subtitles"); stub: true }
             }
 
@@ -290,12 +526,21 @@ Item {
                 }
             }
 
-            // 6 — Quick Connect
+            // 7 — Quick Connect
             Panel {
                 SectionTitle { text: qsTr("Quick Connect") }
-                Hint { text: qsTr("Authorize a sign-in code from another device. Not implemented yet.") }
-                Field { placeholderText: qsTr("Quick Connect code"); enabled: false }
-                PanelButton { text: qsTr("Authorize"); enabled: false }
+                Hint { text: qsTr("Enter the code shown on another device to authorize it to sign in to your account.") }
+                Field { id: qcCode; placeholderText: qsTr("Quick Connect code"); inputMethodHints: Qt.ImhDigitsOnly }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    Text { id: qcResult; text: ""; color: Theme.watched; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter }
+                    PanelButton { primary: true; text: qsTr("Authorize"); enabled: qcCode.text.length > 0; onClicked: if (screen.client) screen.client.authorizeQuickConnect(qcCode.text) }
+                }
+                Connections {
+                    target: screen.client
+                    function onQuickConnectResult(ok, message) { qcResult.text = message; qcResult.color = ok ? Theme.watched : Theme.error; if (ok) qcCode.clear() }
+                }
             }
 
             // 8 — About

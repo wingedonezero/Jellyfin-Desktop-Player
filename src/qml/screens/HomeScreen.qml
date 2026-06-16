@@ -3,9 +3,10 @@ import QtQuick.Layouts
 import QtQuick.Controls.Basic
 import JellyfinDesktop
 
-// The Home screen (jellyfin-web style): Continue Watching, Next Up, My Media,
-// and Latest-per-library rows. Composes MediaRow/MediaCard; all data via the
-// client, routed by request tag.
+// The Home screen (jellyfin-web style). The rows shown and their order come from
+// Settings → Home (home/section0..5): each slot is one of Continue Watching /
+// Next Up / My Media / Latest-per-library / none, rendered top-to-bottom.
+// Composes MediaRow/MediaCard; all data via the client, routed by request tag.
 Item {
     id: screen
     property var client
@@ -21,20 +22,30 @@ Item {
     property var librariesModel: []
     property var latestByLib: ({})
 
-    // home row visibility (from Settings → Home; read at load)
-    property bool showContinue: true
-    property bool showNextUp: true
-    property bool showLatest: true
+    // ordered list of home section keys (from Settings → Home; read at load)
+    property var homeSections: []
+    function loadSections() {
+        const def = ["resume", "nextup", "mymedia", "latest", "none", "none"]
+        let s = []
+        for (var i = 0; i < 6; i++) {
+            const k = config ? config.value("home/section" + i, def[i]) : def[i]
+            if (k && k !== "none") s.push(k)
+        }
+        homeSections = s
+    }
+    // does a section have anything to show? (so empty slots don't reserve space)
+    function sectionHasContent(key) {
+        if (key === "resume") return resumeModel.length > 0
+        if (key === "nextup") return nextUpModel.length > 0
+        if (key === "mymedia" || key === "latest") return librariesModel.length > 0
+        return false
+    }
 
     // The Home page is the StackView's initial item, so it exists before login
     // finishes — only fetch once the client is authenticated (and again if auth
     // changes, e.g. re-login).
     Component.onCompleted: {
-        if (config) {
-            showContinue = config.value("home/continueWatching", true)
-            showNextUp = config.value("home/nextUp", true)
-            showLatest = config.value("home/latest", true)
-        }
+        loadSections()
         maybeReload()
     }
     function maybeReload() { if (client && client.authenticated) reload() }
@@ -66,6 +77,54 @@ Item {
         }
     }
 
+    // one component per home-section type; the Repeater places them by slot order
+    Component {
+        id: resumeRow
+        MediaRow {
+            title: qsTr("Continue Watching"); model: screen.resumeModel
+            client: screen.client; shape: "thumb"
+            onItemActivated: (it) => screen.itemActivated(it)
+            onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+        }
+    }
+    Component {
+        id: nextUpRow
+        MediaRow {
+            title: qsTr("Next Up"); model: screen.nextUpModel
+            client: screen.client; shape: "thumb"
+            onItemActivated: (it) => screen.itemActivated(it)
+            onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+        }
+    }
+    Component {
+        id: myMediaRow
+        MediaRow {
+            title: qsTr("My Media"); model: screen.librariesModel
+            client: screen.client; shape: "thumb"
+            onItemActivated: (it) => screen.openLibrary(it)
+            onItemOpenDetail: (it) => screen.openLibrary(it)
+        }
+    }
+    Component {
+        id: latestRows
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacingLarge
+            Repeater {
+                model: screen.librariesModel
+                MediaRow {
+                    required property var modelData
+                    title: qsTr("Latest %1").arg(modelData.name)
+                    visible: (screen.latestByLib[modelData.id] || []).length > 0
+                    model: screen.latestByLib[modelData.id] || []
+                    client: screen.client; shape: "poster"
+                    onItemActivated: (it) => screen.itemActivated(it)
+                    onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                }
+            }
+        }
+    }
+
     Flickable {
         anchors.fill: parent
         contentWidth: width
@@ -79,43 +138,17 @@ Item {
             y: Theme.spacingLarge
             spacing: Theme.spacingLarge
 
-            MediaRow {
-                title: qsTr("Continue Watching")
-                visible: screen.showContinue && screen.resumeModel.length > 0
-                model: screen.resumeModel
-                client: screen.client
-                shape: "thumb"
-                onItemActivated: (it) => screen.itemActivated(it)
-                onItemOpenDetail: (it) => screen.itemOpenDetail(it)
-            }
-            MediaRow {
-                title: qsTr("Next Up")
-                visible: screen.showNextUp && screen.nextUpModel.length > 0
-                model: screen.nextUpModel
-                client: screen.client
-                shape: "thumb"
-                onItemActivated: (it) => screen.itemActivated(it)
-                onItemOpenDetail: (it) => screen.itemOpenDetail(it)
-            }
-            MediaRow {
-                title: qsTr("My Media")
-                model: screen.librariesModel
-                client: screen.client
-                shape: "thumb"
-                onItemActivated: (it) => screen.openLibrary(it)
-                onItemOpenDetail: (it) => screen.openLibrary(it)
-            }
             Repeater {
-                model: screen.librariesModel
-                MediaRow {
+                model: screen.homeSections
+                Loader {
                     required property var modelData
-                    title: qsTr("Latest %1").arg(modelData.name)
-                    visible: screen.showLatest && (screen.latestByLib[modelData.id] || []).length > 0
-                    model: screen.latestByLib[modelData.id] || []
-                    client: screen.client
-                    shape: "poster"
-                    onItemActivated: (it) => screen.itemActivated(it)
-                    onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                    Layout.fillWidth: true
+                    visible: screen.sectionHasContent(modelData)
+                    Layout.preferredHeight: (visible && item) ? item.implicitHeight : 0
+                    sourceComponent: modelData === "resume" ? resumeRow
+                                   : modelData === "nextup" ? nextUpRow
+                                   : modelData === "mymedia" ? myMediaRow
+                                   : modelData === "latest" ? latestRows : null
                 }
             }
         }

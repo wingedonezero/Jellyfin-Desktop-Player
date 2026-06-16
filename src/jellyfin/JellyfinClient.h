@@ -29,6 +29,7 @@ class JellyfinClient : public QObject
     Q_PROPERTY(bool authenticated READ isAuthenticated NOTIFY authenticatedChanged)
     Q_PROPERTY(QString userName READ userName NOTIFY authenticatedChanged)
     Q_PROPERTY(bool isAdmin READ isAdmin NOTIFY authenticatedChanged)
+    Q_PROPERTY(QVariantMap userConfig READ userConfig NOTIFY userConfigChanged)
 
 public:
     explicit JellyfinClient(QObject *parent = nullptr);
@@ -39,6 +40,7 @@ public:
     bool isAuthenticated() const { return !m_token.isEmpty(); }
     QString userName() const { return m_userName; }
     bool isAdmin() const { return m_isAdmin; }
+    QVariantMap userConfig() const { return m_userConfig; }
 
     // Raw GET for admin/dashboard endpoints — emits jsonReady(tag, <array|object>).
     Q_INVOKABLE void getJson(const QString &path, const QString &requestTag);
@@ -106,6 +108,24 @@ public:
     Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard
     Q_INVOKABLE void changePassword(const QString &currentPw, const QString &newPw);
 
+    // --- user configuration (server-side prefs: audio/subtitle language + mode, ...) ---
+    Q_INVOKABLE void fetchUserConfig();
+    Q_INVOKABLE void setUserConfig(const QString &key, const QVariant &value);
+
+    // Quick Connect: authorize a code shown on another device (this user must be signed in).
+    Q_INVOKABLE void authorizeQuickConnect(const QString &code);
+
+    // Server actions (admin) — destructive; the UI confirms before calling these.
+    Q_INVOKABLE void scanAllLibraries();
+    Q_INVOKABLE void restartServer();
+    Q_INVOKABLE void shutdownServer();
+    Q_INVOKABLE void runScheduledTask(const QString &taskId);
+    Q_INVOKABLE void stopScheduledTask(const QString &taskId);
+    Q_INVOKABLE void setUserPolicy(const QString &userId, const QVariantMap &policy);
+    Q_INVOKABLE void deleteUser(const QString &userId);
+    // Generic JSON POST — server-config editors POST the WHOLE config object back.
+    Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
+
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));
@@ -124,6 +144,8 @@ Q_SIGNALS:
     void jsonReady(const QString &requestTag, const QVariant &data);
     void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
+    void userConfigChanged();
+    void quickConnectResult(bool ok, const QString &message);
     void errorOccurred(const QString &message);
 
 private:
@@ -145,6 +167,7 @@ private:
     QString m_deviceId;
     QString m_deviceName;
     bool m_isAdmin = false;
+    QVariantMap m_userConfig;
 
     // current playback session (for progress reports + transcode teardown)
     QString m_playSessionId;
