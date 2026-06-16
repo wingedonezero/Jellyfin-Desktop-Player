@@ -257,8 +257,11 @@ External video players toggle (we ARE the player — remove the dead row rather 
 
 USER-VERIFY OWED (agent can't click/toggle): toggle each display/* pref + confirm effect; the add-to-collection/playlist *create*/*add* write path (picker was verified read-only only).
 
-**Phase L — the big known one: LibraryOptions provider tables (0.1)** — new client
-`getAvailableOptions` + a ranked-checkbox-list component; all 9 tables; per-content-type incl. boxsets.
+**Phase L — LibraryOptions provider tables (0.1) — ✅ DONE (2026-06-16)**
+- ✅ `2cc3fd9` All 9 provider tables via `GET /Libraries/AvailableOptions` + a reusable `PluginTable` (checkbox + ▲▼ reorder), mirroring `libraryoptionseditor.js` field-for-field (DefaultEnabled fallback, getOrderedPlugins, inverse Disabled* logic, per-type merge). Server-driven incl. boxsets. Verified live (Collections → Emby Xml saver + TheMovieDb downloaders/image fetchers; Movies → multi-row tables w/ reorder).
+- ✅ `c45cfe3` Per-type "Fetcher settings" (ImageOptions) dialog mirroring `imageOptionsEditor` (Fetch Primary/Logo/Thumb toggles + backdrop count/min-width from DefaultImageOptions). Verified live.
+- ✅ `42be069` Last scalar field `DelimiterWhitelist` (music).
+Shape verified live by read-only GET; no save fired. **Note:** `CustomTagDelimiters` ours comma-splits, web char-splits (`.split('')`) — minor pre-existing fidelity gap on a niche music field.
 
 **Phase U — Users admin** (add-user, Access/Parental/Password tabs, full policy field set).
 
