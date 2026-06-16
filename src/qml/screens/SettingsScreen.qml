@@ -30,6 +30,8 @@ Item {
     property string subFont: ""
     property string subColor: "#FFFFFF"
     property string subEdge: "outline"
+    property var audioLangs: []   // [{value, text}] built from /Localization/Cultures
+    property var subLangs: []
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
@@ -40,6 +42,23 @@ Item {
     function pref(key, def) { return config ? config.value(key, def) : def }
     function setPref(key, v) { if (config) config.setValue(key, v) }
     function prefBool(key, def) { const v = pref(key, def); return v === true || v === "true" || v === 1 || v === "1" }
+    // read a field of the server-side user Configuration (null/absent → default)
+    function cfg(key, def) {
+        const c = (client && client.userConfig) ? client.userConfig : ({})
+        const v = c[key]
+        return (v === undefined || v === null) ? def : v
+    }
+    function buildLangModels(cultures) {
+        const audio = [{value: "", text: qsTr("Any language")}, {value: "OriginalLanguage", text: qsTr("Play in original language")}]
+        const sub = [{value: "", text: qsTr("Any language")}]
+        for (var i = 0; i < cultures.length; i++) {
+            const code = cultures[i].ThreeLetterISOLanguageName
+            if (!code) continue
+            const name = cultures[i].DisplayName || cultures[i].Name || code
+            audio.push({value: code, text: name}); sub.push({value: code, text: name})
+        }
+        screen.audioLangs = audio; screen.subLangs = sub
+    }
     function fmtBitrate(bps) {
         if (!bps || bps <= 0) return qsTr("Auto (direct play)")
         return (bps >= 1000000) ? ((Math.round(bps / 100000) / 10) + " Mbps") : (Math.round(bps / 1000) + " kbps")
@@ -61,6 +80,15 @@ Item {
         homeNextUp = pref("home/nextUp", true)
         homeLatest = pref("home/latest", true)
         mpvEditor.text = config ? config.readMpvConf() : ""
+        if (client && client.authenticated) {
+            client.fetchUserConfig()
+            client.getJson("/Localization/Cultures", "settings:cultures")
+        }
+    }
+
+    Connections {
+        target: screen.client
+        function onJsonReady(tag, data) { if (tag === "settings:cultures" && data) screen.buildLangModels(data) }
     }
 
     // ---- reusable bits ----
@@ -168,6 +196,53 @@ Item {
                 color: modelData.color
                 border.color: sel ? Theme.accent : Theme.divider; border.width: sel ? 3 : 1
                 TapHandler { onTapped: swrow.picked(modelData.value) }
+            }
+        }
+    }
+    // a themed dropdown for long lists (languages, etc.)
+    component ComboRow: RowLayout {
+        id: cr
+        property string label: ""
+        property var options: []        // [{value, text}]
+        property string value: ""
+        signal picked(string value)
+        function syncIndex() {
+            for (var i = 0; i < options.length; i++) if (options[i].value === cr.value) { combo.currentIndex = i; return }
+            combo.currentIndex = -1
+        }
+        onValueChanged: syncIndex()
+        onOptionsChanged: syncIndex()
+        Layout.fillWidth: true
+        Text { text: cr.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 8; verticalAlignment: Text.AlignVCenter }
+        ComboBox {
+            id: combo
+            Layout.preferredWidth: 280
+            implicitHeight: 36
+            model: cr.options
+            textRole: "text"
+            Component.onCompleted: cr.syncIndex()
+            onActivated: (idx) => cr.picked(cr.options[idx].value)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: combo.activeFocus || combo.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+            contentItem: Text { text: combo.currentIndex >= 0 ? combo.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            indicator: Text { x: combo.width - width - 10; y: (combo.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+            popup: Popup {
+                y: combo.height + 2; width: combo.width
+                implicitHeight: Math.min(list.contentHeight + 2, 300); padding: 1
+                background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                contentItem: ListView {
+                    id: list
+                    clip: true
+                    model: combo.popup.visible ? combo.delegateModel : null
+                    currentIndex: combo.highlightedIndex
+                    ScrollBar.vertical: ScrollBar { active: true }
+                }
+            }
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: combo.width; implicitHeight: 32; hoverEnabled: true
+                contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
             }
         }
     }
@@ -304,7 +379,15 @@ Item {
                 StepperRow { label: qsTr("Skip back interval"); value: screen.skipBack; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipBack = v; screen.setPref("playback/skipBack", v) } }
                 StepperRow { label: qsTr("Skip forward interval"); value: screen.skipForward; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipForward = v; screen.setPref("playback/skipForward", v) } }
                 Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Preferred audio language"); stub: true }
+                ComboRow {
+                    label: qsTr("Preferred audio language")
+                    options: screen.audioLangs
+                    value: screen.cfg("AudioLanguagePreference", "")
+                    onPicked: (v) => { if (screen.client) screen.client.setUserConfig("AudioLanguagePreference", v) }
+                }
+                ToggleRow { label: qsTr("Play default audio track regardless of language"); on: screen.cfg("PlayDefaultAudioTrack", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("PlayDefaultAudioTrack", v) } }
+                ToggleRow { label: qsTr("Remember audio selections"); on: screen.cfg("RememberAudioSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberAudioSelections", v) } }
+                ToggleRow { label: qsTr("Remember subtitle selections"); on: screen.cfg("RememberSubtitleSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberSubtitleSelections", v) } }
                 OptionRow { text: qsTr("Allow audio passthrough"); stub: true }
             }
 
@@ -341,8 +424,18 @@ Item {
                     onPicked: (v) => { screen.subEdge = v; screen.setPref("subtitles/edge", v) }
                 }
                 Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Subtitle mode"); stub: true }
-                OptionRow { text: qsTr("Preferred subtitle language"); stub: true }
+                ChoiceRow {
+                    label: qsTr("Subtitle mode")
+                    options: [{value: "Default", text: qsTr("Default")}, {value: "Smart", text: qsTr("Smart")}, {value: "OnlyForced", text: qsTr("Only forced")}, {value: "Always", text: qsTr("Always")}, {value: "None", text: qsTr("None")}]
+                    value: screen.cfg("SubtitleMode", "Default")
+                    onPicked: (v) => { if (screen.client) screen.client.setUserConfig("SubtitleMode", v) }
+                }
+                ComboRow {
+                    label: qsTr("Preferred subtitle language")
+                    options: screen.subLangs
+                    value: screen.cfg("SubtitleLanguagePreference", "")
+                    onPicked: (v) => { if (screen.client) screen.client.setUserConfig("SubtitleLanguagePreference", v) }
+                }
                 OptionRow { text: qsTr("Burn in subtitles"); stub: true }
             }
 

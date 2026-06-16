@@ -118,6 +118,7 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         m_userName = user.value(QStringLiteral("Name")).toString();
         m_isAdmin = user.value(QStringLiteral("Policy")).toObject()
                         .value(QStringLiteral("IsAdministrator")).toBool();
+        m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
@@ -125,6 +126,7 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         }
         saveSession();
         Q_EMIT authenticatedChanged();
+        Q_EMIT userConfigChanged();
     });
 }
 
@@ -148,6 +150,42 @@ void JellyfinClient::getJson(const QString &path, const QString &requestTag)
             return;
         }
         Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(reply->readAll()).toVariant());
+    });
+}
+
+void JellyfinClient::fetchUserConfig()
+{
+    if (m_userId.isEmpty())
+        return;
+    QNetworkReply *reply = get(QStringLiteral("/Users/%1").arg(m_userId));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            Q_EMIT errorOccurred(reply->errorString());
+            return;
+        }
+        const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
+        m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        Q_EMIT userConfigChanged();
+    });
+}
+
+// Mutate one field of the cached UserConfiguration and POST the whole object
+// back (matches jellyfin-web's updateUserConfiguration). Optimistic: the UI sees
+// the change immediately via userConfigChanged.
+void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
+{
+    if (m_userId.isEmpty())
+        return;
+    m_userConfig.insert(key, value);
+    Q_EMIT userConfigChanged();
+    const QJsonObject body = QJsonObject::fromVariantMap(m_userConfig);
+    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Configuration").arg(m_userId),
+                                QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError)
+            Q_EMIT errorOccurred(reply->errorString());
     });
 }
 
