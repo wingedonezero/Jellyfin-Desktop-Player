@@ -270,8 +270,16 @@ Shape verified live by read-only GET; no save fired. **Note:** `CustomTagDelimit
 **Phase C — config-editor refinements (Tier 3)** — Transcoding codec group/showWhen/thread/FFmpeg,
 Networking Published-URI, Metadata/Branding control types + multiline.
 
-**Phase P — player features (Tier 1.5 + keyboard)** — keyboard shortcuts (1.2, cheapest big win),
-media-segment skip, chapter menu, up-next card, trickplay, buffered ranges.
+**Phase P — player features (Tier 1.5 + keyboard) — ✅ DONE except keyboard (2026-06-16)**
+Web-parity OSD work, committed per area and screenshot-verified live (Re:Monster S1:E1):
+- ✅ `ee4dfc9` OSD title composition ("Series - Sxx:Exx - Name" / "Movie (Year)") + duration↔remaining toggle (persisted).
+- ✅ `52f0e6b` Trickplay hover thumbnails — parseItem Trickplay map + `trickplayUrl`; PlayerView fetches the full item on play + picks the resolution like web; PlayerControls clips one tile via `Image.sourceClipRect` with chapter name + time. Features.trickplay flipped (data-gated per item).
+- ✅ `4b0cbb3` Chapter nav — prev/next-chapter buttons (⇤ ⇥, shown only with chapters) + a "scenes" jump menu, on the existing mpv chapter list + setChapter.
+- ✅ `2ca8e13` Media-segment skip — `fetchMediaSegments` → GET /MediaSegments/{id}; per-type action map (defaults Intro+Outro=AskToSkip); 400ms poll auto-skips or arms a transient "Skip <Type>" button (independent of the OSD); the 5 settings rows un-stubbed.
+- ✅ `481d470` Up-next card — web's showComingUpNextIfNeeded thresholds; thumbnail + "Next Episode Playing in N Seconds" + Start Now / Hide; gated on the now-wired next-video-overlay pref.
+- ✅ `3e134c7` Buffered ranges — observe mpv demuxer-cache-state → `bufferedRanges`; scrubber draws each span (new Theme.bufferedBar) under the fill.
+- ⏸ **Keyboard shortcuts (§1.2) — DEFERRED by the user** ("come back to it later"; matching the web look came first). All ~22 keys still map to existing invokables (zero engine work) when picked up.
+**User-verify-owed (agent has no pointer/key input):** the remaining/ends-at toggle click, trickplay hover-follow, chapter prev/next/jump clicks, real media-segment skip+auto-skip (this server has no segment data — verified with an injected segment), up-next Start Now/Hide. Build green, tree clean.
 
 **Phase B — browse/detail depth (Tiers 4-5)** — library view-modes/filters/paging/sort, grouped search,
 detail version selector/chapters/next-up/trailer/etc.
