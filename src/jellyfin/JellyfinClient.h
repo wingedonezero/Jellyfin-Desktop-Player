@@ -123,6 +123,21 @@ public:
     Q_INVOKABLE void stopScheduledTask(const QString &taskId);
     Q_INVOKABLE void setUserPolicy(const QString &userId, const QVariantMap &policy);
     Q_INVOKABLE void deleteUser(const QString &userId);
+    Q_INVOKABLE void createUser(const QString &name, const QString &password); // POST /Users/New
+    Q_INVOKABLE void setUserPassword(const QString &userId, const QString &newPw, bool reset); // admin set/reset another user's password
+    // Devices / API keys / plugins / tasks / library refresh (fire-and-forget; UI confirms first)
+    Q_INVOKABLE void renameDevice(const QString &deviceId, const QString &customName);
+    Q_INVOKABLE void deleteDevice(const QString &deviceId);
+    Q_INVOKABLE void createApiKey(const QString &app);
+    Q_INVOKABLE void revokeApiKey(const QString &accessToken);
+    Q_INVOKABLE void updateTaskTriggers(const QString &taskId, const QVariantList &triggers);
+    Q_INVOKABLE void refreshItem(const QString &itemId);
+    Q_INVOKABLE void setPluginEnabled(const QString &pluginId, const QString &version, bool enabled);
+    Q_INVOKABLE void uninstallPlugin(const QString &pluginId, const QString &version);
+    Q_INVOKABLE void installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl);
+    Q_INVOKABLE void setRepositories(const QVariantList &repos);
+    // Raw-text GET (e.g. a log file) → textReady(tag, content)
+    Q_INVOKABLE void getText(const QString &path, const QString &requestTag);
     // Generic JSON POST — server-config editors POST the WHOLE config object back.
     Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
 
@@ -150,6 +165,7 @@ Q_SIGNALS:
     void itemsReady(const QString &requestTag, const QVariantList &items);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);
+    void textReady(const QString &requestTag, const QString &content);
     void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
     void userConfigChanged();

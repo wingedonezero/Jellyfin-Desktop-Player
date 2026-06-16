@@ -12,6 +12,8 @@ Item {
 
     signal itemActivated(var item)
     signal itemOpenDetail(var item)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     property var results: []
 
@@ -103,6 +105,8 @@ Item {
                     shape: "poster"
                     onActivated: (it) => screen.itemActivated(it)
                     onOpenDetail: (it) => screen.itemOpenDetail(it)
+                    onAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                    onAddToCollection: (it) => screen.itemAddToCollection(it)
                 }
             }
         }

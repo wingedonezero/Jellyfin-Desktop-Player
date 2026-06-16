@@ -13,9 +13,12 @@ ColumnLayout {
     property var model: []
     property var client
     property string shape: "poster"
+    property bool episodeImages: true   // forwarded to cards (Next Up/Resume pref)
 
     signal itemActivated(var item)   // play
     signal itemOpenDetail(var item)  // open detail
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     Layout.fillWidth: true
     visible: model && model.length > 0
@@ -47,15 +50,18 @@ ColumnLayout {
             boundsBehavior: Flickable.StopAtBounds
             model: row.model
             cacheBuffer: 600
-            Behavior on contentX { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            Behavior on contentX { NumberAnimation { duration: Theme.animMedium; easing.type: Easing.OutCubic } }
 
             delegate: MediaCard {
                 required property var modelData
                 item: modelData
                 client: row.client
                 shape: row.shape
+                episodeImages: row.episodeImages
                 onActivated: (it) => row.itemActivated(it)
                 onOpenDetail: (it) => row.itemOpenDetail(it)
+                onAddToPlaylist: (it) => row.itemAddToPlaylist(it)
+                onAddToCollection: (it) => row.itemAddToCollection(it)
             }
         }
 

@@ -16,11 +16,20 @@ Item {
     signal itemActivated(var item)   // play
     signal itemOpenDetail(var item)  // open detail
     signal openLibrary(var lib)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     property var resumeModel: []
     property var nextUpModel: []
     property var librariesModel: []
     property var latestByLib: ({})
+
+    // Settings → Display: use episode stills vs the show poster in Next Up / Resume
+    function cfgBool(key, def) {
+        var v = config ? config.value(key, def) : def
+        return v === true || v === "true" || v === 1 || v === "1"
+    }
+    readonly property bool useEpisodeImages: cfgBool("display/episodeImagesNextUp", true)
 
     // ordered list of home section keys (from Settings → Home; read at load)
     property var homeSections: []
@@ -82,18 +91,22 @@ Item {
         id: resumeRow
         MediaRow {
             title: qsTr("Continue Watching"); model: screen.resumeModel
-            client: screen.client; shape: "thumb"
+            client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
         }
     }
     Component {
         id: nextUpRow
         MediaRow {
             title: qsTr("Next Up"); model: screen.nextUpModel
-            client: screen.client; shape: "thumb"
+            client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
         }
     }
     Component {
@@ -120,6 +133,8 @@ Item {
                     client: screen.client; shape: "poster"
                     onItemActivated: (it) => screen.itemActivated(it)
                     onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                    onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                    onItemAddToCollection: (it) => screen.itemAddToCollection(it)
                 }
             }
         }

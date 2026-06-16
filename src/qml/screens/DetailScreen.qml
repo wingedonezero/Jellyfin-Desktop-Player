@@ -9,13 +9,26 @@ import JellyfinDesktop
 Item {
     id: screen
     property var client
+    property var config: null
     property string itemId: ""
     property var detail: ({})
     property string pageTitle: (detail && detail.name) ? detail.name : qsTr("Details")
 
+    // Settings → Display: show the details-page banner backdrop. QSettings can
+    // hand back bools as "true"/"false" strings, so coerce. (Read on open; a
+    // change applies the next time a detail page is opened.)
+    function cfgBool(key, def) {
+        var v = config ? config.value(key, def) : def
+        return v === true || v === "true" || v === 1 || v === "1"
+    }
+    readonly property bool showBackdrop: cfgBool("display/backdrops", true)
+                                         && cfgBool("display/detailsBanner", true)
+
     signal play(var item)
     signal playQueue(var items, int index)
     signal openDetail(var item)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     property bool favorite: false
     property bool played: false
@@ -28,10 +41,40 @@ Item {
 
     readonly property bool isSeries: detail && detail.type === "Series"
     readonly property bool isPerson: detail && detail.type === "Person"
+    readonly property bool isBoxSet: detail && detail.type === "BoxSet"
+    readonly property bool isSeason: detail && detail.type === "Season"
+    readonly property bool isPlayableLeaf: detail && (detail.type === "Movie" || detail.type === "Episode"
+                                                     || detail.type === "Video" || detail.type === "MusicVideo")
     property var filmography: []
     property var extras: []
-    property var playlists: []
-    property var collectionsList: []
+    property var collectionItems: []   // BoxSet (collection) members
+
+    // collection members grouped by type, in a sensible display order
+    readonly property var collectionGroups: {
+        if (!isBoxSet) return []
+        var buckets = ({})
+        for (var i = 0; i < collectionItems.length; ++i) {
+            var it = collectionItems[i]
+            var key = (it.type === "Movie" || it.type === "Series" || it.type === "Episode"
+                       || it.type === "Video" || it.type === "MusicAlbum") ? it.type : "Other"
+            if (!buckets[key]) buckets[key] = []
+            buckets[key].push(it)
+        }
+        var order = [["Movie", qsTr("Movies")], ["Series", qsTr("Shows")], ["Episode", qsTr("Episodes")],
+                     ["MusicAlbum", qsTr("Albums")], ["Video", qsTr("Videos")], ["Other", qsTr("Items")]]
+        var out = []
+        for (var j = 0; j < order.length; ++j)
+            if (buckets[order[j][0]]) out.push({ title: order[j][1], items: buckets[order[j][0]] })
+        return out
+    }
+    readonly property var playableChildren: {
+        var out = []
+        for (var i = 0; i < collectionItems.length; ++i) {
+            var t = collectionItems[i].type
+            if (t === "Movie" || t === "Episode" || t === "Video" || t === "MusicVideo") out.push(collectionItems[i])
+        }
+        return out
+    }
 
     Component.onCompleted: load()
     onItemIdChanged: load()
@@ -53,13 +96,15 @@ Item {
     }
     function playPrimary() {
         if (!detail) return
-        if (isSeries) {
+        if (isSeries || isSeason) {
             if (episodes.length > 0) {
                 let ep = episodes[0]
                 for (let i = 0; i < episodes.length; ++i)
                     if (!episodes[i].played) { ep = episodes[i]; break }
                 playEpisode(ep)
             }
+        } else if (isBoxSet) {
+            if (playableChildren.length > 0) screen.playQueue(playableChildren, 0)
         } else {
             screen.play(detail)
         }
@@ -115,22 +160,24 @@ Item {
                     screen.client.fetchSpecialFeatures(screen.itemId, "d:extras:" + screen.itemId)
                     if (screen.isSeries)
                         screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
+                    else if (screen.isBoxSet)
+                        screen.client.fetchItems(screen.detail.id, "d:children:" + screen.itemId, "SortName", "Ascending")
+                    else if (screen.isSeason)
+                        screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
                 }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
                 if (items.length > 0) screen.selectSeason(items[0])
             } else if (tag.indexOf("d:episodes:") === 0) {
                 screen.episodes = items
+            } else if (tag === "d:children:" + screen.itemId) {
+                screen.collectionItems = items
             } else if (tag === "d:similar:" + screen.itemId) {
                 screen.similar = items
             } else if (tag === "d:filmography:" + screen.itemId) {
                 screen.filmography = items
             } else if (tag === "d:extras:" + screen.itemId) {
                 screen.extras = items
-            } else if (tag === "d:playlists") {
-                screen.playlists = items
-            } else if (tag === "d:collectionsList") {
-                screen.collectionsList = items
             }
         }
     }
@@ -158,55 +205,6 @@ Item {
             color: parent.primary ? Theme.accentText : Theme.textPrimary
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-        }
-    }
-
-    // picker popup: choose an existing playlist/collection or create a new one
-    component AddToPicker: Popup {
-        property var options: []
-        property string heading: ""
-        signal pickExisting(string id)
-        signal createNew(string name)
-        width: 280
-        padding: 8
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-        property bool creating: false
-        onClosed: creating = false
-        contentItem: ColumnLayout {
-            spacing: 2
-            Text { text: heading; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontNormal; Layout.leftMargin: 6; Layout.bottomMargin: 4 }
-            Repeater {
-                model: options
-                ItemDelegate {
-                    required property var modelData
-                    Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                    onClicked: { pickExisting(modelData.id); close() }
-                    contentItem: Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
-                    background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-                }
-            }
-            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
-            ItemDelegate {
-                visible: !creating
-                Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                onClicked: creating = true
-                contentItem: Text { text: qsTr("＋ New…"); color: Theme.accent; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-            }
-            RowLayout {
-                visible: creating
-                Layout.fillWidth: true
-                TextField {
-                    id: newName
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Name")
-                    color: Theme.textPrimary
-                    placeholderTextColor: Theme.textDisabled
-                    background: Rectangle { implicitHeight: 32; radius: Theme.radius; color: Theme.background; border.color: Theme.accent; border.width: 1 }
-                }
-                JIconButton { text: "✓"; implicitWidth: 34; implicitHeight: 34; onClicked: { if (newName.text.length) { createNew(newName.text); newName.clear(); close() } } }
-            }
         }
     }
 
@@ -324,7 +322,7 @@ Item {
                     anchors.fill: parent
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true; cache: true
-                    source: (screen.detail && screen.detail.hasBackdrop)
+                    source: (screen.showBackdrop && screen.detail && screen.detail.hasBackdrop)
                             ? screen.client.imageUrl(screen.detail.id, "Backdrop", 720, "")
                             : ""
                     visible: status === Image.Ready
@@ -391,7 +389,8 @@ Item {
                                 primary: true
                                 visible: !screen.isPerson
                                 text: (screen.detail && screen.detail.playbackTicks > 0) ? qsTr("▶  Resume") : qsTr("▶  Play")
-                                enabled: !screen.isSeries || screen.episodes.length > 0
+                                enabled: (screen.isSeries || screen.isSeason) ? screen.episodes.length > 0
+                                         : screen.isBoxSet ? screen.playableChildren.length > 0 : true
                                 onClicked: screen.playPrimary()
                             }
                             JIconButton {
@@ -410,25 +409,12 @@ Item {
                                 onClicked: moreMenu.popup()
                                 DarkMenu {
                                     id: moreMenu
-                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists; onTriggered: { screen.client.fetchPlaylists("d:playlists"); playlistPicker.open() } }
-                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections; onTriggered: { screen.client.fetchCollections("d:collectionsList"); collectionPicker.open() } }
+                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists; onTriggered: screen.itemAddToPlaylist(screen.detail) }
+                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections; onTriggered: screen.itemAddToCollection(screen.detail) }
+                                    DarkMenuItem { text: qsTr("Copy stream URL"); visible: screen.isPlayableLeaf; onTriggered: screen.client.copyStreamUrl(screen.detail.id) }
                                     DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
                                     DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
                                     DarkMenuItem { text: qsTr("Refresh metadata"); enabled: Features.metadataEdit }
-                                }
-                                AddToPicker {
-                                    id: playlistPicker
-                                    x: moreBtn.width - width; y: moreBtn.height + 4
-                                    heading: qsTr("Add to playlist"); options: screen.playlists
-                                    onPickExisting: (id) => screen.client.addToPlaylist(id, screen.detail.id)
-                                    onCreateNew: (name) => screen.client.createPlaylist(name, screen.detail.id)
-                                }
-                                AddToPicker {
-                                    id: collectionPicker
-                                    x: moreBtn.width - width; y: moreBtn.height + 4
-                                    heading: qsTr("Add to collection"); options: screen.collectionsList
-                                    onPickExisting: (id) => screen.client.addToCollection(id, screen.detail.id)
-                                    onCreateNew: (name) => screen.client.createCollection(name, screen.detail.id)
                                 }
                             }
                         }
@@ -453,6 +439,44 @@ Item {
                     visible: text.length > 0
                     color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
                     wrapMode: Text.Wrap; Layout.fillWidth: true; lineHeight: 1.25
+                }
+            }
+
+            // --- collection (BoxSet) members, grouped by type ---
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacingLarge
+                visible: screen.isBoxSet && screen.collectionItems.length > 0
+                Repeater {
+                    model: screen.collectionGroups
+                    MediaRow {
+                        required property var modelData
+                        title: modelData.title
+                        model: modelData.items
+                        client: screen.client
+                        shape: "poster"
+                        onItemActivated: (it) => screen.play(it)
+                        onItemOpenDetail: (it) => screen.openDetail(it)
+                        onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                        onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                    }
+                }
+            }
+
+            // --- standalone season: episode list (no season selector) ---
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.pagePad
+                Layout.rightMargin: Theme.pagePad
+                spacing: Theme.spacingSmall
+                visible: screen.isSeason && screen.episodes.length > 0
+                Text {
+                    text: qsTr("Episodes")
+                    color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true
+                }
+                Repeater {
+                    model: screen.episodes
+                    EpisodeRow {}
                 }
             }
 
@@ -558,7 +582,7 @@ Item {
                         leftMargin: Theme.pagePad; rightMargin: Theme.pagePad
                         boundsBehavior: Flickable.StopAtBounds
                         model: screen.cast
-                        Behavior on contentX { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        Behavior on contentX { NumberAnimation { duration: Theme.animMedium; easing.type: Easing.OutCubic } }
                         delegate: PersonTile {}
                     }
                     HoverHandler { id: castHover }
@@ -587,6 +611,8 @@ Item {
                 shape: "thumb"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.play(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             // --- filmography (person pages) ---
@@ -597,6 +623,8 @@ Item {
                 shape: "poster"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             // --- more like this ---
@@ -607,6 +635,8 @@ Item {
                 shape: "poster"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             Item { Layout.preferredHeight: Theme.spacingLarge }

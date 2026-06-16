@@ -2,6 +2,7 @@
 
 #include <QClipboard>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -238,6 +239,7 @@ static void fireAndForget(QNetworkReply *r)
 {
     QObject::connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
 }
+static QString enc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
 void JellyfinClient::scanAllLibraries() { fireAndForget(post(QStringLiteral("/Library/Refresh"), QByteArray())); }
 void JellyfinClient::restartServer()    { fireAndForget(post(QStringLiteral("/System/Restart"), QByteArray())); }
 void JellyfinClient::shutdownServer()   { fireAndForget(post(QStringLiteral("/System/Shutdown"), QByteArray())); }
@@ -249,14 +251,74 @@ void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &pol
                        QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
 }
 void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
+void JellyfinClient::createUser(const QString &name, const QString &password)
+{
+    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Password"), password}};
+    fireAndForget(post(QStringLiteral("/Users/New"), QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::setUserPassword(const QString &userId, const QString &newPw, bool reset)
+{
+    QJsonObject body;
+    if (reset) {
+        body[QStringLiteral("ResetPassword")] = true;
+    } else {
+        body[QStringLiteral("CurrentPw")] = QString(); // admins can set without the current password
+        body[QStringLiteral("NewPw")] = newPw;
+    }
+    fireAndForget(post(QStringLiteral("/Users/%1/Password").arg(userId), QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::renameDevice(const QString &deviceId, const QString &customName)
+{
+    const QJsonObject body{{QStringLiteral("CustomName"), customName}};
+    fireAndForget(post(QStringLiteral("/Devices/Options?id=%1").arg(enc(deviceId)), QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::deleteDevice(const QString &deviceId) { fireAndForget(del(QStringLiteral("/Devices?id=%1").arg(enc(deviceId)))); }
+void JellyfinClient::createApiKey(const QString &app) { fireAndForget(post(QStringLiteral("/Auth/Keys?app=%1").arg(enc(app)), QByteArray())); }
+void JellyfinClient::revokeApiKey(const QString &accessToken) { fireAndForget(del(QStringLiteral("/Auth/Keys/%1").arg(enc(accessToken)))); }
+void JellyfinClient::updateTaskTriggers(const QString &taskId, const QVariantList &triggers)
+{
+    fireAndForget(post(QStringLiteral("/ScheduledTasks/%1/Triggers").arg(taskId),
+                       QJsonDocument(QJsonArray::fromVariantList(triggers)).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::refreshItem(const QString &itemId)
+{
+    fireAndForget(post(QStringLiteral("/Items/%1/Refresh?metadataRefreshMode=Default&imageRefreshMode=Default").arg(itemId), QByteArray()));
+}
+void JellyfinClient::setPluginEnabled(const QString &pluginId, const QString &version, bool enabled)
+{
+    fireAndForget(post(QStringLiteral("/Plugins/%1/%2/%3").arg(pluginId, version, enabled ? QStringLiteral("Enable") : QStringLiteral("Disable")), QByteArray()));
+}
+void JellyfinClient::uninstallPlugin(const QString &pluginId, const QString &version)
+{
+    fireAndForget(del(QStringLiteral("/Plugins/%1/%2").arg(pluginId, version)));
+}
+void JellyfinClient::installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl)
+{
+    QString q = QStringLiteral("/Packages/Installed/%1?assemblyGuid=%2").arg(enc(name), enc(guid));
+    if (!version.isEmpty()) q += QStringLiteral("&version=%1").arg(enc(version));
+    if (!repoUrl.isEmpty()) q += QStringLiteral("&repositoryUrl=%1").arg(enc(repoUrl));
+    fireAndForget(post(q, QByteArray()));
+}
+void JellyfinClient::setRepositories(const QVariantList &repos)
+{
+    fireAndForget(post(QStringLiteral("/Repositories"),
+                       QJsonDocument(QJsonArray::fromVariantList(repos)).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::getText(const QString &path, const QString &requestTag)
+{
+    QNetworkReply *reply = get(path);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) { Q_EMIT errorOccurred(reply->errorString()); return; }
+        Q_EMIT textReady(requestTag, QString::fromUtf8(reply->readAll()));
+    });
+}
 void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
 {
     fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
 }
 
 // --- libraries (virtual folders) — fire-and-forget; the UI confirms first ----
-static QString enc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
-
 void JellyfinClient::addVirtualFolder(const QString &name, const QString &collectionType, const QString &path)
 {
     QString q = QStringLiteral("/Library/VirtualFolders?refreshLibrary=true&name=%1").arg(enc(name));
@@ -357,8 +419,21 @@ void JellyfinClient::fetchResume(const QString &requestTag)
 
 void JellyfinClient::fetchNextUp(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Shows/NextUp?userId=%1&Limit=24&%2&%3")
-                     .arg(m_userId, kItemFields, kImageTypes),
+    // Honor the user's Display prefs (Settings → Display): cap how far back a
+    // show stays in Next Up, and optionally keep already-watched episodes.
+    // These live in the shared QSettings the QML AppConfig writes.
+    const QSettings cfg;
+    QString extra;
+    // web default = 365 days; an explicit 0 means "no limit".
+    const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 365).toInt();
+    if (maxDays > 0)
+        extra += QStringLiteral("&NextUpDateCutoff=%1")
+                     .arg(QDateTime::currentDateTimeUtc().addDays(-maxDays).toString(Qt::ISODate));
+    if (cfg.value(QStringLiteral("display/rewatchingNextUp"), false).toBool())
+        extra += QStringLiteral("&EnableRewatching=true");
+
+    requestItems(QStringLiteral("/Shows/NextUp?userId=%1&Limit=24&%2&%3%4")
+                     .arg(m_userId, kItemFields, kImageTypes, extra),
                  requestTag);
 }
 

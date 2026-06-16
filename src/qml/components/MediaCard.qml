@@ -11,9 +11,12 @@ Item {
     required property var item        // QVariantMap from JellyfinClient
     property var client
     property string shape: "poster"   // "poster" | "thumb"
+    property bool episodeImages: true // Next Up/Resume: episode still vs show image
 
     signal activated(var item)        // play
     signal openDetail(var item)       // open detail page
+    signal addToPlaylist(var item)    // → app-level picker (Main)
+    signal addToCollection(var item)  // → app-level picker (Main)
 
     readonly property int artHeight: shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight
     implicitWidth: shape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth
@@ -24,6 +27,11 @@ Item {
     readonly property bool playable: item && (item.type === "Movie" || item.type === "Episode"
                                               || item.type === "Video" || item.type === "MusicVideo"
                                               || item.type === "Trailer" || item.type === "Audio")
+    // real library items can be added to a collection/playlist (not views/genres/people)
+    readonly property bool canAddTo: item && (item.type === "Movie" || item.type === "Series"
+                                              || item.type === "Episode" || item.type === "Video"
+                                              || item.type === "MusicVideo" || item.type === "Audio"
+                                              || item.type === "MusicAlbum" || item.type === "BoxSet")
     readonly property real progress: {
         if (!item) return 0
         const t = item.playbackTicks || 0
@@ -34,6 +42,10 @@ Item {
     function imageSource() {
         if (!item || !client) return ""
         if (shape === "thumb") {
+            // Settings → Display "Use episode images in Next Up & Resume": when off,
+            // show the parent show's poster instead of the per-episode still.
+            if (isEpisode && !episodeImages && item.seriesId)
+                return client.imageUrl(item.seriesId, "Primary", artHeight * 2, "")
             if (item.imageTagThumb) return client.imageUrl(item.id, "Thumb", artHeight * 2, item.imageTagThumb)
             if (item.hasBackdrop)   return client.imageUrl(item.id, "Backdrop", artHeight * 2, "")
         }
@@ -81,7 +93,7 @@ Item {
                 source: card.imageSource()
                 visible: status === Image.Ready
                 scale: hover.hovered ? 1.06 : 1.0
-                Behavior on scale { NumberAnimation { duration: 130 } }
+                Behavior on scale { NumberAnimation { duration: Theme.animFast } }
             }
             // fallback when no/loading artwork
             Text {
@@ -191,8 +203,8 @@ Item {
             text: (card.item && card.item.played) ? qsTr("Mark as unplayed") : qsTr("Mark as played")
             onTriggered: if (card.client) card.client.setWatched(card.item.id, !(card.item.played === true))
         }
-        DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections }
-        DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists }
+        DarkMenuItem { text: qsTr("Add to collection"); visible: card.canAddTo; enabled: Features.collections; onTriggered: card.addToCollection(card.item) }
+        DarkMenuItem { text: qsTr("Add to playlist"); visible: card.canAddTo; enabled: Features.playlists; onTriggered: card.addToPlaylist(card.item) }
         DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
         DarkMenuItem { text: qsTr("Copy stream URL"); visible: card.playable; onTriggered: if (card.client) card.client.copyStreamUrl(card.item.id) }
         DarkMenuItem { text: qsTr("Delete media"); enabled: Features.deleteMedia }

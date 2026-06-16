@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Layouts
 import JellyfinDesktop
 
 // App shell: login (full screen) until authenticated, then the chrome — top
@@ -40,6 +41,20 @@ ApplicationWindow {
     }
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
+
+    // shared "add to playlist/collection" picker, invoked from any card or detail
+    property var addToItem: null
+    property string addToKind: ""      // "playlist" | "collection"
+    property var addToOptions: []
+    function openAddTo(item, kind) {
+        if (!item) return
+        win.addToItem = item
+        win.addToKind = kind
+        win.addToOptions = []
+        if (kind === "playlist") jellyfin.fetchPlaylists("shell:addto")
+        else jellyfin.fetchCollections("shell:addto")
+        addToPicker.open()
+    }
 
     // ---- login (no chrome) ------------------------------------------------
     Loader {
@@ -98,6 +113,8 @@ ApplicationWindow {
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
             onOpenLibrary: (lib) => win.openLibrary(lib)
+            onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
+            onItemAddToCollection: (it) => win.openAddTo(it, "collection")
         }
     }
     Component {
@@ -107,15 +124,20 @@ ApplicationWindow {
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
             onOpenFiltered: (props) => stack.push(libraryComp, props)
+            onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
+            onItemAddToCollection: (it) => win.openAddTo(it, "collection")
         }
     }
     Component {
         id: detailComp
         DetailScreen {
             client: jellyfin
+            config: appConfig
             onPlay: (it) => win.playItem(it)
             onPlayQueue: (items, index) => win.playQueue(items, index)
             onOpenDetail: (it) => win.openDetail(it)
+            onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
+            onItemAddToCollection: (it) => win.openAddTo(it, "collection")
         }
     }
     Component {
@@ -124,6 +146,8 @@ ApplicationWindow {
             client: jellyfin
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
+            onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
+            onItemAddToCollection: (it) => win.openAddTo(it, "collection")
         }
     }
     Component {
@@ -148,6 +172,81 @@ ApplicationWindow {
         config: appConfig
     }
 
+    // ---- shared add-to-playlist/collection picker -------------------------
+    Popup {
+        id: addToPicker
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 340
+        padding: 8
+        modal: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        property bool creating: false
+        onClosed: { creating = false; newName.clear() }
+        contentItem: ColumnLayout {
+            spacing: 2
+            Text {
+                Layout.fillWidth: true; Layout.leftMargin: 6; Layout.bottomMargin: 4
+                text: (win.addToKind === "playlist" ? qsTr("Add to playlist") : qsTr("Add to collection"))
+                      + (win.addToItem ? (" — " + win.addToItem.name) : "")
+                color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontNormal; elide: Text.ElideRight
+            }
+            Repeater {
+                model: win.addToOptions
+                ItemDelegate {
+                    required property var modelData
+                    Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
+                    onClicked: {
+                        if (win.addToKind === "playlist") jellyfin.addToPlaylist(modelData.id, win.addToItem.id)
+                        else jellyfin.addToCollection(modelData.id, win.addToItem.id)
+                        addToPicker.close()
+                    }
+                    contentItem: Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                    background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
+                }
+            }
+            Text {
+                visible: win.addToOptions.length === 0
+                Layout.leftMargin: 6
+                text: win.addToKind === "playlist" ? qsTr("No playlists yet.") : qsTr("No collections yet.")
+                color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
+            }
+            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
+            ItemDelegate {
+                visible: !addToPicker.creating
+                Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
+                onClicked: addToPicker.creating = true
+                contentItem: Text { text: qsTr("＋ New…"); color: Theme.accent; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter }
+                background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
+            }
+            RowLayout {
+                visible: addToPicker.creating
+                Layout.fillWidth: true
+                TextField {
+                    id: newName
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Name")
+                    color: Theme.textPrimary
+                    placeholderTextColor: Theme.textDisabled
+                    background: Rectangle { implicitHeight: 32; radius: Theme.radius; color: Theme.background; border.color: Theme.accent; border.width: 1 }
+                    onAccepted: createBtn.clicked()
+                }
+                JIconButton {
+                    id: createBtn
+                    text: "✓"; implicitWidth: 34; implicitHeight: 34
+                    onClicked: {
+                        if (newName.text.length && win.addToItem) {
+                            if (win.addToKind === "playlist") jellyfin.createPlaylist(newName.text, win.addToItem.id)
+                            else jellyfin.createCollection(newName.text, win.addToItem.id)
+                            addToPicker.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- shell data + dev auto-login/auto-play ---------------------------
     Connections {
         target: jellyfin
@@ -166,10 +265,16 @@ ApplicationWindow {
                 win.libraries = items
             else if (tag === "auto:resume" && win.autoPlayEnabled && items.length > 0)
                 win.playItem(items[0])
+            else if (tag === "shell:addto")
+                win.addToOptions = items
         }
     }
 
     Component.onCompleted: {
+        // apply client-local display prefs that affect the whole UI
+        var fa = appConfig.value("display/fastAnimations", false)
+        Theme.fastAnimations = (fa === true || fa === "true" || fa === 1 || fa === "1")
+
         if (jellyfin.restoreSession()) // saved login: skip re-auth
             return
         if (typeof initialUser !== "undefined" && initialUser.length > 0)
