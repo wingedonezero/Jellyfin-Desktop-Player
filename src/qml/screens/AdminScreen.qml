@@ -24,6 +24,7 @@ Item {
     property var editPolicy: ({})
     property var serverConfig: null
     property var editConfig: ({})
+    property var dynOptions: ({})          // dynamically-fetched select options (e.g. {users: [...]})
     property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
@@ -68,6 +69,37 @@ Item {
         {label: qsTr("Enable throttling"), key: "EnableThrottling", type: "toggle"},
         {label: qsTr("Enable audio VBR"), key: "EnableAudioVbr", type: "toggle"}
     ]
+    readonly property var resumeFields: [
+        {label: qsTr("Minimum resume percentage"), key: "MinResumePct", type: "number"},
+        {label: qsTr("Maximum resume percentage"), key: "MaxResumePct", type: "number"},
+        {label: qsTr("Minimum audiobook resume (%)"), key: "MinAudiobookResume", type: "number"},
+        {label: qsTr("Maximum audiobook resume (%)"), key: "MaxAudiobookResume", type: "number"},
+        {label: qsTr("Minimum resume duration (seconds)"), key: "MinResumeDurationSeconds", type: "number"}
+    ]
+    readonly property var streamingFields: [
+        {label: qsTr("Remote client bitrate limit (Mbps, 0 = unlimited)"), key: "RemoteClientBitrateLimit", type: "number", scale: 1000000}
+    ]
+    readonly property var nfoFields: [
+        {label: qsTr("Kodi metadata user"), key: "UserId", type: "select", optionsKey: "users"},
+        {label: qsTr("Save image paths in NFO"), key: "SaveImagePathsInNfo", type: "toggle"},
+        {label: qsTr("Enable path substitution"), key: "EnablePathSubstitution", type: "toggle"},
+        {label: qsTr("Duplicate extra thumbnails (extrafanart/extrathumbs)"), key: "EnableExtraThumbsDuplication", type: "toggle"}
+    ]
+    // Trickplay lives in the nested ServerConfiguration.TrickplayOptions object → dot-path keys.
+    readonly property var trickplayFields: [
+        {label: qsTr("Enable hardware decoding"), key: "TrickplayOptions.EnableHwAcceleration", type: "toggle"},
+        {label: qsTr("Enable hardware encoding"), key: "TrickplayOptions.EnableHwEncoding", type: "toggle"},
+        {label: qsTr("Key-frame-only extraction"), key: "TrickplayOptions.EnableKeyFrameOnlyExtraction", type: "toggle"},
+        {label: qsTr("Scan behavior"), key: "TrickplayOptions.ScanBehavior", type: "select", options: [{value: "NonBlocking", text: qsTr("Non-blocking")}, {value: "Blocking", text: qsTr("Blocking")}]},
+        {label: qsTr("Process priority"), key: "TrickplayOptions.ProcessPriority", type: "select", options: [{value: "High", text: qsTr("High")}, {value: "AboveNormal", text: qsTr("Above normal")}, {value: "Normal", text: qsTr("Normal")}, {value: "BelowNormal", text: qsTr("Below normal")}, {value: "Idle", text: qsTr("Idle")}]},
+        {label: qsTr("Image interval (ms)"), key: "TrickplayOptions.Interval", type: "number"},
+        {label: qsTr("Width resolutions (comma-separated)"), key: "TrickplayOptions.WidthResolutions", type: "csv"},
+        {label: qsTr("Tile width (images per tile)"), key: "TrickplayOptions.TileWidth", type: "number"},
+        {label: qsTr("Tile height (images per tile)"), key: "TrickplayOptions.TileHeight", type: "number"},
+        {label: qsTr("JPEG quality (1–100)"), key: "TrickplayOptions.JpegQuality", type: "number"},
+        {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number"},
+        {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number"}
+    ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
     readonly property var navModel: [
@@ -77,8 +109,11 @@ Item {
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
         { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "config", ep: "/System/Configuration", fields: screen.metadataFields },
+        { group: qsTr("Server"),   label: qsTr("NFO"),           kind: "config", ep: "/System/Configuration/xbmcmetadata", fields: screen.nfoFields },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "config", ep: "/System/Configuration/encoding", fields: screen.encodingFields },
-        { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("Resume"),        kind: "config", ep: "/System/Configuration", fields: screen.resumeFields },
+        { group: qsTr("Server"),   label: qsTr("Streaming"),     kind: "config", ep: "/System/Configuration", fields: screen.streamingFields },
+        { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "config", ep: "/System/Configuration", fields: screen.trickplayFields },
         { group: qsTr("Devices"),  label: qsTr("Devices"),       kind: "list", ep: "/Devices", fmt: "devices" },
         { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", fmt: "activity" },
         { group: qsTr("Live TV"),  label: qsTr("Live TV"),       kind: "stub" },
@@ -107,8 +142,10 @@ Item {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
         } else if (selEntry.kind === "config") {
-            serverConfig = null; editConfig = ({})
+            serverConfig = null; editConfig = ({}); dynOptions = ({})
             client.getJson(selEntry.ep, "admin:config")
+            var fs = selEntry.fields || []
+            for (var i = 0; i < fs.length; i++) if (fs[i].optionsKey === "users") { client.getJson("/Users", "admin:config:users"); break }
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
         }
@@ -174,6 +211,12 @@ Item {
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
             else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
+            else if (tag === "admin:config:users") {
+                var opts = [{value: "", text: qsTr("None")}]
+                var us = screen.asArray(data)
+                for (var i = 0; i < us.length; i++) opts.push({value: us[i].Id, text: us[i].Name})
+                screen.dynOptions = Object.assign({}, screen.dynOptions, {users: opts})
+            }
         }
     }
 
@@ -211,20 +254,57 @@ Item {
         MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: db.clicked() }
     }
 
-    function setConfig(key, val) { var c = Object.assign({}, editConfig); c[key] = val; editConfig = c }
+    // editConfig accessors with dot-path support (e.g. "TrickplayOptions.Interval").
+    // setConfig deep-clones so a nested edit still flips the top-level ref (reactivity).
+    function cfgGet(path) {
+        var o = editConfig
+        var parts = ("" + path).split(".")
+        for (var i = 0; i < parts.length; i++) {
+            if (o === null || o === undefined) return undefined
+            o = o[parts[i]]
+        }
+        return o
+    }
+    function setConfig(path, val) {
+        var c = editConfig ? JSON.parse(JSON.stringify(editConfig)) : ({})
+        var parts = ("" + path).split(".")
+        var o = c
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (o[parts[i]] === null || o[parts[i]] === undefined) o[parts[i]] = ({})
+            o = o[parts[i]]
+        }
+        o[parts[parts.length - 1]] = val
+        editConfig = c
+    }
     component ConfigField: RowLayout {
         id: cf
         property string label: ""
         property string key: ""
-        property bool numeric: false
+        property string mode: "text"     // text | number | csv
+        property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
+        function display() {
+            var v = screen.cfgGet(cf.key)
+            if (v === undefined || v === null) return ""
+            if (cf.mode === "csv") return (typeof v !== "string" && v.length !== undefined) ? v.join(",") : ("" + v)
+            if (cf.mode === "number" && cf.scale !== 1) return v ? ("" + (v / cf.scale)) : ""
+            return "" + v
+        }
+        function commit(t) {
+            if (cf.mode === "csv")
+                screen.setConfig(cf.key, ("" + t).replace(/\s/g, "").split(",").filter(function (x) { return x.length }).map(Number))
+            else if (cf.mode === "number")
+                screen.setConfig(cf.key, cf.scale !== 1 ? Math.trunc(cf.scale * (parseFloat(t) || 0)) : (parseInt(t) || 0))
+            else
+                screen.setConfig(cf.key, t)
+        }
         Layout.fillWidth: true
         Text { text: cf.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
         TextField {
             Layout.preferredWidth: 340
-            text: ("" + (screen.editConfig[cf.key] !== undefined && screen.editConfig[cf.key] !== null ? screen.editConfig[cf.key] : ""))
+            text: cf.display()
             color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
-            inputMethodHints: cf.numeric ? Qt.ImhDigitsOnly : Qt.ImhNone
-            onEditingFinished: screen.setConfig(cf.key, cf.numeric ? (parseInt(text) || 0) : text)
+            inputMethodHints: cf.mode === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+            onEditingFinished: cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
         }
     }
@@ -236,10 +316,59 @@ Item {
         Text { text: ct.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
         Rectangle {
             id: cs
-            readonly property bool on: screen.editConfig[ct.key] === true
+            readonly property bool on: screen.cfgGet(ct.key) === true
             width: 44; height: 24; radius: 12; color: on ? Theme.accent : Theme.elevated
             Rectangle { width: 18; height: 18; radius: 9; y: 3; x: cs.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.setConfig(ct.key, !cs.on) }
+        }
+    }
+    component ConfigSelect: RowLayout {
+        id: csel
+        property string label: ""
+        property string key: ""
+        property var options: []          // [{value, text}]
+        function syncIndex() {
+            var cur = screen.cfgGet(csel.key)
+            for (var i = 0; i < csel.options.length; i++)
+                if (String(csel.options[i].value) === String(cur)) { cbox.currentIndex = i; return }
+            cbox.currentIndex = -1
+        }
+        onOptionsChanged: syncIndex()
+        // editConfig is assigned just after serverConfig, but the Repeater builds us
+        // synchronously on the serverConfig change — so re-sync once editConfig lands.
+        Connections { target: screen; function onEditConfigChanged() { csel.syncIndex() } }
+        Layout.fillWidth: true
+        Text { text: csel.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        ComboBox {
+            id: cbox
+            Layout.preferredWidth: 340
+            implicitHeight: 34
+            model: csel.options
+            textRole: "text"
+            Component.onCompleted: csel.syncIndex()
+            onActivated: (idx) => screen.setConfig(csel.key, csel.options[idx].value)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: cbox.activeFocus || cbox.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+            contentItem: Text { text: cbox.currentIndex >= 0 ? cbox.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            indicator: Text { x: cbox.width - width - 10; y: (cbox.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+            popup: Popup {
+                y: cbox.height + 2; width: cbox.width
+                implicitHeight: Math.min(clist.contentHeight + 2, 300); padding: 1
+                background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                contentItem: ListView {
+                    id: clist
+                    clip: true
+                    model: cbox.popup.visible ? cbox.delegateModel : null
+                    currentIndex: cbox.highlightedIndex
+                    ScrollBar.vertical: ScrollBar { active: true }
+                }
+            }
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: cbox.width; implicitHeight: 32; hoverEnabled: true
+                contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+            }
         }
     }
 
@@ -501,15 +630,16 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; numeric: parent.modelData.type === "number" } }
+                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : "text"); scale: parent.modelData.scale || 1 } }
                     Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
+                    Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
                     Repeater {
                         model: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : []
                         Loader {
                             required property var modelData
                             Layout.fillWidth: true
                             Layout.preferredHeight: item ? item.implicitHeight : 0
-                            sourceComponent: modelData.type === "toggle" ? cfgToggleComp : cfgFieldComp
+                            sourceComponent: modelData.type === "toggle" ? cfgToggleComp : (modelData.type === "select" ? cfgSelectComp : cfgFieldComp)
                         }
                     }
                     RowLayout {
