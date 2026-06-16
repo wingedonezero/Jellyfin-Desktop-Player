@@ -30,13 +30,13 @@ Item {
 
     // field sets for the data-driven server-config editors (kind "config")
     readonly property var generalFields: [
-        {label: qsTr("Server name"), key: "ServerName", type: "text"},
-        {label: qsTr("Preferred display language"), key: "UICulture", type: "text"},
-        {label: qsTr("Cache path"), key: "CachePath", type: "text"},
-        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text"},
-        {label: qsTr("Enable Quick Connect"), key: "QuickConnectAvailable", type: "toggle"},
-        {label: qsTr("Library scan fanout concurrency (0 = auto)"), key: "LibraryScanFanoutConcurrency", type: "number"},
-        {label: qsTr("Parallel image encoding limit (0 = auto)"), key: "ParallelImageEncodingLimit", type: "number"}
+        {group: qsTr("Settings"), label: qsTr("Server name"), key: "ServerName", type: "text", help: qsTr("This name will be used to identify the server and will default to the server's hostname.")},
+        {label: qsTr("Preferred display language"), key: "UICulture", type: "select", optionsKey: "uiCultures", help: qsTr("Translating Jellyfin is an ongoing project. <a href=\"https://jellyfin.org/docs/general/contributing/#translating\">Learn how you can contribute.</a>")},
+        {group: qsTr("Paths"), label: qsTr("Cache path"), key: "CachePath", type: "text", help: qsTr("Specify a custom location for server cache files such as images. Leave blank to use the server default.")},
+        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text", help: qsTr("Specify a custom location for downloaded artwork and metadata.")},
+        {group: qsTr("Quick Connect"), label: qsTr("Enable Quick Connect on this server"), key: "QuickConnectAvailable", type: "toggle"},
+        {group: qsTr("Performance"), label: qsTr("Parallel library scan tasks limit"), key: "LibraryScanFanoutConcurrency", type: "number", help: qsTr("Maximum number of parallel tasks during library scans. Leaving this empty will choose a limit based on your system's core count. WARNING: Setting this number too high may cause issues with network file systems; if you encounter problems lower this number.")},
+        {label: qsTr("Parallel image encoding limit"), key: "ParallelImageEncodingLimit", type: "number", help: qsTr("Maximum number of image encodings that are allowed to run in parallel. Leaving this empty will choose a limit based on your system's core count.")}
     ]
     readonly property var brandingFields: [
         {label: qsTr("Enable splash screen"), key: "SplashscreenEnabled", type: "toggle"},
@@ -44,8 +44,8 @@ Item {
         {label: qsTr("Custom CSS"), key: "CustomCss", type: "text"}
     ]
     readonly property var metadataFields: [
-        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "text"},
-        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "text"},
+        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
+        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
         {label: qsTr("Dummy chapter duration (seconds)"), key: "DummyChapterDuration", type: "number"},
         {label: qsTr("Chapter image resolution"), key: "ChapterImageResolution", type: "text"}
     ]
@@ -144,10 +144,19 @@ Item {
         } else if (selEntry.kind === "config") {
             serverConfig = null; editConfig = ({}); dynOptions = ({})
             client.getJson(selEntry.ep, "admin:config")
-            var fs = selEntry.fields || []
-            for (var i = 0; i < fs.length; i++) if (fs[i].optionsKey === "users") { client.getJson("/Users", "admin:config:users"); break }
+            fetchOptionSources(selEntry.fields)
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
+        }
+    }
+    // GET any dynamic dropdown option sources the field set needs (deduped); tagged admin:opt:<key>
+    readonly property var optionEndpoints: ({ users: "/Users", uiCultures: "/Localization/Options", cultures: "/Localization/Cultures", countries: "/Localization/Countries" })
+    function fetchOptionSources(fields) {
+        var seen = ({})
+        var fs = fields || []
+        for (var i = 0; i < fs.length; i++) {
+            var k = fs[i].optionsKey
+            if (k && !seen[k] && optionEndpoints[k]) { seen[k] = true; client.getJson(optionEndpoints[k], "admin:opt:" + k) }
         }
     }
     // confirm a destructive action before running it (server actions)
@@ -211,11 +220,15 @@ Item {
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
             else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
-            else if (tag === "admin:config:users") {
-                var opts = [{value: "", text: qsTr("None")}]
-                var us = screen.asArray(data)
-                for (var i = 0; i < us.length; i++) opts.push({value: us[i].Id, text: us[i].Name})
-                screen.dynOptions = Object.assign({}, screen.dynOptions, {users: opts})
+            else if (tag.indexOf("admin:opt:") === 0) {
+                var key = tag.substring(10)
+                var src = screen.asArray(data)
+                var opts = []
+                if (key === "users") { opts.push({value: "", text: qsTr("None")}); for (var i = 0; i < src.length; i++) opts.push({value: src[i].Id, text: src[i].Name}) }
+                else if (key === "uiCultures") { for (var j = 0; j < src.length; j++) opts.push({value: src[j].Value || "", text: src[j].Name}) }
+                else if (key === "cultures") { opts.push({value: "", text: qsTr("Any language")}); for (var m = 0; m < src.length; m++) opts.push({value: src[m].TwoLetterISOLanguageName || "", text: src[m].DisplayName || src[m].Name}) }
+                else if (key === "countries") { opts.push({value: "", text: qsTr("Any country")}); for (var n = 0; n < src.length; n++) opts.push({value: src[n].TwoLetterISORegionName || "", text: src[n].DisplayName || src[n].Name}) }
+                var dd = Object.assign({}, screen.dynOptions); dd[key] = opts; screen.dynOptions = dd
             }
         }
     }
@@ -635,11 +648,36 @@ Item {
                     Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
                     Repeater {
                         model: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : []
-                        Loader {
+                        ColumnLayout {
+                            id: fieldRow
                             required property var modelData
+                            required property int index
                             Layout.fillWidth: true
-                            Layout.preferredHeight: item ? item.implicitHeight : 0
-                            sourceComponent: modelData.type === "toggle" ? cfgToggleComp : (modelData.type === "select" ? cfgSelectComp : cfgFieldComp)
+                            spacing: 3
+                            // section header — shown when a field starts a new group (web groups fields under headings)
+                            Text {
+                                visible: !!fieldRow.modelData.group && (fieldRow.index === 0 || screen.selEntry.fields[fieldRow.index - 1].group !== fieldRow.modelData.group)
+                                text: fieldRow.modelData.group || ""
+                                color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+                                Layout.topMargin: fieldRow.index === 0 ? 0 : Theme.spacing
+                                Layout.bottomMargin: 2
+                            }
+                            Loader {
+                                property var modelData: fieldRow.modelData
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: item ? item.implicitHeight : 0
+                                sourceComponent: modelData.type === "toggle" ? cfgToggleComp : (modelData.type === "select" ? cfgSelectComp : cfgFieldComp)
+                            }
+                            // helper text (matches web; supports an inline <a href> link)
+                            Text {
+                                visible: !!fieldRow.modelData.help
+                                text: fieldRow.modelData.help || ""
+                                color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
+                                textFormat: Text.StyledText; linkColor: Theme.accent
+                                onLinkActivated: (l) => Qt.openUrlExternally(l)
+                                wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 4; Layout.maximumWidth: 760
+                                Layout.bottomMargin: Theme.spacingSmall
+                            }
                         }
                     }
                     RowLayout {
