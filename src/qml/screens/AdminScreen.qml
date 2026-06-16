@@ -87,10 +87,11 @@ Item {
         {label: qsTr("Custom CSS"), key: "CustomCss", type: "text", help: qsTr("Apply your custom CSS code for theming/branding on the web interface.")}
     ]
     readonly property var metadataFields: [
-        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
-        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
-        {label: qsTr("Dummy chapter duration (seconds)"), key: "DummyChapterDuration", type: "number"},
-        {label: qsTr("Chapter image resolution"), key: "ChapterImageResolution", type: "text"}
+        {group: qsTr("Preferred metadata language"), label: qsTr("Language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures", help: qsTr("These are your defaults and can be customized on a per-library basis.")},
+        {label: qsTr("Country"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
+        {group: qsTr("Chapter images"), label: qsTr("Interval"), key: "DummyChapterDuration", type: "number", help: qsTr("The interval between dummy chapters in seconds. Set to 0 to disable dummy chapter generation. Changing this will have no effect on existing dummy chapters.")},
+        {label: qsTr("Resolution"), key: "ChapterImageResolution", type: "select", help: qsTr("The resolution of the extracted chapter images. Changing this will have no effect on existing dummy chapters."),
+         options: [{value: "MatchSource", text: qsTr("Match Source")}, {value: "P2160", text: "2160p"}, {value: "P1440", text: "1440p"}, {value: "P1080", text: "1080p"}, {value: "P720", text: "720p"}, {value: "P480", text: "480p"}, {value: "P360", text: "360p"}, {value: "P240", text: "240p"}, {value: "P144", text: "144p"}]}
     ]
     readonly property var networkFields: [
         {group: qsTr("Server addresses"), label: qsTr("Local HTTP port number"), key: "InternalHttpPort", type: "number", help: qsTr("The TCP port number for the HTTP server.")},
@@ -105,7 +106,7 @@ Item {
         {label: qsTr("Certificate password"), key: "CertificatePassword", type: "password", help: qsTr("If your certificate requires a password, please enter it here.")},
         {group: qsTr("Remote access"), label: qsTr("Allow remote connections to this server"), key: "EnableRemoteAccess", type: "toggle", help: qsTr("If unchecked, all remote connections will be blocked.")},
         {label: qsTr("Remote IP address filter"), key: "RemoteIPFilter", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries that will be allowed to connect remotely. If left blank, all remote addresses will be allowed.")},
-        {label: qsTr("Treat the remote IP filter as a blacklist (off = whitelist)"), key: "IsRemoteIPFilterBlacklist", type: "toggle"},
+        {label: qsTr("Remote IP filter mode"), key: "IsRemoteIPFilterBlacklist", type: "select", options: [{value: false, text: qsTr("Whitelist — only the addresses above may connect")}, {value: true, text: qsTr("Blacklist — the addresses above are blocked")}]},
         {label: qsTr("Public HTTP port number"), key: "PublicHttpPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTP port.")},
         {label: qsTr("Public HTTPS port number"), key: "PublicHttpsPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTPS port.")},
         {group: qsTr("IP protocols"), label: qsTr("Enable IPv4"), key: "EnableIPv4", type: "toggle", help: qsTr("Enable IPv4 functionality.")},
@@ -118,10 +119,10 @@ Item {
         {label: qsTr("VA-API device"), key: "VaapiDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "vaapi"}, help: qsTr("This is the render node that is used for hardware acceleration.")},
         {label: qsTr("QSV device"), key: "QsvDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}, help: qsTr("Specify the device for Intel QSV on a multi-GPU system. On Linux this is the render node, e.g. /dev/dri/renderD128; on Windows the device index from 0.")},
         {label: qsTr("Enable hardware decoding for"), key: "HardwareDecodingCodecs", type: "list", showWhen: {key: "HardwareAccelerationType", neq: "none"}, help: qsTr("Comma-separated list of codecs to hardware-decode (e.g. h264, hevc, mpeg2video, vc1, vp8, vp9, av1).")},
-        {label: qsTr("HEVC 10bit decoding"), key: "EnableDecodingColorDepth10Hevc", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
-        {label: qsTr("VP9 10bit decoding"), key: "EnableDecodingColorDepth10Vp9", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
-        {label: qsTr("HEVC RExt 8/10bit decoding"), key: "EnableDecodingColorDepth10HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
-        {label: qsTr("HEVC RExt 12bit decoding"), key: "EnableDecodingColorDepth12HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("HEVC 10bit decoding"), key: "EnableDecodingColorDepth10Hevc", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp"]}},
+        {label: qsTr("VP9 10bit decoding"), key: "EnableDecodingColorDepth10Vp9", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp"]}},
+        {label: qsTr("HEVC RExt 8/10bit decoding"), key: "EnableDecodingColorDepth10HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["nvenc", "qsv", "vaapi"]}},
+        {label: qsTr("HEVC RExt 12bit decoding"), key: "EnableDecodingColorDepth12HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["nvenc", "qsv", "vaapi"]}},
         {label: qsTr("Enable enhanced NVDEC decoder"), key: "EnableEnhancedNvdecDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "nvenc"}, help: qsTr("Enhanced NVDEC implementation; disable to use CUVID if you encounter decoding errors.")},
         {label: qsTr("Prefer OS native DXVA or VA-API decoders"), key: "PreferSystemNativeHwDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}},
         {label: qsTr("Enable hardware encoding"), key: "EnableHardwareEncoding", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
@@ -150,7 +151,8 @@ Item {
          options: [{value: "auto", text: qsTr("Auto")}, {value: "veryslow", text: "veryslow"}, {value: "slower", text: "slower"}, {value: "slow", text: "slow"}, {value: "medium", text: "medium"}, {value: "fast", text: "fast"}, {value: "faster", text: "faster"}, {value: "veryfast", text: "veryfast"}, {value: "superfast", text: "superfast"}, {value: "ultrafast", text: "ultrafast"}]},
         {label: qsTr("H.265 encoding CRF"), key: "H265Crf", type: "number"},
         {label: qsTr("H.264 encoding CRF"), key: "H264Crf", type: "number", help: qsTr("The 'Constant Rate Factor' for the x264/x265 software encoders. Values 0-51, lower = better quality / larger files. Sane values 18-28 (x264 default 23, x265 28). Hardware encoders ignore this.")},
-        {label: qsTr("Transcoding thread count (-1 = auto, 0 = max)"), key: "EncodingThreadCount", type: "number", help: qsTr("Max threads when transcoding. Reducing lowers CPU usage but may not convert fast enough for smooth playback.")},
+        {label: qsTr("Transcoding thread count"), key: "EncodingThreadCount", type: "select", help: qsTr("Max threads when transcoding. Reducing lowers CPU usage but may not convert fast enough for smooth playback."),
+         options: [{value: -1, text: qsTr("Auto")}, {value: 1, text: "1"}, {value: 2, text: "2"}, {value: 3, text: "3"}, {value: 4, text: "4"}, {value: 5, text: "5"}, {value: 6, text: "6"}, {value: 7, text: "7"}, {value: 8, text: "8"}, {value: 9, text: "9"}, {value: 10, text: "10"}, {value: 11, text: "11"}, {value: 12, text: "12"}, {value: 13, text: "13"}, {value: 14, text: "14"}, {value: 15, text: "15"}, {value: 16, text: "16"}, {value: 0, text: qsTr("Max")}]},
         {label: qsTr("Max muxing queue size"), key: "MaxMuxingQueueSize", type: "number", help: qsTr("Packets buffered while streams initialize. Increase if you meet \"Too many packets buffered for output stream\" errors. Recommended 2048.")},
 
         {group: qsTr("Deinterlacing"), label: qsTr("Deinterlacing method"), key: "DeinterlaceMethod", type: "select", help: qsTr("Method used when software transcoding interlaced content. Hardware deinterlacing is used instead when available."),
@@ -163,7 +165,8 @@ Item {
         {label: qsTr("Stereo downmix algorithm"), key: "DownMixStereoAlgorithm", type: "select", help: qsTr("Algorithm used to downmix multi-channel audio to stereo."),
          options: [{value: "None", text: qsTr("None")}, {value: "Dave750", text: "Dave750"}, {value: "NightmodeDialogue", text: "Nightmode Dialogue"}, {value: "Rfc7845", text: "RFC7845"}, {value: "Ac4", text: "AC-4"}]},
 
-        {group: qsTr("Paths"), label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", browse: true, help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
+        {group: qsTr("Paths"), label: qsTr("FFmpeg path"), key: "EncoderAppPathDisplay", type: "text", readonly: true, help: qsTr("The path to the ffmpeg application file or folder containing ffmpeg. Detected automatically.")},
+        {label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", browse: true, help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
         {label: qsTr("Fallback font folder path"), key: "FallbackFontPath", type: "text", browse: true, help: qsTr("Fonts used by some clients to render subtitles.")},
         {label: qsTr("Enable fallback fonts"), key: "EnableFallbackFont", type: "toggle", help: qsTr("Enable custom alternate fonts to avoid incorrect subtitle rendering.")},
 
@@ -832,6 +835,7 @@ Item {
         property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
         property bool secret: false      // mask the input (passwords)
         property bool browse: false      // show a "Browse…" button → server directory picker
+        property bool ro: false          // read-only display field (e.g. detected FFmpeg path)
         function display() {
             var v = screen.cfgGet(cf.key)
             if (v === undefined || v === null) return ""
@@ -859,8 +863,9 @@ Item {
             text: cf.display()
             color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
             echoMode: cf.secret ? TextInput.Password : TextInput.Normal
+            readOnly: cf.ro
             inputMethodHints: (cf.mode === "number" || cf.mode === "float") ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
-            onEditingFinished: cf.commit(text)
+            onEditingFinished: if (!cf.ro) cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
         }
         DashButton { visible: cf.browse; text: qsTr("Browse…"); onClicked: screen.openDirPicker(cf.key) }
@@ -938,7 +943,7 @@ Item {
         property var fields: []
         Layout.fillWidth: true
         spacing: Theme.spacingSmall
-        Component { id: cflField; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true } }
+        Component { id: cflField; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true; ro: parent.modelData.readonly === true } }
         Component { id: cflToggle; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
         Component { id: cflSelect; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
         Repeater {
