@@ -68,6 +68,13 @@ Item {
         if (!bps || bps <= 0) return qsTr("Auto (direct play)")
         return (bps >= 1000000) ? ((Math.round(bps / 100000) / 10) + " Mbps") : (Math.round(bps / 1000) + " kbps")
     }
+    function subtitleModeHelp(m) {
+        if (m === "Smart") return qsTr("Subtitles matching the language preference will be loaded when the audio is in a foreign language.")
+        if (m === "OnlyForced") return qsTr("Only subtitles marked as forced will be loaded.")
+        if (m === "Always") return qsTr("Subtitles matching the language preference will always be loaded.")
+        if (m === "None") return qsTr("Subtitles will not be loaded by default.")
+        return qsTr("Subtitles are loaded based on the default and forced flags in the media's embedded metadata.")
+    }
 
     Component.onCompleted: {
         defaultBitrate = pref("playback/maxBitrate", 0)
@@ -361,18 +368,26 @@ Item {
                 OptionRow { text: qsTr("Display language"); stub: true }
                 OptionRow { text: qsTr("Layout mode"); stub: true }
                 ToggleRow { label: qsTr("Show backdrops"); on: screen.prefBool("display/backdrops", true); onSwitched: (v) => screen.setPref("display/backdrops", v) }
+                Hint { text: qsTr("Display the backdrops in the background of some pages while browsing the library.") }
                 ToggleRow { label: qsTr("Show details banner on items"); on: screen.prefBool("display/detailsBanner", true); onSwitched: (v) => screen.setPref("display/detailsBanner", v) }
+                Hint { text: qsTr("Display a banner image at the top of the item details page.") }
                 ToggleRow { label: qsTr("Faster animations"); on: screen.prefBool("display/fastAnimations", false); onSwitched: (v) => screen.setPref("display/fastAnimations", v) }
+                Hint { text: qsTr("Use faster animations and transitions.") }
                 OptionRow { text: qsTr("BlurHash placeholders"); stub: true }
 
                 GroupLabel { text: qsTr("LIBRARY") }
                 StepperRow { label: qsTr("Library page size (0 = all)"); value: screen.pref("display/libraryPageSize", 100); step: 25; minValue: 0; maxValue: 500; suffix: ""; onChanged: (v) => screen.setPref("display/libraryPageSize", v) }
+                Hint { text: qsTr("Number of items to show per library page (0 disables paging).") }
                 ToggleRow { label: qsTr("Display missing episodes within seasons"); on: screen.cfg("DisplayMissingEpisodes", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("DisplayMissingEpisodes", v) } }
+                Hint { text: qsTr("This must also be enabled for TV libraries in the server configuration.") }
 
                 GroupLabel { text: qsTr("NEXT UP") }
                 StepperRow { label: qsTr("Max days for Next Up"); value: screen.pref("display/maxDaysNextUp", 365); step: 30; minValue: 0; maxValue: 1000; suffix: ""; onChanged: (v) => screen.setPref("display/maxDaysNextUp", v) }
+                Hint { text: qsTr("Set the maximum amount of days a show should stay in the 'Next Up' list without watching it. Set to 0 for no limit.") }
                 ToggleRow { label: qsTr("Enable rewatching in Next Up"); on: screen.prefBool("display/rewatchingNextUp", false); onSwitched: (v) => screen.setPref("display/rewatchingNextUp", v) }
-                ToggleRow { label: qsTr("Use episode images in Next Up & Resume"); on: screen.prefBool("display/episodeImagesNextUp", false); onSwitched: (v) => screen.setPref("display/episodeImagesNextUp", v) }
+                Hint { text: qsTr("Enable showing already watched episodes in 'Next Up' sections.") }
+                ToggleRow { label: qsTr("Use episode images in Next Up & Resume"); on: screen.prefBool("display/episodeImagesNextUp", true); onSwitched: (v) => screen.setPref("display/episodeImagesNextUp", v) }
+                Hint { text: qsTr("'Next Up' and 'Continue Watching' sections will use episode images instead of the show's primary image.") }
 
                 GroupLabel { text: qsTr("EXTRAS") }
                 Hint { text: qsTr("Web-specific or not yet wired for the native client.") }
@@ -412,22 +427,33 @@ Item {
                 ToggleRow { label: qsTr("Play default audio track regardless of language"); on: screen.cfg("PlayDefaultAudioTrack", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("PlayDefaultAudioTrack", v) } }
                 ComboRow { label: qsTr("Allowed audio channels"); options: [{value: 0, text: qsTr("Auto")}, {value: 2, text: qsTr("Stereo")}, {value: 6, text: qsTr("5.1")}, {value: 8, text: qsTr("7.1")}]; value: screen.pref("playback/audioChannels", 0); onPicked: (v) => screen.setPref("playback/audioChannels", v) }
                 ComboRow { label: qsTr("Audio normalization"); options: [{value: "TrackGain", text: qsTr("Track")}, {value: "AlbumGain", text: qsTr("Album")}, {value: "None", text: qsTr("Off")}]; value: screen.pref("playback/audioNormalization", "TrackGain"); onPicked: (v) => screen.setPref("playback/audioNormalization", v) }
+                Hint { text: qsTr("Track gain plays every track at the same loudness; Album gain keeps an album's relative levels. Changing this requires restarting the current playback.") }
                 ToggleRow { label: qsTr("Disable VBR audio encoding"); on: screen.prefBool("playback/disableVbrAudio", false); onSwitched: (v) => screen.setPref("playback/disableVbrAudio", v) }
+                Hint { text: qsTr("Prevent the server from encoding audio with VBR for this client.") }
                 ToggleRow { label: qsTr("Allow DTS (audio passthrough)"); on: screen.prefBool("playback/enableDts", false); onSwitched: (v) => screen.setPref("playback/enableDts", v) }
+                Hint { text: qsTr("Only enable if your device supports DTS or is connected to a compatible audio receiver, otherwise it may cause playback failure.") }
                 ToggleRow { label: qsTr("Allow TrueHD (audio passthrough)"); on: screen.prefBool("playback/enableTrueHd", false); onSwitched: (v) => screen.setPref("playback/enableTrueHd", v) }
+                Hint { text: qsTr("Only enable if your device supports TrueHD or is connected to a compatible audio receiver, otherwise it may cause playback failure.") }
 
                 GroupLabel { text: qsTr("VIDEO") }
                 ComboRow { label: qsTr("Max video resolution"); options: [{value: 0, text: qsTr("Auto (source)")}, {value: 3840, text: qsTr("4K — 2160p")}, {value: 2560, text: qsTr("1440p")}, {value: 1920, text: qsTr("1080p")}, {value: 1280, text: qsTr("720p")}, {value: 854, text: qsTr("480p")}]; value: screen.pref("playback/maxResolutionWidth", 0); onPicked: (v) => screen.setPref("playback/maxResolutionWidth", v) }
                 ToggleRow { label: qsTr("Limit to the display's resolution"); on: screen.prefBool("playback/limitResolution", false); onSwitched: (v) => screen.setPref("playback/limitResolution", v) }
+                Hint { text: qsTr("Use the display's resolution as the maximum supported video resolution.") }
                 ComboRow { label: qsTr("Preferred transcode video codec"); options: [{value: "", text: qsTr("Auto (H.264)")}, {value: "h264", text: "H.264"}, {value: "hevc", text: qsTr("HEVC (H.265)")}, {value: "av1", text: "AV1"}]; value: screen.pref("playback/transcodeVideoCodec", ""); onPicked: (v) => screen.setPref("playback/transcodeVideoCodec", v) }
+                Hint { text: qsTr("Select the preferred video codec to transcode to. If it isn't supported, the server uses the next best available codec.") }
                 ComboRow { label: qsTr("Preferred transcode audio codec"); options: [{value: "", text: qsTr("Auto (AAC)")}, {value: "aac", text: "AAC"}, {value: "ac3", text: "AC3"}, {value: "eac3", text: "E-AC3"}, {value: "flac", text: "FLAC"}]; value: screen.pref("playback/transcodeAudioCodec", ""); onPicked: (v) => screen.setPref("playback/transcodeAudioCodec", v) }
+                Hint { text: qsTr("Select the preferred audio codec to transcode to for video content if audio transcoding is necessary.") }
                 ToggleRow { label: qsTr("Allow 10-bit H.264 (Hi10P)"); on: screen.prefBool("playback/enableHi10p", true); onSwitched: (v) => screen.setPref("playback/enableHi10p", v) }
+                Hint { text: qsTr("Enable to avoid transcoding H.264 10-bit videos. Disable if the video displays blank frames.") }
                 ToggleRow { label: qsTr("Prefer fMP4-HLS container"); on: screen.prefBool("playback/preferFmp4", false); onSwitched: (v) => screen.setPref("playback/preferFmp4", v) }
+                Hint { text: qsTr("Prefer fMP4 as the default HLS container, making it possible to direct stream HEVC and AV1 content on supported devices.") }
 
                 GroupLabel { text: qsTr("BEHAVIOUR") }
                 ToggleRow { label: qsTr("Play next episode automatically"); on: screen.autoPlayNext; onSwitched: (v) => { screen.autoPlayNext = v; screen.setPref("playback/autoPlayNext", v) } }
                 ToggleRow { label: qsTr("Remember audio selections"); on: screen.cfg("RememberAudioSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberAudioSelections", v) } }
+                Hint { text: qsTr("Try to set the audio track to the closest match to the last video.") }
                 ToggleRow { label: qsTr("Remember subtitle selections"); on: screen.cfg("RememberSubtitleSelections", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("RememberSubtitleSelections", v) } }
+                Hint { text: qsTr("Try to set the subtitle track to the closest match to the last video.") }
                 StepperRow { label: qsTr("Skip back interval"); value: screen.skipBack; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipBack = v; screen.setPref("playback/skipBack", v) } }
                 StepperRow { label: qsTr("Skip forward interval"); value: screen.skipForward; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipForward = v; screen.setPref("playback/skipForward", v) } }
                 ToggleRow { label: qsTr("Enable cinema mode (trailers / intros)"); on: screen.prefBool("playback/cinemaMode", false); stub: true }
@@ -482,6 +508,7 @@ Item {
                     value: screen.cfg("SubtitleMode", "Default")
                     onPicked: (v) => { if (screen.client) screen.client.setUserConfig("SubtitleMode", v) }
                 }
+                Hint { text: screen.subtitleModeHelp(screen.cfg("SubtitleMode", "Default")) }
                 ComboRow {
                     label: qsTr("Preferred subtitle language")
                     options: screen.subLangs

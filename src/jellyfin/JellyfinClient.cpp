@@ -363,7 +363,8 @@ void JellyfinClient::fetchNextUp(const QString &requestTag)
     // These live in the shared QSettings the QML AppConfig writes.
     const QSettings cfg;
     QString extra;
-    const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 0).toInt();
+    // web default = 365 days; an explicit 0 means "no limit".
+    const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 365).toInt();
     if (maxDays > 0)
         extra += QStringLiteral("&NextUpDateCutoff=%1")
                      .arg(QDateTime::currentDateTimeUtc().addDays(-maxDays).toString(Qt::ISODate));
