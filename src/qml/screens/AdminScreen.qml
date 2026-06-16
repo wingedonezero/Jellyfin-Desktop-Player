@@ -225,7 +225,8 @@ Item {
 
         {group: qsTr("Audio tags"), label: qsTr("Prefer ARTISTS tag if available"), key: "PreferNonstandardArtistsTag", type: "toggle", types: ["music"], help: qsTr("Use the non-standard ARTISTS tag instead of ARTIST when available.")},
         {label: qsTr("Use custom tag delimiters"), key: "UseCustomTagDelimiters", type: "toggle", types: ["music"], help: qsTr("Split artist/genre tags with custom characters.")},
-        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list", types: ["music"]}
+        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list", types: ["music"]},
+        {label: qsTr("Delimiter whitelist (comma-separated)"), key: "DelimiterWhitelist", type: "list", types: ["music"], help: qsTr("Items to be excluded from tag splitting.")}
     ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
