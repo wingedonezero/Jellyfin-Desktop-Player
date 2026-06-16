@@ -70,13 +70,64 @@ Item {
         {group: qsTr("Network discovery"), label: qsTr("Enable Auto Discovery"), key: "AutoDiscovery", type: "toggle", help: qsTr("Allow applications to automatically detect Jellyfin by using UDP port 7359.")}
     ]
     readonly property var encodingFields: [
-        {label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "text"},
-        {label: qsTr("Encoding thread count (-1 = auto)"), key: "EncodingThreadCount", type: "number"},
-        {label: qsTr("Transcode temp path"), key: "TranscodingTempPath", type: "text"},
-        {label: qsTr("H.264 CRF"), key: "H264Crf", type: "number"},
-        {label: qsTr("Allow HEVC encoding"), key: "AllowHevcEncoding", type: "toggle"},
-        {label: qsTr("Enable throttling"), key: "EnableThrottling", type: "toggle"},
-        {label: qsTr("Enable audio VBR"), key: "EnableAudioVbr", type: "toggle"}
+        {group: qsTr("Hardware acceleration"), label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "select", help: qsTr("Hardware acceleration requires additional configuration."),
+         options: [{value: "none", text: qsTr("None")}, {value: "amf", text: "AMD AMF"}, {value: "nvenc", text: "Nvidia NVENC"}, {value: "qsv", text: "Intel Quicksync (QSV)"}, {value: "vaapi", text: "Video Acceleration API (VAAPI)"}, {value: "rkmpp", text: "Rockchip MPP (RKMPP)"}, {value: "videotoolbox", text: "Apple VideoToolBox"}, {value: "v4l2m2m", text: "Video4Linux2 (V4L2)"}]},
+        {label: qsTr("VA-API device"), key: "VaapiDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "vaapi"}, help: qsTr("This is the render node that is used for hardware acceleration.")},
+        {label: qsTr("QSV device"), key: "QsvDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}, help: qsTr("Specify the device for Intel QSV on a multi-GPU system. On Linux this is the render node, e.g. /dev/dri/renderD128; on Windows the device index from 0.")},
+        {label: qsTr("Enable hardware decoding for"), key: "HardwareDecodingCodecs", type: "list", showWhen: {key: "HardwareAccelerationType", neq: "none"}, help: qsTr("Comma-separated list of codecs to hardware-decode (e.g. h264, hevc, mpeg2video, vc1, vp8, vp9, av1).")},
+        {label: qsTr("HEVC 10bit decoding"), key: "EnableDecodingColorDepth10Hevc", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("VP9 10bit decoding"), key: "EnableDecodingColorDepth10Vp9", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("HEVC RExt 8/10bit decoding"), key: "EnableDecodingColorDepth10HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("HEVC RExt 12bit decoding"), key: "EnableDecodingColorDepth12HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("Enable enhanced NVDEC decoder"), key: "EnableEnhancedNvdecDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "nvenc"}, help: qsTr("Enhanced NVDEC implementation; disable to use CUVID if you encounter decoding errors.")},
+        {label: qsTr("Prefer OS native DXVA or VA-API decoders"), key: "PreferSystemNativeHwDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}},
+        {label: qsTr("Enable hardware encoding"), key: "EnableHardwareEncoding", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("Enable Intel Low-Power H.264 hardware encoder"), key: "EnableIntelLowPowerH264HwEncoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}},
+        {label: qsTr("Enable Intel Low-Power HEVC hardware encoder"), key: "EnableIntelLowPowerHevcHwEncoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("On Linux these must be disabled if the i915 HuC firmware is not configured.")},
+
+        {group: qsTr("Encoding format"), label: qsTr("Allow encoding in HEVC format"), key: "AllowHevcEncoding", type: "toggle", help: qsTr("The video format Jellyfin transcodes to. Software encoding is used when hardware acceleration for the format is unavailable. H264 is always enabled.")},
+        {label: qsTr("Allow encoding in AV1 format"), key: "AllowAv1Encoding", type: "toggle"},
+
+        {group: qsTr("Tone mapping"), label: qsTr("Tone mapping algorithm"), key: "TonemappingAlgorithm", type: "select", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("If unfamiliar with these options, keep the default. The recommended value is 'BT.2390'."),
+         options: [{value: "none", text: qsTr("None")}, {value: "clip", text: "Clip"}, {value: "linear", text: "Linear"}, {value: "gamma", text: "Gamma"}, {value: "reinhard", text: "Reinhard"}, {value: "hable", text: "Hable"}, {value: "mobius", text: "Mobius"}, {value: "bt2390", text: "BT.2390"}]},
+        {label: qsTr("Tone mapping mode"), key: "TonemappingMode", type: "select", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]}, help: qsTr("If you experience blown-out highlights try switching to RGB mode."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "max", text: "MAX"}, {value: "rgb", text: "RGB"}, {value: "lum", text: "LUM"}, {value: "itp", text: "ITP"}]},
+        {label: qsTr("Tone mapping range"), key: "TonemappingRange", type: "select", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Output color range. Auto matches the input range."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "tv", text: "TV"}, {value: "pc", text: "PC"}]},
+        {label: qsTr("Tone mapping desat"), key: "TonemappingDesat", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Desaturate highlights exceeding this brightness. Recommended value 0 (disable).")},
+        {label: qsTr("Tone mapping peak"), key: "TonemappingPeak", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Override the embedded peak metadata for the input signal. Default 100 (1000nit).")},
+        {label: qsTr("Tone mapping param"), key: "TonemappingParam", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Tune the tone mapping algorithm. Generally leave blank.")},
+        {label: qsTr("Enable tone mapping"), key: "EnableTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]}, help: qsTr("Transforms HDR to SDR while keeping detail and color. Works with 10bit HDR10, HLG and DoVi; requires the corresponding GPGPU runtime.")},
+        {label: qsTr("Enable VPP tone mapping"), key: "EnableVppTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Full Intel driver based tone-mapping. Works only on certain hardware with HDR10 videos.")},
+        {label: qsTr("VPP tone mapping brightness gain"), key: "VppTonemappingBrightness", type: "float", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Recommended value 16.")},
+        {label: qsTr("VPP tone mapping contrast gain"), key: "VppTonemappingContrast", type: "float", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Recommended value 1.")},
+        {label: qsTr("Enable VideoToolbox tone mapping"), key: "EnableVideoToolboxTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "videotoolbox"}, help: qsTr("Works with most HDR formats (HDR10, HDR10+, HLG) but not Dolby Vision Profile 5.")},
+
+        {group: qsTr("Encoding quality"), label: qsTr("Encoding preset"), key: "EncoderPreset", type: "select", help: qsTr("Pick a faster value to improve performance, or a slower value to improve quality."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "veryslow", text: "veryslow"}, {value: "slower", text: "slower"}, {value: "slow", text: "slow"}, {value: "medium", text: "medium"}, {value: "fast", text: "fast"}, {value: "faster", text: "faster"}, {value: "veryfast", text: "veryfast"}, {value: "superfast", text: "superfast"}, {value: "ultrafast", text: "ultrafast"}]},
+        {label: qsTr("H.265 encoding CRF"), key: "H265Crf", type: "number"},
+        {label: qsTr("H.264 encoding CRF"), key: "H264Crf", type: "number", help: qsTr("The 'Constant Rate Factor' for the x264/x265 software encoders. Values 0-51, lower = better quality / larger files. Sane values 18-28 (x264 default 23, x265 28). Hardware encoders ignore this.")},
+        {label: qsTr("Transcoding thread count (-1 = auto, 0 = max)"), key: "EncodingThreadCount", type: "number", help: qsTr("Max threads when transcoding. Reducing lowers CPU usage but may not convert fast enough for smooth playback.")},
+        {label: qsTr("Max muxing queue size"), key: "MaxMuxingQueueSize", type: "number", help: qsTr("Packets buffered while streams initialize. Increase if you meet \"Too many packets buffered for output stream\" errors. Recommended 2048.")},
+
+        {group: qsTr("Deinterlacing"), label: qsTr("Deinterlacing method"), key: "DeinterlaceMethod", type: "select", help: qsTr("Method used when software transcoding interlaced content. Hardware deinterlacing is used instead when available."),
+         options: [{value: "yadif", text: "YADIF"}, {value: "bwdif", text: "BWDIF"}]},
+        {label: qsTr("Double the frame rate when deinterlacing"), key: "DeinterlaceDoubleRate", type: "toggle", help: qsTr("Uses the field rate (bob deinterlacing), doubling the frame rate for full motion like interlaced video on a TV.")},
+
+        {group: qsTr("Subtitles & audio"), label: qsTr("Allow subtitle extraction on the fly"), key: "EnableSubtitleExtraction", type: "toggle", help: qsTr("Extract embedded subtitles to plain text to help avoid transcoding. Can be slow on some systems; disable to burn in instead when not natively supported.")},
+        {label: qsTr("Enable VBR audio encoding"), key: "EnableAudioVbr", type: "toggle", help: qsTr("Better quality-to-bitrate, but in rare cases may cause buffering/compatibility issues.")},
+        {label: qsTr("Audio boost when downmixing"), key: "DownMixAudioBoost", type: "float", help: qsTr("Boost audio when downmixing. A value of one preserves the original volume.")},
+        {label: qsTr("Stereo downmix algorithm"), key: "DownMixStereoAlgorithm", type: "select", help: qsTr("Algorithm used to downmix multi-channel audio to stereo."),
+         options: [{value: "None", text: qsTr("None")}, {value: "Dave750", text: "Dave750"}, {value: "NightmodeDialogue", text: "Nightmode Dialogue"}, {value: "Rfc7845", text: "RFC7845"}, {value: "Ac4", text: "AC-4"}]},
+
+        {group: qsTr("Paths"), label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
+        {label: qsTr("Fallback font folder path"), key: "FallbackFontPath", type: "text", help: qsTr("Fonts used by some clients to render subtitles.")},
+        {label: qsTr("Enable fallback fonts"), key: "EnableFallbackFont", type: "toggle", help: qsTr("Enable custom alternate fonts to avoid incorrect subtitle rendering.")},
+
+        {group: qsTr("Transcode throttling"), label: qsTr("Throttle transcodes"), key: "EnableThrottling", type: "toggle", help: qsTr("When a transcode gets far enough ahead of playback, pause it to use fewer resources. Turn off if you experience playback issues.")},
+        {label: qsTr("Throttle after (seconds)"), key: "ThrottleDelaySeconds", type: "number", help: qsTr("Seconds after which the transcoder is throttled. Must be large enough for the client to keep a healthy buffer. Only works if throttling is enabled.")},
+        {label: qsTr("Delete segments"), key: "EnableSegmentDeletion", type: "toggle", help: qsTr("Delete old segments after the client downloads them, avoiding storing the whole transcoded file. Turn off if you experience playback issues.")},
+        {label: qsTr("Time to keep segments (seconds)"), key: "SegmentKeepSeconds", type: "number", help: qsTr("Seconds to keep segments after the client downloads them. Only works if segment deletion is enabled.")}
     ]
     readonly property var resumeFields: [
         {label: qsTr("Minimum resume percentage"), key: "MinResumePct", type: "number", help: qsTr("Titles are assumed unplayed if stopped before this time.")},
@@ -298,11 +349,22 @@ Item {
         o[parts[parts.length - 1]] = val
         editConfig = c
     }
+    // Optional per-field conditional visibility: showWhen {key, eq|neq|oneOf}
+    // evaluated against the live editConfig (e.g. show VAAPI device only for vaapi).
+    function fieldVisible(fld) {
+        if (!fld || !fld.showWhen) return true
+        var w = fld.showWhen
+        var cur = cfgGet(w.key)
+        if (w.eq !== undefined) return cur === w.eq
+        if (w.neq !== undefined) return cur !== w.neq
+        if (w.oneOf !== undefined) return w.oneOf.indexOf(cur) >= 0
+        return true
+    }
     component ConfigField: RowLayout {
         id: cf
         property string label: ""
         property string key: ""
-        property string mode: "text"     // text | number | csv (int list) | list (string list)
+        property string mode: "text"     // text | number | float | csv (int list) | list (string list)
         property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
         property bool secret: false      // mask the input (passwords)
         function display() {
@@ -318,6 +380,8 @@ Item {
                 screen.setConfig(cf.key, ("" + t).replace(/\s/g, "").split(",").filter(function (x) { return x.length }).map(Number))
             else if (cf.mode === "list")
                 screen.setConfig(cf.key, ("" + t).split(",").map(function (x) { return x.trim() }).filter(function (x) { return x.length }))
+            else if (cf.mode === "float")
+                screen.setConfig(cf.key, parseFloat(t) || 0)
             else if (cf.mode === "number")
                 screen.setConfig(cf.key, cf.scale !== 1 ? Math.trunc(cf.scale * (parseFloat(t) || 0)) : (parseInt(t) || 0))
             else
@@ -330,7 +394,7 @@ Item {
             text: cf.display()
             color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
             echoMode: cf.secret ? TextInput.Password : TextInput.Normal
-            inputMethodHints: cf.mode === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+            inputMethodHints: (cf.mode === "number" || cf.mode === "float") ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
             onEditingFinished: cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
         }
@@ -657,7 +721,7 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "list" ? "list" : "text")); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password" } }
+                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password" } }
                     Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
                     Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
                     Repeater {
@@ -667,6 +731,7 @@ Item {
                             required property var modelData
                             required property int index
                             Layout.fillWidth: true
+                            visible: screen.fieldVisible(fieldRow.modelData)
                             spacing: 3
                             // section header — shown when a field starts a new group (web groups fields under headings)
                             Text {
