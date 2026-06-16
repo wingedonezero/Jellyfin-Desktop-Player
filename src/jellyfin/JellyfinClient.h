@@ -121,6 +121,8 @@ public:
     Q_INVOKABLE void shutdownServer();
     Q_INVOKABLE void runScheduledTask(const QString &taskId);
     Q_INVOKABLE void stopScheduledTask(const QString &taskId);
+    Q_INVOKABLE void setUserPolicy(const QString &userId, const QVariantMap &policy);
+    Q_INVOKABLE void deleteUser(const QString &userId);
 
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,

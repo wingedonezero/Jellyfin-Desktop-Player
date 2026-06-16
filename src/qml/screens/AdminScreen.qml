@@ -19,6 +19,9 @@ Item {
     property var dashCounts: null
     property var dashSessions: []
     property var tasksData: []
+    property var usersData: []
+    property var selectedUser: null
+    property var editPolicy: ({})
     property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
@@ -27,7 +30,7 @@ Item {
         { group: qsTr("Server"),   label: qsTr("Dashboard"),     kind: "dashboard" },
         { group: qsTr("Server"),   label: qsTr("General"),       kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "stub" },
-        { group: qsTr("Server"),   label: qsTr("Users"),         kind: "list", ep: "/Users", primary: "Name", secondary: "Id" },
+        { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
         { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "stub" },
@@ -56,6 +59,9 @@ Item {
         } else if (selEntry.kind === "tasks") {
             tasksData = []
             client.getJson("/ScheduledTasks", "admin:tasks")
+        } else if (selEntry.kind === "users") {
+            usersData = []; selectedUser = null
+            client.getJson("/Users", "admin:users")
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
         }
@@ -105,6 +111,29 @@ Item {
             else if (tag === "admin:dash:counts") screen.dashCounts = data
             else if (tag === "admin:dash:sessions") screen.dashSessions = screen.asArray(data)
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
+            else if (tag === "admin:users") screen.usersData = screen.asArray(data)
+        }
+    }
+
+    function selectUser(u) {
+        selectedUser = u
+        editPolicy = (u && u.Policy) ? JSON.parse(JSON.stringify(u.Policy)) : ({})
+    }
+    function setFlag(key, val) { var p = Object.assign({}, editPolicy); p[key] = val; editPolicy = p }
+
+    component PolicyToggle: RowLayout {
+        id: pt
+        property string label: ""
+        property string flag: ""
+        Layout.fillWidth: true
+        Text { text: pt.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        Rectangle {
+            id: sw
+            readonly property bool on: screen.editPolicy[pt.flag] === true
+            width: 44; height: 24; radius: 12
+            color: on ? Theme.accent : Theme.elevated
+            Rectangle { width: 18; height: 18; radius: 9; y: 3; x: sw.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.setFlag(pt.flag, !sw.on) }
         }
     }
 
@@ -317,6 +346,62 @@ Item {
                     }
                 }
 
+                // users — list, then per-user policy detail/edit on selection
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "users"
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSmall
+                    Repeater {
+                        model: screen.selectedUser === null ? screen.usersData : []
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: ma2.containsMouse ? Theme.surfaceHover : Theme.surface
+                            MouseArea { id: ma2; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: screen.selectUser(modelData) }
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 2
+                                    Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal }
+                                    Text { text: modelData.LastActivityDate ? qsTr("Last seen %1").arg(screen.relTime(modelData.LastActivityDate)) : qsTr("Never signed in"); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny }
+                                }
+                                Text { visible: modelData.Policy && modelData.Policy.IsAdministrator === true; text: qsTr("ADMIN"); color: Theme.accent; font.pixelSize: Theme.fontTiny; font.bold: true }
+                                Text { visible: modelData.Policy && modelData.Policy.IsDisabled === true; text: qsTr("DISABLED"); color: Theme.error; font.pixelSize: Theme.fontTiny; font.bold: true }
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        visible: screen.selectedUser !== null
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.selectedUser = null }
+                            Text { text: screen.selectedUser ? screen.selectedUser.Name : ""; color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Text { text: qsTr("Account"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Administrator"); flag: "IsAdministrator" }
+                        PolicyToggle { label: qsTr("Disable this user"); flag: "IsDisabled" }
+                        PolicyToggle { label: qsTr("Hide from login screen"); flag: "IsHidden" }
+                        Text { text: qsTr("Playback"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Allow media playback"); flag: "EnableMediaPlayback" }
+                        PolicyToggle { label: qsTr("Allow audio transcoding"); flag: "EnableAudioPlaybackTranscoding" }
+                        PolicyToggle { label: qsTr("Allow video transcoding"); flag: "EnableVideoPlaybackTranscoding" }
+                        Text { text: qsTr("Permissions"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Allow downloads"); flag: "EnableContentDownloading" }
+                        PolicyToggle { label: qsTr("Allow collection management"); flag: "EnableCollectionManagement" }
+                        PolicyToggle { label: qsTr("Allow media deletion"); flag: "EnableContentDeletion" }
+                        PolicyToggle { label: qsTr("Remote-control other users"); flag: "EnableRemoteControlOfOtherUsers" }
+                        Text {
+                            text: qsTr("Library access: %1").arg((screen.editPolicy.EnableAllFolders === true) ? qsTr("all libraries") : qsTr("%1 selected").arg((screen.editPolicy.EnabledFolders || []).length))
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing; spacing: Theme.spacingSmall
+                            DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save policy changes for “%1”?").arg(screen.selectedUser.Name), function() { screen.client.setUserPolicy(screen.selectedUser.Id, screen.editPolicy) }) }
+                            DashButton { text: qsTr("Delete user"); danger: true; onClicked: screen.confirm(qsTr("Delete the user “%1”? This cannot be undone.").arg(screen.selectedUser.Name), function() { screen.client.deleteUser(screen.selectedUser.Id); screen.selectedUser = null }) }
+                        }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -327,7 +412,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }

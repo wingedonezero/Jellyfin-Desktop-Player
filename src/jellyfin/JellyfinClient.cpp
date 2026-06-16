@@ -211,6 +211,12 @@ void JellyfinClient::restartServer()    { fireAndForget(post(QStringLiteral("/Sy
 void JellyfinClient::shutdownServer()   { fireAndForget(post(QStringLiteral("/System/Shutdown"), QByteArray())); }
 void JellyfinClient::runScheduledTask(const QString &taskId)  { fireAndForget(post(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId), QByteArray())); }
 void JellyfinClient::stopScheduledTask(const QString &taskId) { fireAndForget(del(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId))); }
+void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &policy)
+{
+    fireAndForget(post(QStringLiteral("/Users/%1/Policy").arg(userId),
+                       QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
 
 void JellyfinClient::saveSession() const
 {
