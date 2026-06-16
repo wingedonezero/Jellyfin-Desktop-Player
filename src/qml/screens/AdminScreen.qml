@@ -170,10 +170,15 @@ Item {
         {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number", help: qsTr("The quality scale of images output by ffmpeg, with 2 being the highest quality and 31 being the lowest.")},
         {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number", help: qsTr("The number of threads to pass to the '-threads' argument of ffmpeg.")}
     ]
+    // LibraryOptions field visibility by content type (mirrors web's setContentType).
+    readonly property var tChapter: ["homevideos", "movies", "musicvideos", "tvshows", "mixed"]      // chapter + trickplay
+    readonly property var tEmbedded: ["movies", "tvshows", "homevideos", "musicvideos", "mixed"]      // embedded titles
+    readonly property var tSubs: ["movies", "tvshows", "musicvideos", "mixed"]                        // subtitles
     // Per-library LibraryOptions (edited against a deep copy of the selected
     // library's options; Save → updateLibraryOptions). Mirrors web's
-    // libraryoptionseditor (common fields; the per-type fetcher-order tables are
-    // out of scope). Reuses the cultures/countries dropdown sources.
+    // libraryoptionseditor: each field's `types` gates it to applicable content
+    // types (so e.g. Collections/boxsets shows only the basic settings). The
+    // per-type fetcher-order tables are out of scope. Reuses cultures/countries.
     readonly property var libraryOptionsFields: [
         {group: qsTr("Library"), label: qsTr("Enable the library"), key: "Enabled", type: "toggle", help: qsTr("Disabling the library will hide it from all user views.")},
         {label: qsTr("Download metadata and images from the internet"), key: "EnableInternetProviders", type: "toggle"},
@@ -182,34 +187,34 @@ Item {
         {label: qsTr("Automatically refresh metadata from the internet (days; 0 = never)"), key: "AutomaticRefreshIntervalDays", type: "number"},
         {label: qsTr("Save artwork into media folders"), key: "SaveLocalMetadata", type: "toggle", help: qsTr("Saving artwork into media folders puts it where it can be easily edited.")},
         {label: qsTr("Enable real-time monitoring"), key: "EnableRealtimeMonitor", type: "toggle", help: qsTr("Changes to files will be processed immediately on supported file systems.")},
-        {label: qsTr("Display photos"), key: "EnablePhotos", type: "toggle", help: qsTr("Images will be detected and displayed alongside other media files.")},
-        {label: qsTr("Enable LUFS scan"), key: "EnableLUFSScan", type: "toggle", help: qsTr("Lets clients normalize playback loudness across tracks. Makes library scans longer and use more resources.")},
-        {label: qsTr("Automatically add to collection"), key: "AutomaticallyAddToCollection", type: "toggle", help: qsTr("When at least 2 movies share the same collection name, they are added to the collection automatically.")},
-        {label: qsTr("Automatically merge series spread across multiple folders"), key: "EnableAutomaticSeriesGrouping", type: "toggle", help: qsTr("Series spread across multiple folders in this library are merged into a single series.")},
-        {label: qsTr("Special season display name"), key: "SeasonZeroDisplayName", type: "text"},
+        {label: qsTr("Display photos"), key: "EnablePhotos", type: "toggle", types: ["homevideos"], help: qsTr("Images will be detected and displayed alongside other media files.")},
+        {label: qsTr("Enable LUFS scan"), key: "EnableLUFSScan", type: "toggle", types: ["music"], help: qsTr("Lets clients normalize playback loudness across tracks. Makes library scans longer and use more resources.")},
+        {label: qsTr("Automatically add to collection"), key: "AutomaticallyAddToCollection", type: "toggle", types: ["movies", "mixed"], help: qsTr("When at least 2 movies share the same collection name, they are added to the collection automatically.")},
+        {label: qsTr("Automatically merge series spread across multiple folders"), key: "EnableAutomaticSeriesGrouping", type: "toggle", types: ["tvshows"], help: qsTr("Series spread across multiple folders in this library are merged into a single series.")},
+        {label: qsTr("Special season display name"), key: "SeasonZeroDisplayName", type: "text", types: ["tvshows"]},
 
-        {group: qsTr("Embedded info"), label: qsTr("Prefer embedded titles over filenames"), key: "EnableEmbeddedTitles", type: "toggle", help: qsTr("Title to use when no internet or local metadata is available.")},
-        {label: qsTr("Prefer embedded titles over filenames for extras"), key: "EnableEmbeddedExtrasTitles", type: "toggle", help: qsTr("Extras often share the parent's embedded name; check to use embedded titles for them anyway.")},
-        {label: qsTr("Prefer embedded episode information over filenames"), key: "EnableEmbeddedEpisodeInfos", type: "toggle", help: qsTr("Use embedded episode information when available.")},
-        {label: qsTr("Disable different types of embedded subtitles"), key: "AllowEmbeddedSubtitles", type: "select", options: [{value: "AllowAll", text: qsTr("Allow All")}, {value: "AllowText", text: qsTr("Allow Text")}, {value: "AllowImage", text: qsTr("Allow Image")}, {value: "AllowNone", text: qsTr("Allow None")}], help: qsTr("Disable subtitles packaged within media containers. Requires a full library refresh.")},
+        {group: qsTr("Embedded info"), label: qsTr("Prefer embedded titles over filenames"), key: "EnableEmbeddedTitles", type: "toggle", types: screen.tEmbedded, help: qsTr("Title to use when no internet or local metadata is available.")},
+        {label: qsTr("Prefer embedded titles over filenames for extras"), key: "EnableEmbeddedExtrasTitles", type: "toggle", types: screen.tEmbedded, help: qsTr("Extras often share the parent's embedded name; check to use embedded titles for them anyway.")},
+        {label: qsTr("Prefer embedded episode information over filenames"), key: "EnableEmbeddedEpisodeInfos", type: "toggle", types: ["tvshows"], help: qsTr("Use embedded episode information when available.")},
+        {label: qsTr("Disable different types of embedded subtitles"), key: "AllowEmbeddedSubtitles", type: "select", types: screen.tSubs, options: [{value: "AllowAll", text: qsTr("Allow All")}, {value: "AllowText", text: qsTr("Allow Text")}, {value: "AllowImage", text: qsTr("Allow Image")}, {value: "AllowNone", text: qsTr("Allow None")}], help: qsTr("Disable subtitles packaged within media containers. Requires a full library refresh.")},
 
-        {group: qsTr("Trickplay"), label: qsTr("Enable trickplay image extraction"), key: "EnableTrickplayImageExtraction", type: "toggle", help: qsTr("Trickplay images span the content and show a preview when scrubbing through videos.")},
-        {label: qsTr("Extract trickplay images during the library scan"), key: "ExtractTrickplayImagesDuringLibraryScan", type: "toggle", help: qsTr("Otherwise they are extracted during the trickplay scheduled task.")},
-        {label: qsTr("Save trickplay images next to media"), key: "SaveTrickplayWithMedia", type: "toggle", help: qsTr("Puts trickplay images next to your media for easy migration and access.")},
+        {group: qsTr("Trickplay"), label: qsTr("Enable trickplay image extraction"), key: "EnableTrickplayImageExtraction", type: "toggle", types: screen.tChapter, help: qsTr("Trickplay images span the content and show a preview when scrubbing through videos.")},
+        {label: qsTr("Extract trickplay images during the library scan"), key: "ExtractTrickplayImagesDuringLibraryScan", type: "toggle", types: screen.tChapter, help: qsTr("Otherwise they are extracted during the trickplay scheduled task.")},
+        {label: qsTr("Save trickplay images next to media"), key: "SaveTrickplayWithMedia", type: "toggle", types: screen.tChapter, help: qsTr("Puts trickplay images next to your media for easy migration and access.")},
 
-        {group: qsTr("Chapter images"), label: qsTr("Enable chapter image extraction"), key: "EnableChapterImageExtraction", type: "toggle", help: qsTr("Lets clients display graphical scene-selection menus. Can be slow and resource intensive.")},
-        {label: qsTr("Extract chapter images during the library scan"), key: "ExtractChapterImagesDuringLibraryScan", type: "toggle", help: qsTr("Otherwise they are extracted during the chapter-images scheduled task.")},
+        {group: qsTr("Chapter images"), label: qsTr("Enable chapter image extraction"), key: "EnableChapterImageExtraction", type: "toggle", types: screen.tChapter, help: qsTr("Lets clients display graphical scene-selection menus. Can be slow and resource intensive.")},
+        {label: qsTr("Extract chapter images during the library scan"), key: "ExtractChapterImagesDuringLibraryScan", type: "toggle", types: screen.tChapter, help: qsTr("Otherwise they are extracted during the chapter-images scheduled task.")},
 
-        {group: qsTr("Subtitle downloads"), label: qsTr("Only download subtitles that perfectly match the video"), key: "RequirePerfectSubtitleMatch", type: "toggle", help: qsTr("Filters to subtitles verified with your exact file. Unchecking increases coverage but risks mistimed/incorrect subtitles.")},
-        {label: qsTr("Skip if the default audio track matches the download language"), key: "SkipSubtitlesIfAudioTrackMatches", type: "toggle", help: qsTr("Uncheck to ensure all videos have subtitles regardless of audio language.")},
-        {label: qsTr("Skip if the video already contains embedded subtitles"), key: "SkipSubtitlesIfEmbeddedSubtitlesPresent", type: "toggle", help: qsTr("Keeping text subtitles means more efficient delivery and less transcoding.")},
-        {label: qsTr("Save subtitles into media folders"), key: "SaveSubtitlesWithMedia", type: "toggle", help: qsTr("Storing subtitles next to video files makes them easier to manage.")},
+        {group: qsTr("Subtitle downloads"), label: qsTr("Only download subtitles that perfectly match the video"), key: "RequirePerfectSubtitleMatch", type: "toggle", types: screen.tSubs, help: qsTr("Filters to subtitles verified with your exact file. Unchecking increases coverage but risks mistimed/incorrect subtitles.")},
+        {label: qsTr("Skip if the default audio track matches the download language"), key: "SkipSubtitlesIfAudioTrackMatches", type: "toggle", types: screen.tSubs, help: qsTr("Uncheck to ensure all videos have subtitles regardless of audio language.")},
+        {label: qsTr("Skip if the video already contains embedded subtitles"), key: "SkipSubtitlesIfEmbeddedSubtitlesPresent", type: "toggle", types: screen.tSubs, help: qsTr("Keeping text subtitles means more efficient delivery and less transcoding.")},
+        {label: qsTr("Save subtitles into media folders"), key: "SaveSubtitlesWithMedia", type: "toggle", types: screen.tSubs, help: qsTr("Storing subtitles next to video files makes them easier to manage.")},
 
-        {group: qsTr("Lyrics"), label: qsTr("Save lyrics into media folders"), key: "SaveLyricsWithMedia", type: "toggle", help: qsTr("Storing lyrics next to audio files makes them easier to manage.")},
+        {group: qsTr("Lyrics"), label: qsTr("Save lyrics into media folders"), key: "SaveLyricsWithMedia", type: "toggle", types: ["music"], help: qsTr("Storing lyrics next to audio files makes them easier to manage.")},
 
-        {group: qsTr("Audio tags"), label: qsTr("Prefer ARTISTS tag if available"), key: "PreferNonstandardArtistsTag", type: "toggle", help: qsTr("Use the non-standard ARTISTS tag instead of ARTIST when available.")},
-        {label: qsTr("Use custom tag delimiters"), key: "UseCustomTagDelimiters", type: "toggle", help: qsTr("Split artist/genre tags with custom characters.")},
-        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list"}
+        {group: qsTr("Audio tags"), label: qsTr("Prefer ARTISTS tag if available"), key: "PreferNonstandardArtistsTag", type: "toggle", types: ["music"], help: qsTr("Use the non-standard ARTISTS tag instead of ARTIST when available.")},
+        {label: qsTr("Use custom tag delimiters"), key: "UseCustomTagDelimiters", type: "toggle", types: ["music"], help: qsTr("Split artist/genre tags with custom characters.")},
+        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list", types: ["music"]}
     ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
@@ -425,7 +430,14 @@ Item {
     // Optional per-field conditional visibility: showWhen {key, eq|neq|oneOf}
     // evaluated against the live editConfig (e.g. show VAAPI device only for vaapi).
     function fieldVisible(fld) {
-        if (!fld || !fld.showWhen) return true
+        if (!fld) return true
+        // per-library-type gating for LibraryOptions (mirrors web's setContentType):
+        // a field with a `types` list only shows for the selected library's type.
+        if (fld.types) {
+            var ct = selectedLib ? (selectedLib.CollectionType || "mixed") : "mixed"
+            if (fld.types.indexOf(ct) < 0) return false
+        }
+        if (!fld.showWhen) return true
         var w = fld.showWhen
         var cur = cfgGet(w.key)
         if (w.eq !== undefined) return cur === w.eq
@@ -495,6 +507,7 @@ Item {
         property var options: []          // [{value, text}]
         function syncIndex() {
             var cur = screen.cfgGet(csel.key)
+            if (cur === undefined || cur === null) cur = "" // null resolves to the "Any/None" option
             for (var i = 0; i < csel.options.length; i++)
                 if (String(csel.options[i].value) === String(cur)) { cbox.currentIndex = i; return }
             cbox.currentIndex = -1
