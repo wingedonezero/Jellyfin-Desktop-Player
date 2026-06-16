@@ -249,11 +249,13 @@ External video players toggle (we ARE the player — remove the dead row rather 
 
 ## Proposed build plan (committable per area)
 
-**Phase Q — quick wins / dead-control fixes (low effort, high "looks broken" payoff)**
-1. MediaCard add-to-collection/playlist handlers (1.3) + Copy-stream-URL in detail menu.
-2. BoxSet children + Season episodes (0.2) — wire existing fetches.
-3. Wire `display/*` prefs into views + client queries (1.1).
-4. Helper-text sweep across Display/Playback/Subtitles/Metadata/Transcoding (0.3) — pure text.
+**Phase Q — quick wins / dead-control fixes — ✅ DONE (2026-06-16)**
+1. ✅ `005f503` BoxSet collection members (grouped by type) + directly-opened Season episodes + collection Play-all. Verified live (Sharknado Collection).
+2. ✅ `066936a` Dead MediaCard "Add to collection/playlist" wired via one shared picker in Main (signal-bubbling); DetailScreen inline picker removed; Copy-stream-URL added to detail more-menu. Verified live (picker opens + lists collections).
+3. ✅ `8ccca7a` display/* prefs consumed: detailsBanner+backdrops→detail backdrop, fastAnimations→Theme tokens, maxDaysNextUp→NextUpDateCutoff, rewatchingNextUp→EnableRewatching, episodeImagesNextUp→card image pick. DisplayMissingEpisodes is server-driven (already works). **Deferred: `display/libraryPageSize` → Phase B** (needs real pagination + TotalRecordCount).
+4. ✅ `2711774` Helper text across Display + Playback + Subtitle-mode (reactive). Fixed 2 default mismatches (episodeImages→true, maxDays→365). **Admin config-page helper text folded into Phase C** (with the control-type fixes for the same fields).
+
+USER-VERIFY OWED (agent can't click/toggle): toggle each display/* pref + confirm effect; the add-to-collection/playlist *create*/*add* write path (picker was verified read-only only).
 
 **Phase L — the big known one: LibraryOptions provider tables (0.1)** — new client
 `getAvailableOptions` + a ranked-checkbox-list component; all 9 tables; per-content-type incl. boxsets.
