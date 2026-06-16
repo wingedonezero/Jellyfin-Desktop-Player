@@ -55,6 +55,12 @@ Item {
     property string _dirPickKey: ""        // config key the directory picker is editing
     property string _dirPickMode: "config" // config | newlib | addpath
     property var librariesData: []
+    property string pluginTab: "installed" // installed | catalog | repos
+    property var pluginsInstalled: []
+    property var packagesData: []
+    property var reposData: []
+    property string newRepoName: ""
+    property string newRepoUrl: ""
     property string logName: ""            // currently-open log file (empty = list view)
     property string logContent: ""
     property string inputValue: ""         // generic input dialog
@@ -287,7 +293,7 @@ Item {
         { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", fmt: "activity" },
         { group: qsTr("Live TV"),  label: qsTr("Live TV"),       kind: "stub" },
         { group: qsTr("Live TV"),  label: qsTr("DVR"),           kind: "stub" },
-        { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "list", ep: "/Plugins", fmt: "plugins" },
+        { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "plugins" },
         { group: qsTr("Advanced"), label: qsTr("Networking"),    kind: "config", ep: "/System/Configuration/network", fields: screen.networkFields },
         { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", fmt: "apikeys", primary: "AppName", secondary: "DateCreated" },
         { group: qsTr("Advanced"), label: qsTr("Backups"),       kind: "stub" },
@@ -320,6 +326,11 @@ Item {
             librariesData = []; selectedLib = null; addMode = false; dynOptions = ({})
             client.getJson("/Library/VirtualFolders", "admin:libs")
             fetchOptionSources(libraryOptionsFields) // cultures/countries for the per-library options editor
+        } else if (entry.kind === "plugins") {
+            pluginTab = "installed"; pluginsInstalled = []; packagesData = []; reposData = []; newRepoName = ""; newRepoUrl = ""
+            client.getJson("/Plugins", "admin:plugins")
+            client.getJson("/Packages", "admin:packages")
+            client.getJson("/Repositories", "admin:repos")
         } else if (entry.kind === "config") {
             serverConfig = null; editConfig = ({}); dynOptions = ({})
             client.getJson(entry.ep, "admin:config")
@@ -388,6 +399,17 @@ Item {
     }
     function removeTrigger(i) { var a = JSON.parse(JSON.stringify(editTriggers)); a.splice(i, 1); editTriggers = a }
     function saveTriggers() { if (selectedTask && client) { client.updateTaskTriggers(selectedTask.Id, editTriggers); selectedTask = null; tasksReloadTimer.restart() } }
+    // --- plugins / repositories ---
+    function addRepo() {
+        if (!newRepoName.length || !newRepoUrl.length || !client) return
+        var list = JSON.parse(JSON.stringify(reposData)); list.push({Name: newRepoName, Url: newRepoUrl, Enabled: true})
+        client.setRepositories(list); newRepoName = ""; newRepoUrl = ""; pluginsReloadTimer.restart()
+    }
+    function removeRepo(i) {
+        if (!client) return
+        var list = JSON.parse(JSON.stringify(reposData)); list.splice(i, 1)
+        client.setRepositories(list); pluginsReloadTimer.restart()
+    }
     function infoRows(d) {
         if (!d || typeof d !== "object") return []
         return Object.keys(d).map(function (k) {
@@ -431,6 +453,9 @@ Item {
             else if (tag === "admin:dash:counts") screen.dashCounts = data
             else if (tag === "admin:dash:sessions") screen.dashSessions = screen.asArray(data)
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
+            else if (tag === "admin:plugins") screen.pluginsInstalled = screen.asArray(data)
+            else if (tag === "admin:packages") screen.packagesData = screen.asArray(data)
+            else if (tag === "admin:repos") screen.reposData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
             else if (tag === "u:folders") { var fa = screen.asArray(data); var fo = []; for (var fi = 0; fi < fa.length; fi++) fo.push({id: fa[fi].Id, name: fa[fi].Name}); screen.mediaFoldersData = fo }
             else if (tag === "u:channels") { var ca = screen.asArray(data); var co = []; for (var ci = 0; ci < ca.length; ci++) co.push({id: ca[ci].Id, name: ca[ci].Name}); screen.channelsData = co }
@@ -1191,6 +1216,7 @@ Item {
     Timer { id: usersReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/Users", "admin:users") }
     Timer { id: panelReloadTimer; interval: 800; repeat: false; onTriggered: { var e = screen.navModel[screen.sel]; if (screen.client && e && e.ep) screen.client.getJson(e.ep, "admin:panel") } }
     Timer { id: tasksReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/ScheduledTasks", "admin:tasks") }
+    Timer { id: pluginsReloadTimer; interval: 1000; repeat: false; onTriggered: if (screen.client) { screen.client.getJson("/Plugins", "admin:plugins"); screen.client.getJson("/Repositories", "admin:repos") } }
     function promptInput(title, placeholder, initial, action) { inputPopup.title = title; inputPopup.placeholder = placeholder; screen.inputValue = initial || ""; screen.inputAction = action; inputField.text = initial || ""; inputPopup.open(); inputField.forceActiveFocus() }
 
     RowLayout {
@@ -1842,6 +1868,90 @@ Item {
                     }
                 }
 
+                // plugins — Installed / Catalog / Repositories
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "plugins"
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        DashButton { text: qsTr("Installed"); onClicked: screen.pluginTab = "installed" }
+                        DashButton { text: qsTr("Catalog"); onClicked: screen.pluginTab = "catalog" }
+                        DashButton { text: qsTr("Repositories"); onClicked: screen.pluginTab = "repos" }
+                    }
+                    Repeater {
+                        model: screen.pluginTab === "installed" ? screen.pluginsInstalled : []
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; implicitHeight: 52; radius: Theme.radius; color: Theme.surface
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacingSmall
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 2
+                                    Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: [modelData.Version ? ("v" + modelData.Version) : "", ("" + (modelData.Status || "")), ("" + (modelData.Description || ""))].filter(function (x) { return x }).join("  ·  "); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; elide: Text.ElideRight; Layout.fillWidth: true }
+                                }
+                                DashButton { text: (("" + modelData.Status) === "Disabled") ? qsTr("Enable") : qsTr("Disable"); onClicked: screen.confirm(qsTr("%1 the plugin “%2”?").arg((("" + modelData.Status) === "Disabled") ? qsTr("Enable") : qsTr("Disable")).arg(("" + modelData.Name)), function () { screen.client.setPluginEnabled(modelData.Id, ("" + modelData.Version), (("" + modelData.Status) === "Disabled")); screen.pluginsReloadTimer.restart() }) }
+                                DashButton { text: qsTr("Uninstall"); danger: true; onClicked: screen.confirm(qsTr("Uninstall the plugin “%1”?").arg(("" + modelData.Name)), function () { screen.client.uninstallPlugin(modelData.Id, ("" + modelData.Version)); screen.pluginsReloadTimer.restart() }) }
+                            }
+                        }
+                    }
+                    Text { visible: screen.pluginTab === "installed" && screen.pluginsInstalled.length === 0; text: qsTr("No plugins installed."); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
+                    Repeater {
+                        model: screen.pluginTab === "catalog" ? screen.packagesData : []
+                        Rectangle {
+                            required property var modelData
+                            Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: Theme.surface
+                            RowLayout {
+                                anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacingSmall
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 2
+                                    Text { text: ("" + (modelData.name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; elide: Text.ElideRight; Layout.fillWidth: true }
+                                    Text { text: [("" + (modelData.category || "")), ("" + (modelData.overview || ""))].filter(function (x) { return x }).join("  ·  "); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; elide: Text.ElideRight; Layout.fillWidth: true }
+                                }
+                                DashButton { text: qsTr("Install"); onClicked: screen.confirm(qsTr("Install the plugin “%1” (latest version)?").arg(("" + modelData.name)), function () { screen.client.installPackage(("" + modelData.name), ("" + (modelData.guid || "")), "", ""); screen.pluginsReloadTimer.restart() }) }
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        visible: screen.pluginTab === "repos"
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        Repeater {
+                            model: screen.reposData
+                            Rectangle {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true; implicitHeight: 48; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacingSmall
+                                    ColumnLayout {
+                                        Layout.fillWidth: true; spacing: 2
+                                        Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideRight }
+                                        Text { text: ("" + (modelData.Url || "")); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                                    }
+                                    DashButton { text: qsTr("Remove"); danger: true; onClicked: screen.confirm(qsTr("Remove the repository “%1”?").arg(("" + modelData.Name)), function () { screen.removeRepo(index) }) }
+                                }
+                            }
+                        }
+                        Text { text: qsTr("Add repository"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Name"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 320; text: screen.newRepoName; onTextEdited: screen.newRepoName = text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("URL (manifest.json)"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 320; text: screen.newRepoUrl; onTextEdited: screen.newRepoUrl = text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacingSmall
+                            DashButton { text: qsTr("Add repository"); onClicked: screen.confirm(qsTr("Add the repository “%1”?").arg(screen.newRepoName || qsTr("(unnamed)")), function () { screen.addRepo() }) }
+                        }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -1852,7 +1962,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.selEntry.kind !== "libraries" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.selEntry.kind !== "libraries" && screen.selEntry.kind !== "plugins" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }
