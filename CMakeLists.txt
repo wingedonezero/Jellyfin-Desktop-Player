@@ -8,7 +8,7 @@ project(jellyfin-desktop
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network DBus)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # The mpv engine itself — our one core dependency. Everything else is ours.
@@ -59,6 +59,8 @@ qt_add_qml_module(jellyfin-desktop
         src/jellyfin/JellyfinClient.cpp
         src/core/AppConfig.h
         src/core/AppConfig.cpp
+        src/core/ScreenSaverInhibitor.h
+        src/core/ScreenSaverInhibitor.cpp
 )
 
 # Header dirs are on the include path so the generated QML type-registration
@@ -74,5 +76,6 @@ target_link_libraries(jellyfin-desktop PRIVATE
     Qt6::QuickControls2
     Qt6::Gui
     Qt6::Network
+    Qt6::DBus
     PkgConfig::Mpv
 )
