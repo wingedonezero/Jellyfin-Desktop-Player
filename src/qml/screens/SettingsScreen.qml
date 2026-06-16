@@ -457,7 +457,7 @@ Item {
                 StepperRow { label: qsTr("Skip back interval"); value: screen.skipBack; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipBack = v; screen.setPref("playback/skipBack", v) } }
                 StepperRow { label: qsTr("Skip forward interval"); value: screen.skipForward; step: 5; minValue: 5; maxValue: 120; onChanged: (v) => { screen.skipForward = v; screen.setPref("playback/skipForward", v) } }
                 ToggleRow { label: qsTr("Enable cinema mode (trailers / intros)"); on: screen.prefBool("playback/cinemaMode", false); stub: true }
-                ToggleRow { label: qsTr("Show next-video info overlay"); on: screen.prefBool("playback/nextVideoOverlay", true); stub: true }
+                ToggleRow { label: qsTr("Show next-video info overlay"); on: screen.prefBool("playback/nextVideoOverlay", true); onSwitched: (v) => screen.setPref("playback/nextVideoOverlay", v) }
                 ToggleRow { label: qsTr("Enable external video players"); on: screen.prefBool("playback/externalPlayers", false); stub: true }
 
                 GroupLabel { text: qsTr("MEDIA SEGMENTS") }

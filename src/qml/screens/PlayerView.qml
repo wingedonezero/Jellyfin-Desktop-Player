@@ -21,6 +21,10 @@ Item {
     property var segActions: ({})
     property var currentSkipSegment: null  // the AskToSkip segment to prompt for, or null
 
+    // up-next overlay card (episodes, near the end, when there's a next item)
+    property bool upNextVisible: false
+    property bool upNextDismissed: false
+
     // play queue
     property var queue: []
     property int queueIndex: -1
@@ -85,6 +89,9 @@ Item {
         // fetch the full item so the OSD has trickplay sheets (the resume/episode
         // list items don't carry them); merged in onItemsReady below
         client.fetchItem(item.id, "player:item")
+        // up-next card resets per item
+        root.upNextVisible = false
+        root.upNextDismissed = false
         // media segments: load the per-type actions, reset, fetch enabled types
         root.segActions = root._loadSegActions()
         root.segments = []
@@ -201,6 +208,29 @@ Item {
         var names = { "Intro": qsTr("Intro"), "Outro": qsTr("Outro"), "Recap": qsTr("Recap"),
                       "Preview": qsTr("Preview"), "Commercial": qsTr("Commercial") }
         return qsTr("Skip %1").arg(names[type] || type)
+    }
+
+    // ---- up-next overlay card ---------------------------------------------
+    function _nextItem() { return (queueIndex + 1 < queue.length) ? queue[queueIndex + 1] : null }
+    function _nextOverlayEnabled() {
+        if (!config) return true
+        var v = config.value("playback/nextVideoOverlay", true)
+        return (v === true || v === "true" || v === 1 || v === "1")
+    }
+    // Mirror web's showComingUpNextIfNeeded thresholds: only for episodes with a
+    // next item, runtime >= 10 min, >= 20s left, within the last 30/35/40s.
+    function _checkUpNext() {
+        if (root.upNextDismissed || root.upNextVisible) return
+        if (!_nextOverlayEnabled()) return
+        var it = root.currentItem
+        if (!it || it.type !== "Episode" || !_nextItem()) return
+        var runtime = player.duration
+        var pos = player.position
+        if (runtime < 600) return
+        var showAtSecondsLeft = runtime >= 3000 ? 40 : (runtime >= 2400 ? 35 : 30)
+        var remaining = runtime - pos
+        if (pos >= (runtime - showAtSecondsLeft) && remaining >= 20)
+            root.upNextVisible = true
     }
 
     function playNext() {
@@ -364,12 +394,82 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 150 } }
     }
 
-    // Poll the position while there are segments, to arm/auto-apply skips.
+    // Up-next overlay card: next-episode thumbnail + countdown + Start Now / Hide.
+    // Independent of the OSD auto-hide, like web's upnextdialog.
+    Rectangle {
+        id: upNextCard
+        visible: root.upNextVisible && root._nextItem() !== null
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 40; bottomMargin: 96 }
+        z: 60
+        width: 440
+        height: 116
+        radius: Theme.radius
+        color: Theme.surface
+        border.color: Theme.divider
+        border.width: 1
+        opacity: 0.97
+
+        readonly property var nx: root._nextItem() || ({})
+        readonly property int secondsLeft: Math.max(0, Math.ceil(player.duration - player.position))
+
+        Row {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
+            Image {
+                width: 160; height: 90
+                fillMode: Image.PreserveAspectCrop
+                clip: true
+                asynchronous: true
+                cache: true
+                source: (root.client && upNextCard.nx.id)
+                        ? root.client.imageUrl(upNextCard.nx.id, "Primary", 180, upNextCard.nx.imageTag || "")
+                        : ""
+            }
+            Column {
+                width: parent.width - 160 - 12
+                spacing: 5
+                Text {
+                    width: parent.width
+                    text: qsTr("Next Episode Playing in %1").arg(qsTr("%1 Seconds").arg(upNextCard.secondsLeft))
+                    color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+                    elide: Text.ElideRight
+                }
+                Text {
+                    width: parent.width
+                    text: root.composeTitle(upNextCard.nx)
+                    color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
+                    wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                }
+                Row {
+                    spacing: 8
+                    Button {
+                        id: startNowBtn
+                        hoverEnabled: true
+                        padding: 7
+                        onClicked: root.playNext()
+                        background: Rectangle { radius: Theme.radius; color: startNowBtn.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent }
+                        contentItem: Text { text: qsTr("Start Now"); color: Theme.accentText; font.pixelSize: Theme.fontSmall; font.bold: true }
+                    }
+                    Button {
+                        id: hideUpNextBtn
+                        hoverEnabled: true
+                        padding: 7
+                        onClicked: { root.upNextDismissed = true; root.upNextVisible = false }
+                        background: Rectangle { radius: Theme.radius; color: hideUpNextBtn.hovered ? Theme.surfaceHover : "transparent"; border.color: Theme.divider; border.width: 1 }
+                        contentItem: Text { text: qsTr("Hide"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                    }
+                }
+            }
+        }
+    }
+
+    // Poll position during playback: arm/auto-apply segment skips + up-next card.
     Timer {
         interval: 400
         repeat: true
-        running: player.playing && root.segments.length > 0
-        onTriggered: root._checkSegments()
+        running: player.playing
+        onTriggered: { root._checkSegments(); root._checkUpNext() }
     }
 
     Timer {
