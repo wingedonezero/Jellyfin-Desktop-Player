@@ -50,15 +50,24 @@ Item {
         {label: qsTr("Chapter image resolution"), key: "ChapterImageResolution", type: "text"}
     ]
     readonly property var networkFields: [
-        {label: qsTr("Base URL"), key: "BaseUrl", type: "text"},
-        {label: qsTr("Enable HTTPS"), key: "EnableHttps", type: "toggle"},
-        {label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle"},
-        {label: qsTr("HTTP port"), key: "InternalHttpPort", type: "number"},
-        {label: qsTr("HTTPS port"), key: "InternalHttpsPort", type: "number"},
-        {label: qsTr("Public HTTP port"), key: "PublicHttpPort", type: "number"},
-        {label: qsTr("Allow remote connections"), key: "EnableRemoteAccess", type: "toggle"},
-        {label: qsTr("Enable auto-discovery"), key: "AutoDiscovery", type: "toggle"},
-        {label: qsTr("Certificate path"), key: "CertificatePath", type: "text"}
+        {group: qsTr("Server addresses"), label: qsTr("Local HTTP port number"), key: "InternalHttpPort", type: "number", help: qsTr("The TCP port number for the HTTP server.")},
+        {label: qsTr("Enable HTTPS"), key: "EnableHttps", type: "toggle", help: qsTr("Listen on the configured HTTPS port. A valid certificate must also be supplied for this to take effect.")},
+        {label: qsTr("Local HTTPS port number"), key: "InternalHttpsPort", type: "number", help: qsTr("The TCP port number for the HTTPS server.")},
+        {label: qsTr("Base URL"), key: "BaseUrl", type: "text", help: qsTr("Add a custom subdirectory to the server URL. For example: https://example.com/<baseurl>")},
+        {label: qsTr("Bind to local network address"), key: "LocalNetworkAddresses", type: "list", help: qsTr("Override the local IP address for the HTTP server. If left empty, the server will bind to all available addresses. Changing this value requires a restart.")},
+        {label: qsTr("LAN networks"), key: "LocalNetworkSubnets", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries for networks that will be considered on local network. If left blank, all RFC1918 addresses are considered local.")},
+        {label: qsTr("Known proxies"), key: "KnownProxies", type: "list", help: qsTr("Comma separated list of IP addresses or hostnames of known proxies. Required to make proper use of 'X-Forwarded-For' headers. Requires a reboot after saving.")},
+        {group: qsTr("HTTPS settings"), label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle", help: qsTr("If checked, the server will automatically redirect all requests over HTTP to HTTPS. No effect if the server is not listening on HTTPS.")},
+        {label: qsTr("Custom SSL certificate path"), key: "CertificatePath", type: "text", help: qsTr("Path to a PKCS #12 file containing a certificate and private key to enable TLS support on a custom domain.")},
+        {label: qsTr("Certificate password"), key: "CertificatePassword", type: "password", help: qsTr("If your certificate requires a password, please enter it here.")},
+        {group: qsTr("Remote access"), label: qsTr("Allow remote connections to this server"), key: "EnableRemoteAccess", type: "toggle", help: qsTr("If unchecked, all remote connections will be blocked.")},
+        {label: qsTr("Remote IP address filter"), key: "RemoteIPFilter", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries that will be allowed to connect remotely. If left blank, all remote addresses will be allowed.")},
+        {label: qsTr("Treat the remote IP filter as a blacklist (off = whitelist)"), key: "IsRemoteIPFilterBlacklist", type: "toggle"},
+        {label: qsTr("Public HTTP port number"), key: "PublicHttpPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTP port.")},
+        {label: qsTr("Public HTTPS port number"), key: "PublicHttpsPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTPS port.")},
+        {group: qsTr("IP protocols"), label: qsTr("Enable IPv4"), key: "EnableIPv4", type: "toggle", help: qsTr("Enable IPv4 functionality.")},
+        {label: qsTr("Enable IPv6"), key: "EnableIPv6", type: "toggle", help: qsTr("Enable IPv6 functionality.")},
+        {group: qsTr("Network discovery"), label: qsTr("Enable Auto Discovery"), key: "AutoDiscovery", type: "toggle", help: qsTr("Allow applications to automatically detect Jellyfin by using UDP port 7359.")}
     ]
     readonly property var encodingFields: [
         {label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "text"},
@@ -293,18 +302,22 @@ Item {
         id: cf
         property string label: ""
         property string key: ""
-        property string mode: "text"     // text | number | csv
+        property string mode: "text"     // text | number | csv (int list) | list (string list)
         property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
+        property bool secret: false      // mask the input (passwords)
         function display() {
             var v = screen.cfgGet(cf.key)
             if (v === undefined || v === null) return ""
             if (cf.mode === "csv") return (typeof v !== "string" && v.length !== undefined) ? v.join(",") : ("" + v)
+            if (cf.mode === "list") return (typeof v !== "string" && v.length !== undefined) ? v.join(", ") : ("" + v)
             if (cf.mode === "number" && cf.scale !== 1) return v ? ("" + (v / cf.scale)) : ""
             return "" + v
         }
         function commit(t) {
             if (cf.mode === "csv")
                 screen.setConfig(cf.key, ("" + t).replace(/\s/g, "").split(",").filter(function (x) { return x.length }).map(Number))
+            else if (cf.mode === "list")
+                screen.setConfig(cf.key, ("" + t).split(",").map(function (x) { return x.trim() }).filter(function (x) { return x.length }))
             else if (cf.mode === "number")
                 screen.setConfig(cf.key, cf.scale !== 1 ? Math.trunc(cf.scale * (parseFloat(t) || 0)) : (parseInt(t) || 0))
             else
@@ -316,6 +329,7 @@ Item {
             Layout.preferredWidth: 340
             text: cf.display()
             color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+            echoMode: cf.secret ? TextInput.Password : TextInput.Normal
             inputMethodHints: cf.mode === "number" ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
             onEditingFinished: cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
@@ -643,7 +657,7 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : "text"); scale: parent.modelData.scale || 1 } }
+                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "list" ? "list" : "text")); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password" } }
                     Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
                     Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
                     Repeater {
