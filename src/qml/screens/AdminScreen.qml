@@ -26,14 +26,15 @@ Item {
     property var editConfig: ({})
     property var dynOptions: ({})          // dynamically-fetched select options (e.g. {users: [...]})
     property var pendingAction: null
+    property string _dirPickKey: ""        // config key the directory picker is editing
     readonly property var selEntry: navModel[sel] || ({})
 
     // field sets for the data-driven server-config editors (kind "config")
     readonly property var generalFields: [
         {group: qsTr("Settings"), label: qsTr("Server name"), key: "ServerName", type: "text", help: qsTr("This name will be used to identify the server and will default to the server's hostname.")},
         {label: qsTr("Preferred display language"), key: "UICulture", type: "select", optionsKey: "uiCultures", help: qsTr("Translating Jellyfin is an ongoing project. <a href=\"https://jellyfin.org/docs/general/contributing/#translating\">Learn how you can contribute.</a>")},
-        {group: qsTr("Paths"), label: qsTr("Cache path"), key: "CachePath", type: "text", help: qsTr("Specify a custom location for server cache files such as images. Leave blank to use the server default.")},
-        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text", help: qsTr("Specify a custom location for downloaded artwork and metadata.")},
+        {group: qsTr("Paths"), label: qsTr("Cache path"), key: "CachePath", type: "text", browse: true, help: qsTr("Specify a custom location for server cache files such as images. Leave blank to use the server default.")},
+        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text", browse: true, help: qsTr("Specify a custom location for downloaded artwork and metadata.")},
         {group: qsTr("Quick Connect"), label: qsTr("Enable Quick Connect on this server"), key: "QuickConnectAvailable", type: "toggle"},
         {group: qsTr("Performance"), label: qsTr("Parallel library scan tasks limit"), key: "LibraryScanFanoutConcurrency", type: "number", help: qsTr("Maximum number of parallel tasks during library scans. Leaving this empty will choose a limit based on your system's core count. WARNING: Setting this number too high may cause issues with network file systems; if you encounter problems lower this number.")},
         {label: qsTr("Parallel image encoding limit"), key: "ParallelImageEncodingLimit", type: "number", help: qsTr("Maximum number of image encodings that are allowed to run in parallel. Leaving this empty will choose a limit based on your system's core count.")}
@@ -58,7 +59,7 @@ Item {
         {label: qsTr("LAN networks"), key: "LocalNetworkSubnets", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries for networks that will be considered on local network. If left blank, all RFC1918 addresses are considered local.")},
         {label: qsTr("Known proxies"), key: "KnownProxies", type: "list", help: qsTr("Comma separated list of IP addresses or hostnames of known proxies. Required to make proper use of 'X-Forwarded-For' headers. Requires a reboot after saving.")},
         {group: qsTr("HTTPS settings"), label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle", help: qsTr("If checked, the server will automatically redirect all requests over HTTP to HTTPS. No effect if the server is not listening on HTTPS.")},
-        {label: qsTr("Custom SSL certificate path"), key: "CertificatePath", type: "text", help: qsTr("Path to a PKCS #12 file containing a certificate and private key to enable TLS support on a custom domain.")},
+        {label: qsTr("Custom SSL certificate path"), key: "CertificatePath", type: "text", browse: true, help: qsTr("Path to a PKCS #12 file containing a certificate and private key to enable TLS support on a custom domain.")},
         {label: qsTr("Certificate password"), key: "CertificatePassword", type: "password", help: qsTr("If your certificate requires a password, please enter it here.")},
         {group: qsTr("Remote access"), label: qsTr("Allow remote connections to this server"), key: "EnableRemoteAccess", type: "toggle", help: qsTr("If unchecked, all remote connections will be blocked.")},
         {label: qsTr("Remote IP address filter"), key: "RemoteIPFilter", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries that will be allowed to connect remotely. If left blank, all remote addresses will be allowed.")},
@@ -120,8 +121,8 @@ Item {
         {label: qsTr("Stereo downmix algorithm"), key: "DownMixStereoAlgorithm", type: "select", help: qsTr("Algorithm used to downmix multi-channel audio to stereo."),
          options: [{value: "None", text: qsTr("None")}, {value: "Dave750", text: "Dave750"}, {value: "NightmodeDialogue", text: "Nightmode Dialogue"}, {value: "Rfc7845", text: "RFC7845"}, {value: "Ac4", text: "AC-4"}]},
 
-        {group: qsTr("Paths"), label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
-        {label: qsTr("Fallback font folder path"), key: "FallbackFontPath", type: "text", help: qsTr("Fonts used by some clients to render subtitles.")},
+        {group: qsTr("Paths"), label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", browse: true, help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
+        {label: qsTr("Fallback font folder path"), key: "FallbackFontPath", type: "text", browse: true, help: qsTr("Fonts used by some clients to render subtitles.")},
         {label: qsTr("Enable fallback fonts"), key: "EnableFallbackFont", type: "toggle", help: qsTr("Enable custom alternate fonts to avoid incorrect subtitle rendering.")},
 
         {group: qsTr("Transcode throttling"), label: qsTr("Throttle transcodes"), key: "EnableThrottling", type: "toggle", help: qsTr("When a transcode gets far enough ahead of playback, pause it to use fewer resources. Turn off if you experience playback issues.")},
@@ -227,6 +228,7 @@ Item {
     }
     // confirm a destructive action before running it (server actions)
     function confirm(msg, action) { confirmPopup.message = msg; pendingAction = action; confirmPopup.open() }
+    function openDirPicker(key) { _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
     function relTime(iso) {
         if (!iso) return ""
         const t = Date.parse(iso); if (isNaN(t)) return ""
@@ -373,6 +375,7 @@ Item {
         property string mode: "text"     // text | number | float | csv (int list) | list (string list)
         property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
         property bool secret: false      // mask the input (passwords)
+        property bool browse: false      // show a "Browse…" button → server directory picker
         function display() {
             var v = screen.cfgGet(cf.key)
             if (v === undefined || v === null) return ""
@@ -404,6 +407,7 @@ Item {
             onEditingFinished: cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
         }
+        DashButton { visible: cf.browse; text: qsTr("Browse…"); onClicked: screen.openDirPicker(cf.key) }
     }
     component ConfigToggle: RowLayout {
         id: ct
@@ -486,6 +490,12 @@ Item {
                 DashButton { text: qsTr("Confirm"); danger: true; onClicked: { confirmPopup.close(); if (screen.pendingAction) screen.pendingAction() } }
             }
         }
+    }
+
+    DirectoryPicker {
+        id: dirPicker
+        client: screen.client
+        onPicked: (chosenPath) => screen.setConfig(screen._dirPickKey, chosenPath)
     }
 
     RowLayout {
@@ -727,7 +737,7 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password" } }
+                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true } }
                     Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
                     Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
                     Repeater {
