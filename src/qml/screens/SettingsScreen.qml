@@ -351,13 +351,33 @@ Item {
             // 1 — Display
             Panel {
                 SectionTitle { text: qsTr("Display") }
-                Hint { text: qsTr("Theme — the app is fully skinnable; the default replicates the Jellyfin web layout. More skins coming.") }
+
+                GroupLabel { text: qsTr("APPEARANCE") }
+                Hint { text: qsTr("The default skin replicates the Jellyfin web layout. Full theming / alternate skins are a separate future project.") }
                 OptionRow { text: qsTr("Jellyfin Web — Dark"); current: true }
                 OptionRow { text: qsTr("Jellyfin Web — Light"); stub: true }
-                Item { Layout.preferredHeight: Theme.spacing }
-                OptionRow { text: qsTr("Language"); stub: true }
-                OptionRow { text: qsTr("Show backdrops"); stub: true }
-                OptionRow { text: qsTr("Enable cinema mode"); stub: true }
+                OptionRow { text: qsTr("Display language"); stub: true }
+                OptionRow { text: qsTr("Layout mode"); stub: true }
+                ToggleRow { label: qsTr("Show backdrops"); on: screen.prefBool("display/backdrops", true); onSwitched: (v) => screen.setPref("display/backdrops", v) }
+                ToggleRow { label: qsTr("Show details banner on items"); on: screen.prefBool("display/detailsBanner", true); onSwitched: (v) => screen.setPref("display/detailsBanner", v) }
+                ToggleRow { label: qsTr("Faster animations"); on: screen.prefBool("display/fastAnimations", false); onSwitched: (v) => screen.setPref("display/fastAnimations", v) }
+                OptionRow { text: qsTr("BlurHash placeholders"); stub: true }
+
+                GroupLabel { text: qsTr("LIBRARY") }
+                StepperRow { label: qsTr("Library page size (0 = all)"); value: screen.pref("display/libraryPageSize", 100); step: 25; minValue: 0; maxValue: 500; suffix: ""; onChanged: (v) => screen.setPref("display/libraryPageSize", v) }
+                ToggleRow { label: qsTr("Display missing episodes within seasons"); on: screen.cfg("DisplayMissingEpisodes", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("DisplayMissingEpisodes", v) } }
+
+                GroupLabel { text: qsTr("NEXT UP") }
+                StepperRow { label: qsTr("Max days for Next Up"); value: screen.pref("display/maxDaysNextUp", 365); step: 30; minValue: 0; maxValue: 1000; suffix: ""; onChanged: (v) => screen.setPref("display/maxDaysNextUp", v) }
+                ToggleRow { label: qsTr("Enable rewatching in Next Up"); on: screen.prefBool("display/rewatchingNextUp", false); onSwitched: (v) => screen.setPref("display/rewatchingNextUp", v) }
+                ToggleRow { label: qsTr("Use episode images in Next Up & Resume"); on: screen.prefBool("display/episodeImagesNextUp", false); onSwitched: (v) => screen.setPref("display/episodeImagesNextUp", v) }
+
+                GroupLabel { text: qsTr("EXTRAS") }
+                Hint { text: qsTr("Web-specific or not yet wired for the native client.") }
+                OptionRow { text: qsTr("Theme songs"); stub: true }
+                OptionRow { text: qsTr("Theme videos"); stub: true }
+                OptionRow { text: qsTr("Screensaver"); stub: true }
+                OptionRow { text: qsTr("Custom CSS"); stub: true }
             }
 
             // 2 — Home
