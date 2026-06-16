@@ -92,6 +92,9 @@ public:
     Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
     // One trickplay tile sheet (a grid of thumbnails) at the given resolution width.
     Q_INVOKABLE QUrl trickplayUrl(const QString &itemId, int width, int index) const;
+    // Media segments (intro/outro/recap/preview/commercial) for skip prompts.
+    // includeTypes = comma-separated MediaSegmentType names. Emits mediaSegmentsReady.
+    Q_INVOKABLE void fetchMediaSegments(const QString &itemId, const QString &includeTypes);
 
     // Resolve a playable URL via /Items/{id}/PlaybackInfo: direct-play when the
     // source fits (maxBitrate <= 0 = Auto), otherwise an HLS transcode URL.
@@ -165,6 +168,7 @@ Q_SIGNALS:
     void authenticatedChanged();
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
+    void mediaSegmentsReady(const QString &itemId, const QVariantList &segments);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);
     void textReady(const QString &requestTag, const QString &content);

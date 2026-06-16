@@ -494,6 +494,28 @@ void JellyfinClient::fetchSimilar(const QString &itemId, const QString &requestT
                  requestTag);
 }
 
+void JellyfinClient::fetchMediaSegments(const QString &itemId, const QString &includeTypes)
+{
+    QString path = QStringLiteral("/MediaSegments/%1").arg(itemId);
+    if (!includeTypes.isEmpty())
+        path += QStringLiteral("?includeSegmentTypes=%1").arg(includeTypes);
+    QNetworkReply *reply = get(path);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, itemId]() {
+        reply->deleteLater();
+        QVariantList segments;
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonArray items = obj.value(QStringLiteral("Items")).toArray();
+        for (const QJsonValue &v : items) {
+            const QJsonObject s = v.toObject();
+            segments.append(QVariantMap{
+                {QStringLiteral("type"), s.value(QStringLiteral("Type")).toString()},
+                {QStringLiteral("startTicks"), s.value(QStringLiteral("StartTicks")).toDouble()},
+                {QStringLiteral("endTicks"), s.value(QStringLiteral("EndTicks")).toDouble()}});
+        }
+        Q_EMIT mediaSegmentsReady(itemId, segments);
+    });
+}
+
 void JellyfinClient::fetchFavorites(const QString &requestTag)
 {
     requestItems(QStringLiteral("/Users/%1/Items?Filters=IsFavorite&Recursive=true&SortBy=SortName"

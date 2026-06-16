@@ -461,12 +461,12 @@ Item {
                 ToggleRow { label: qsTr("Enable external video players"); on: screen.prefBool("playback/externalPlayers", false); stub: true }
 
                 GroupLabel { text: qsTr("MEDIA SEGMENTS") }
-                Hint { text: qsTr("What to do at each marked segment. The skip behaviour isn't wired to the player yet.") }
-                ComboRow { enabled: false; label: qsTr("Intro"); options: screen.segmentActions; value: screen.pref("playback/segIntro", "None"); onPicked: (v) => screen.setPref("playback/segIntro", v) }
-                ComboRow { enabled: false; label: qsTr("Recap"); options: screen.segmentActions; value: screen.pref("playback/segRecap", "None"); onPicked: (v) => screen.setPref("playback/segRecap", v) }
-                ComboRow { enabled: false; label: qsTr("Preview"); options: screen.segmentActions; value: screen.pref("playback/segPreview", "None"); onPicked: (v) => screen.setPref("playback/segPreview", v) }
-                ComboRow { enabled: false; label: qsTr("Outro / Credits"); options: screen.segmentActions; value: screen.pref("playback/segOutro", "None"); onPicked: (v) => screen.setPref("playback/segOutro", v) }
-                ComboRow { enabled: false; label: qsTr("Commercial"); options: screen.segmentActions; value: screen.pref("playback/segCommercial", "None"); onPicked: (v) => screen.setPref("playback/segCommercial", v) }
+                Hint { text: qsTr("What to do when playback reaches a marked segment. \"Ask to skip\" shows a Skip button; \"Skip automatically\" jumps past it.") }
+                ComboRow { label: qsTr("Intro"); options: screen.segmentActions; value: screen.pref("playback/segIntro", "AskToSkip"); onPicked: (v) => screen.setPref("playback/segIntro", v) }
+                ComboRow { label: qsTr("Recap"); options: screen.segmentActions; value: screen.pref("playback/segRecap", "None"); onPicked: (v) => screen.setPref("playback/segRecap", v) }
+                ComboRow { label: qsTr("Preview"); options: screen.segmentActions; value: screen.pref("playback/segPreview", "None"); onPicked: (v) => screen.setPref("playback/segPreview", v) }
+                ComboRow { label: qsTr("Outro / Credits"); options: screen.segmentActions; value: screen.pref("playback/segOutro", "AskToSkip"); onPicked: (v) => screen.setPref("playback/segOutro", v) }
+                ComboRow { label: qsTr("Commercial"); options: screen.segmentActions; value: screen.pref("playback/segCommercial", "None"); onPicked: (v) => screen.setPref("playback/segCommercial", v) }
             }
 
             // 4 — Subtitles

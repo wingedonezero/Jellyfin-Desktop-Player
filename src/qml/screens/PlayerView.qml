@@ -16,6 +16,11 @@ Item {
     property var playerItem: ({})  // full item (trickplay/chapters), fetched on play
     property bool favorite: false
 
+    // media segments (intro/outro/...) + the per-type skip action map
+    property var segments: []
+    property var segActions: ({})
+    property var currentSkipSegment: null  // the AskToSkip segment to prompt for, or null
+
     // play queue
     property var queue: []
     property int queueIndex: -1
@@ -80,6 +85,12 @@ Item {
         // fetch the full item so the OSD has trickplay sheets (the resume/episode
         // list items don't carry them); merged in onItemsReady below
         client.fetchItem(item.id, "player:item")
+        // media segments: load the per-type actions, reset, fetch enabled types
+        root.segActions = root._loadSegActions()
+        root.segments = []
+        root.currentSkipSegment = null
+        var segTypes = root._enabledSegTypes()
+        if (segTypes.length > 0) client.fetchMediaSegments(item.id, segTypes.join(","))
         console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", root._resumeSeconds)
     }
 
@@ -109,6 +120,9 @@ Item {
             if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)
                 root.playerItem = items[0]
         }
+        function onMediaSegmentsReady(itemId, segs) {
+            if (itemId === player.currentId) root.segments = segs
+        }
     }
 
     // Pick the trickplay resolution the way jellyfin-web does: the highest width
@@ -129,6 +143,64 @@ Item {
                 best = info
         }
         return best
+    }
+
+    // ---- media-segment skip (intro/outro/recap/preview/commercial) --------
+    // The per-type action (None/AskToSkip/Skip) is a client-local pref. Defaults
+    // mirror jellyfin-web: Intro + Outro = AskToSkip, the rest None.
+    function _loadSegActions() {
+        if (!config) return ({})
+        function a(key, def) { return "" + config.value(key, def) }
+        return {
+            "Intro":      a("playback/segIntro", "AskToSkip"),
+            "Recap":      a("playback/segRecap", "None"),
+            "Preview":    a("playback/segPreview", "None"),
+            "Outro":      a("playback/segOutro", "AskToSkip"),
+            "Commercial": a("playback/segCommercial", "None")
+        }
+    }
+    function _enabledSegTypes() {
+        var types = []
+        for (var t in root.segActions)
+            if (root.segActions[t] && root.segActions[t] !== "None") types.push(t)
+        return types
+    }
+    // Called on a short timer during playback: find the segment we're inside and
+    // apply its action (auto-skip, or arm the "Skip …" prompt). Mirrors web's
+    // MediaSegmentManager.onPlayerTimeUpdate.
+    function _checkSegments() {
+        if (!player.playing || root.segments.length === 0) return
+        var time = player.position * 10000000 // ticks
+        var seg = null
+        for (var i = 0; i < root.segments.length; ++i) {
+            var s = root.segments[i]
+            if (s.startTicks <= time && (s.endTicks <= 0 || time < s.endTicks)) { seg = s; break }
+        }
+        if (!seg) { if (root.currentSkipSegment) root.currentSkipSegment = null; return }
+        var act = root.segActions[seg.type] || "None"
+        if (act === "Skip") {
+            if (root.currentSkipSegment) root.currentSkipSegment = null
+            // skip once: seek to the end if it's a real (>1s) segment ahead of us
+            if (seg.endTicks > seg.startTicks && (seg.endTicks - seg.startTicks) >= 10000000
+                    && time < seg.endTicks - 5000000)
+                player.seek(seg.endTicks / 10000000)
+        } else if (act === "AskToSkip") {
+            if (root.currentSkipSegment !== seg) root.currentSkipSegment = seg // identity-stable
+        } else if (root.currentSkipSegment) {
+            root.currentSkipSegment = null
+        }
+    }
+    function skipCurrentSegment() {
+        var seg = root.currentSkipSegment
+        if (!seg) return
+        root.currentSkipSegment = null
+        if (seg.endTicks > 0) player.seek(seg.endTicks / 10000000)
+        else playNext()
+    }
+    function skipLabel(type) {
+        var names = { "Intro": qsTr("Intro"), "Outro": qsTr("Outro"), "Recap": qsTr("Recap"),
+                      "Preview": qsTr("Preview"), "Commercial": qsTr("Commercial") }
+        return qsTr("Skip %1").arg(names[type] || type)
     }
 
     function playNext() {
@@ -153,6 +225,8 @@ Item {
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
+        root.segments = []
+        root.currentSkipSegment = null
         player.command(["stop"])
     }
 
@@ -262,6 +336,40 @@ Item {
             if (w)
                 w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
         }
+    }
+
+    // Transient "Skip Intro / Outro / …" button during an AskToSkip segment.
+    // Shown independent of the OSD auto-hide, matching jellyfin-web's skip button.
+    Button {
+        id: skipBtn
+        visible: root.currentSkipSegment !== null
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 48; bottomMargin: 96 }
+        z: 60
+        hoverEnabled: true
+        padding: 12
+        onClicked: root.skipCurrentSegment()
+        background: Rectangle {
+            radius: Theme.radius
+            color: skipBtn.hovered ? Theme.surfaceHover : Theme.surface
+            border.color: Theme.accent
+            border.width: 1
+            opacity: 0.97
+        }
+        contentItem: Text {
+            text: (root.currentSkipSegment ? root.skipLabel(root.currentSkipSegment.type) : "") + "   ⏭"
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontMedium
+            font.bold: true
+        }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+    }
+
+    // Poll the position while there are segments, to arm/auto-apply skips.
+    Timer {
+        interval: 400
+        repeat: true
+        running: player.playing && root.segments.length > 0
+        onTriggered: root._checkSegments()
     }
 
     Timer {
