@@ -23,6 +23,7 @@ Item {
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
+    property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
 
     Component.onCompleted: if (config) {
@@ -30,9 +31,29 @@ Item {
         autoPlayNext = config.value("playback/autoPlayNext", true)
         skipBack = config.value("playback/skipBack", 10)
         skipForward = config.value("playback/skipForward", 30)
+        var rt = config.value("playback/remainingTime", false)
+        showRemaining = (rt === true || rt === "true" || rt === 1 || rt === "1")
     }
 
     function playItem(item) { playQueue([item], 0) }
+
+    // Compose the OSD title the way jellyfin-web does (itemHelper.getDisplayName
+    // + setTitle): episodes as "Series - Sxx:Exx - Episode", movies with a year.
+    function composeTitle(it) {
+        if (!it || !it.name) return ""
+        if (it.type === "Episode") {
+            var num = ""
+            // specials (season 0) get no Sxx:Exx prefix, matching web
+            if (it.parentIndexNumber !== undefined && it.parentIndexNumber !== 0
+                    && it.indexNumber !== undefined)
+                num = "S" + it.parentIndexNumber + ":E" + it.indexNumber
+            var base = num ? (it.name ? num + " - " + it.name : num) : it.name
+            return it.seriesName ? (it.seriesName + " - " + base) : base
+        }
+        if (it.type === "Movie" && it.productionYear)
+            return it.name + " (" + it.productionYear + ")"
+        return it.name
+    }
 
     function playQueue(items, index) {
         root.queue = items
@@ -180,16 +201,21 @@ Item {
     PlayerControls {
         anchors.fill: parent
         player: player
-        title: root.currentItem.name || ""
+        title: root.composeTitle(root.currentItem)
         favorite: root.favorite
         repeatMode: root.repeatMode
         maxBitrate: root.maxBitrate
         skipBack: root.skipBack
         skipForward: root.skipForward
+        showRemaining: root.showRemaining
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         onBack: root.stop()
+        onToggleRemaining: {
+            root.showRemaining = !root.showRemaining
+            if (root.config) root.config.setValue("playback/remainingTime", root.showRemaining)
+        }
         onPrevious: root.playPrev()
         onNext: root.playNext()
         onCycleRepeat: root.repeatMode = (root.repeatMode + 1) % 3

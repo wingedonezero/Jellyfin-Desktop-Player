@@ -18,6 +18,7 @@ Item {
     property int maxBitrate: 0 // 0 = Auto (direct play)
     property int skipBack: 10
     property int skipForward: 30
+    property bool showRemaining: false // duration label shows -remaining instead of total
 
     signal back()
     signal toggleFullscreen()
@@ -26,6 +27,7 @@ Item {
     signal next()
     signal cycleRepeat()
     signal setQuality(int bitrate)
+    signal toggleRemaining()
 
     // Local skin state (the mpv side is authoritative for speed/delays).
     property string aspectMode: "Auto"
@@ -299,7 +301,22 @@ Item {
                     }
                 }
 
-                Label { text: root.fmt(root.player.duration); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                // total duration, or -remaining; click to toggle (web parity)
+                Label {
+                    id: durationLabel
+                    text: root.showRemaining
+                          ? "-" + root.fmt(Math.max(0, root.player.duration - root.player.position))
+                          : root.fmt(root.player.duration)
+                    color: durMa.containsMouse ? Theme.accent : Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
+                    MouseArea {
+                        id: durMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleRemaining()
+                    }
+                }
             }
 
             // --- control row ---
