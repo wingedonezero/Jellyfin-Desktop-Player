@@ -66,7 +66,10 @@ Item {
     }
 
     Component.onCompleted: reloadItems()
-    onTabChanged: loadKind(curKind)
+    // Compute the kind FRESH from the current tab — the curKind binding is still
+    // the previous tab's value inside this (tab) change handler (it hasn't
+    // re-evaluated yet), which would load the wrong tab's content.
+    onTabChanged: loadKind(filteredView ? "items" : (tabs[tab] ? tabs[tab].kind : "items"))
 
     function filterPart() {
         var f = []
