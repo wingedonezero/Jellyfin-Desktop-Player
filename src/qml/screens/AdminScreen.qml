@@ -170,6 +170,47 @@ Item {
         {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number", help: qsTr("The quality scale of images output by ffmpeg, with 2 being the highest quality and 31 being the lowest.")},
         {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number", help: qsTr("The number of threads to pass to the '-threads' argument of ffmpeg.")}
     ]
+    // Per-library LibraryOptions (edited against a deep copy of the selected
+    // library's options; Save → updateLibraryOptions). Mirrors web's
+    // libraryoptionseditor (common fields; the per-type fetcher-order tables are
+    // out of scope). Reuses the cultures/countries dropdown sources.
+    readonly property var libraryOptionsFields: [
+        {group: qsTr("Library"), label: qsTr("Enable the library"), key: "Enabled", type: "toggle", help: qsTr("Disabling the library will hide it from all user views.")},
+        {label: qsTr("Download metadata and images from the internet"), key: "EnableInternetProviders", type: "toggle"},
+        {label: qsTr("Preferred download language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
+        {label: qsTr("Country / Region"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
+        {label: qsTr("Automatically refresh metadata from the internet (days; 0 = never)"), key: "AutomaticRefreshIntervalDays", type: "number"},
+        {label: qsTr("Save artwork into media folders"), key: "SaveLocalMetadata", type: "toggle", help: qsTr("Saving artwork into media folders puts it where it can be easily edited.")},
+        {label: qsTr("Enable real-time monitoring"), key: "EnableRealtimeMonitor", type: "toggle", help: qsTr("Changes to files will be processed immediately on supported file systems.")},
+        {label: qsTr("Display photos"), key: "EnablePhotos", type: "toggle", help: qsTr("Images will be detected and displayed alongside other media files.")},
+        {label: qsTr("Enable LUFS scan"), key: "EnableLUFSScan", type: "toggle", help: qsTr("Lets clients normalize playback loudness across tracks. Makes library scans longer and use more resources.")},
+        {label: qsTr("Automatically add to collection"), key: "AutomaticallyAddToCollection", type: "toggle", help: qsTr("When at least 2 movies share the same collection name, they are added to the collection automatically.")},
+        {label: qsTr("Automatically merge series spread across multiple folders"), key: "EnableAutomaticSeriesGrouping", type: "toggle", help: qsTr("Series spread across multiple folders in this library are merged into a single series.")},
+        {label: qsTr("Special season display name"), key: "SeasonZeroDisplayName", type: "text"},
+
+        {group: qsTr("Embedded info"), label: qsTr("Prefer embedded titles over filenames"), key: "EnableEmbeddedTitles", type: "toggle", help: qsTr("Title to use when no internet or local metadata is available.")},
+        {label: qsTr("Prefer embedded titles over filenames for extras"), key: "EnableEmbeddedExtrasTitles", type: "toggle", help: qsTr("Extras often share the parent's embedded name; check to use embedded titles for them anyway.")},
+        {label: qsTr("Prefer embedded episode information over filenames"), key: "EnableEmbeddedEpisodeInfos", type: "toggle", help: qsTr("Use embedded episode information when available.")},
+        {label: qsTr("Disable different types of embedded subtitles"), key: "AllowEmbeddedSubtitles", type: "select", options: [{value: "AllowAll", text: qsTr("Allow All")}, {value: "AllowText", text: qsTr("Allow Text")}, {value: "AllowImage", text: qsTr("Allow Image")}, {value: "AllowNone", text: qsTr("Allow None")}], help: qsTr("Disable subtitles packaged within media containers. Requires a full library refresh.")},
+
+        {group: qsTr("Trickplay"), label: qsTr("Enable trickplay image extraction"), key: "EnableTrickplayImageExtraction", type: "toggle", help: qsTr("Trickplay images span the content and show a preview when scrubbing through videos.")},
+        {label: qsTr("Extract trickplay images during the library scan"), key: "ExtractTrickplayImagesDuringLibraryScan", type: "toggle", help: qsTr("Otherwise they are extracted during the trickplay scheduled task.")},
+        {label: qsTr("Save trickplay images next to media"), key: "SaveTrickplayWithMedia", type: "toggle", help: qsTr("Puts trickplay images next to your media for easy migration and access.")},
+
+        {group: qsTr("Chapter images"), label: qsTr("Enable chapter image extraction"), key: "EnableChapterImageExtraction", type: "toggle", help: qsTr("Lets clients display graphical scene-selection menus. Can be slow and resource intensive.")},
+        {label: qsTr("Extract chapter images during the library scan"), key: "ExtractChapterImagesDuringLibraryScan", type: "toggle", help: qsTr("Otherwise they are extracted during the chapter-images scheduled task.")},
+
+        {group: qsTr("Subtitle downloads"), label: qsTr("Only download subtitles that perfectly match the video"), key: "RequirePerfectSubtitleMatch", type: "toggle", help: qsTr("Filters to subtitles verified with your exact file. Unchecking increases coverage but risks mistimed/incorrect subtitles.")},
+        {label: qsTr("Skip if the default audio track matches the download language"), key: "SkipSubtitlesIfAudioTrackMatches", type: "toggle", help: qsTr("Uncheck to ensure all videos have subtitles regardless of audio language.")},
+        {label: qsTr("Skip if the video already contains embedded subtitles"), key: "SkipSubtitlesIfEmbeddedSubtitlesPresent", type: "toggle", help: qsTr("Keeping text subtitles means more efficient delivery and less transcoding.")},
+        {label: qsTr("Save subtitles into media folders"), key: "SaveSubtitlesWithMedia", type: "toggle", help: qsTr("Storing subtitles next to video files makes them easier to manage.")},
+
+        {group: qsTr("Lyrics"), label: qsTr("Save lyrics into media folders"), key: "SaveLyricsWithMedia", type: "toggle", help: qsTr("Storing lyrics next to audio files makes them easier to manage.")},
+
+        {group: qsTr("Audio tags"), label: qsTr("Prefer ARTISTS tag if available"), key: "PreferNonstandardArtistsTag", type: "toggle", help: qsTr("Use the non-standard ARTISTS tag instead of ARTIST when available.")},
+        {label: qsTr("Use custom tag delimiters"), key: "UseCustomTagDelimiters", type: "toggle", help: qsTr("Split artist/genre tags with custom characters.")},
+        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list"}
+    ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
     readonly property var navModel: [
@@ -218,8 +259,9 @@ Item {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
         } else if (entry.kind === "libraries") {
-            librariesData = []; selectedLib = null; addMode = false
+            librariesData = []; selectedLib = null; addMode = false; dynOptions = ({})
             client.getJson("/Library/VirtualFolders", "admin:libs")
+            fetchOptionSources(libraryOptionsFields) // cultures/countries for the per-library options editor
         } else if (entry.kind === "config") {
             serverConfig = null; editConfig = ({}); dynOptions = ({})
             client.getJson(entry.ep, "admin:config")
@@ -243,7 +285,7 @@ Item {
     function openDirPicker(key) { _dirPickMode = "config"; _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
     function pickNewLibFolder() { _dirPickMode = "newlib"; dirPicker.openAt("") }
     function pickAddPathFolder() { _dirPickMode = "addpath"; dirPicker.openAt("") }
-    function selectLib(lib) { selectedLib = lib; renameValue = ("" + (lib.Name || "")) }
+    function selectLib(lib) { selectedLib = lib; renameValue = ("" + (lib.Name || "")); editConfig = lib.LibraryOptions ? JSON.parse(JSON.stringify(lib.LibraryOptions)) : ({}) }
     function reloadLibs() { if (client) client.getJson("/Library/VirtualFolders", "admin:libs") }
     function relTime(iso) {
         if (!iso) return ""
@@ -492,6 +534,52 @@ Item {
                 width: cbox.width; implicitHeight: 32; hoverEnabled: true
                 contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
                 background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+            }
+        }
+    }
+
+    // Reusable renderer for a field descriptor list (group headers + control +
+    // helper text + showWhen), editing the shared editConfig via cfgGet/setConfig.
+    // Used by the server-config pages AND a library's LibraryOptions.
+    component ConfigFieldList: ColumnLayout {
+        id: cfl
+        property var fields: []
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Component { id: cflField; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true } }
+        Component { id: cflToggle; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
+        Component { id: cflSelect; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
+        Repeater {
+            model: cfl.fields
+            ColumnLayout {
+                id: fieldRow
+                required property var modelData
+                required property int index
+                Layout.fillWidth: true
+                visible: screen.fieldVisible(fieldRow.modelData)
+                spacing: 3
+                Text {
+                    visible: !!fieldRow.modelData.group && (fieldRow.index === 0 || cfl.fields[fieldRow.index - 1].group !== fieldRow.modelData.group)
+                    text: fieldRow.modelData.group || ""
+                    color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+                    Layout.topMargin: fieldRow.index === 0 ? 0 : Theme.spacing
+                    Layout.bottomMargin: 2
+                }
+                Loader {
+                    property var modelData: fieldRow.modelData
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    sourceComponent: modelData.type === "toggle" ? cflToggle : (modelData.type === "select" ? cflSelect : cflField)
+                }
+                Text {
+                    visible: !!fieldRow.modelData.help
+                    text: fieldRow.modelData.help || ""
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
+                    textFormat: Text.StyledText; linkColor: Theme.accent
+                    onLinkActivated: (l) => Qt.openUrlExternally(l)
+                    wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 4; Layout.maximumWidth: 760
+                    Layout.bottomMargin: Theme.spacingSmall
+                }
             }
         }
     }
@@ -769,44 +857,7 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true } }
-                    Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
-                    Component { id: cfgSelectComp; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
-                    Repeater {
-                        model: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : []
-                        ColumnLayout {
-                            id: fieldRow
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            visible: screen.fieldVisible(fieldRow.modelData)
-                            spacing: 3
-                            // section header — shown when a field starts a new group (web groups fields under headings)
-                            Text {
-                                visible: !!fieldRow.modelData.group && (fieldRow.index === 0 || screen.selEntry.fields[fieldRow.index - 1].group !== fieldRow.modelData.group)
-                                text: fieldRow.modelData.group || ""
-                                color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
-                                Layout.topMargin: fieldRow.index === 0 ? 0 : Theme.spacing
-                                Layout.bottomMargin: 2
-                            }
-                            Loader {
-                                property var modelData: fieldRow.modelData
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: item ? item.implicitHeight : 0
-                                sourceComponent: modelData.type === "toggle" ? cfgToggleComp : (modelData.type === "select" ? cfgSelectComp : cfgFieldComp)
-                            }
-                            // helper text (matches web; supports an inline <a href> link)
-                            Text {
-                                visible: !!fieldRow.modelData.help
-                                text: fieldRow.modelData.help || ""
-                                color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
-                                textFormat: Text.StyledText; linkColor: Theme.accent
-                                onLinkActivated: (l) => Qt.openUrlExternally(l)
-                                wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 4; Layout.maximumWidth: 760
-                                Layout.bottomMargin: Theme.spacingSmall
-                            }
-                        }
-                    }
+                    ConfigFieldList { fields: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : [] }
                     RowLayout {
                         visible: screen.serverConfig !== null
                         Layout.topMargin: Theme.spacing
@@ -934,12 +985,19 @@ Item {
                             }
                         }
                         DashButton { text: qsTr("Add folder"); onClicked: screen.pickAddPathFolder() }
+
+                        Text { text: qsTr("Library options"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingLarge }
+                        ConfigFieldList { fields: screen.libraryOptionsFields }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing
+                            DashButton { text: qsTr("Save library options"); onClicked: screen.confirm(qsTr("Save library options for “%1”?").arg(screen.selectedLib.Name), function () { screen.client.updateLibraryOptions(screen.selectedLib.ItemId, screen.editConfig) }) }
+                        }
+
                         RowLayout {
                             Layout.topMargin: Theme.spacingLarge
                             DashButton { text: qsTr("Delete library"); danger: true; onClicked: screen.confirm(qsTr("Delete the library “%1”? (Your media files are not deleted.)").arg(screen.selectedLib.Name),
                                 function () { screen.client.removeVirtualFolder(screen.selectedLib.Name); screen.selectedLib = null; screen.libReloadTimer.restart() }) }
                         }
-                        Text { text: qsTr("Library options (real-time monitoring, metadata, image extraction…) editing is coming next."); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.topMargin: Theme.spacing }
                     }
                 }
 
