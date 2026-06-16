@@ -182,6 +182,13 @@ Item {
     readonly property var streamingFields: [
         {label: qsTr("Remote client bitrate limit (Mbps, 0 = unlimited)"), key: "RemoteClientBitrateLimit", type: "number", scale: 1000000, help: qsTr("An optional per-stream bitrate limit for all out of network devices. This is useful to prevent devices from requesting a higher bitrate than your internet connection can handle. This may result in increased CPU load on your server in order to transcode videos on the fly to a lower bitrate.")}
     ]
+    readonly property var displayFields: [
+        {label: qsTr("Display a folder view to show plain media folders"), key: "EnableFolderView", type: "toggle", help: qsTr("Display folders alongside your other media. This may be useful if you'd like to have a plain folder view.")},
+        {label: qsTr("Display specials within the seasons they aired in"), key: "DisplaySpecialsWithinSeasons", type: "toggle"},
+        {label: qsTr("Group movies into collections"), key: "EnableGroupingMoviesIntoCollections", type: "toggle", help: qsTr("When displaying movie lists, movies belonging to a collection will be displayed as one grouped item.")},
+        {label: qsTr("Group shows into collections"), key: "EnableGroupingShowsIntoCollections", type: "toggle", help: qsTr("When displaying show lists, shows belonging to a collection will be displayed as one grouped item.")},
+        {label: qsTr("Enable external content in suggestions"), key: "EnableExternalContentInSuggestions", type: "toggle", help: qsTr("Allow internet trailers and Live TV programs to be included within suggested content.")}
+    ]
     readonly property var nfoFields: [
         {label: qsTr("Kodi metadata user"), key: "UserId", type: "select", optionsKey: "users", help: qsTr("Save watch data to NFO files for other applications to use.")},
         {label: qsTr("Save image paths in NFO"), key: "SaveImagePathsInNfo", type: "toggle", help: qsTr("This is recommended if you have image file names that don't conform to Kodi guidelines.")},
@@ -259,6 +266,7 @@ Item {
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "config", ep: "/System/Configuration/branding", fields: screen.brandingFields },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
         { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "libraries" },
+        { group: qsTr("Server"),   label: qsTr("Display"),       kind: "config", ep: "/System/Configuration", fields: screen.displayFields },
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "config", ep: "/System/Configuration", fields: screen.metadataFields },
         { group: qsTr("Server"),   label: qsTr("NFO"),           kind: "config", ep: "/System/Configuration/xbmcmetadata", fields: screen.nfoFields },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "config", ep: "/System/Configuration/encoding", fields: screen.encodingFields },
@@ -1617,7 +1625,11 @@ Item {
                                 }
                             }
                         }
-                        DashButton { text: qsTr("Add folder"); onClicked: screen.pickAddPathFolder() }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                            DashButton { text: qsTr("Add folder"); onClicked: screen.pickAddPathFolder() }
+                            DashButton { text: qsTr("Scan / refresh metadata"); onClicked: screen.confirm(qsTr("Refresh metadata for the “%1” library now?").arg(screen.selectedLib.Name), function () { screen.client.refreshItem(screen.selectedLib.ItemId) }) }
+                        }
 
                         Text { text: qsTr("Library options"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingLarge }
                         ConfigFieldList { fields: screen.libraryOptionsFields }
