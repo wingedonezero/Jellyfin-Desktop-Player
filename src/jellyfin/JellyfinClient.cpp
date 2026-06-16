@@ -609,8 +609,21 @@ QUrl JellyfinClient::streamUrl(const QString &itemId) const
 
 QJsonObject JellyfinClient::deviceProfile() const
 {
-    // mpv direct-plays essentially everything; the transcode target is HLS
-    // (h264/aac) so the server can downscale when a bitrate cap forces it.
+    // mpv direct-plays essentially everything; the transcode target (used only
+    // when a bitrate/resolution cap forces a server transcode) is configurable
+    // from Settings → Playback. Defaults reproduce the original safe h264/aac
+    // HLS pipeline, so an unconfigured client behaves exactly as before.
+    const QSettings cfg;
+    QString vCodec = cfg.value(QStringLiteral("playback/transcodeVideoCodec")).toString();
+    if (vCodec.isEmpty() || vCodec == QLatin1String("auto")) vCodec = QStringLiteral("h264");
+    QString aCodec = cfg.value(QStringLiteral("playback/transcodeAudioCodec")).toString();
+    if (aCodec.isEmpty() || aCodec == QLatin1String("auto")) aCodec = QStringLiteral("aac,mp3");
+    int channels = cfg.value(QStringLiteral("playback/audioChannels"), 2).toInt();
+    if (channels < 1) channels = 2;
+    const int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
+    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS.
+    const QString hlsContainer = (vCodec == QLatin1String("h264")) ? QStringLiteral("ts") : QStringLiteral("mp4");
+
     const QJsonObject videoDirect{
         {QStringLiteral("Container"), QStringLiteral("mp4,m4v,mkv,webm,avi,mov,ts,m2ts,flv,wmv,asf,mpg,mpeg,3gp,ogv")},
         {QStringLiteral("Type"), QStringLiteral("Video")}};
@@ -618,22 +631,36 @@ QJsonObject JellyfinClient::deviceProfile() const
         {QStringLiteral("Container"), QStringLiteral("mp3,aac,flac,alac,ogg,oga,wav,wma,opus,m4a,mka")},
         {QStringLiteral("Type"), QStringLiteral("Audio")}};
     const QJsonObject hls{
-        {QStringLiteral("Container"), QStringLiteral("ts")},
+        {QStringLiteral("Container"), hlsContainer},
         {QStringLiteral("Type"), QStringLiteral("Video")},
-        {QStringLiteral("AudioCodec"), QStringLiteral("aac,mp3")},
-        {QStringLiteral("VideoCodec"), QStringLiteral("h264")},
+        {QStringLiteral("AudioCodec"), aCodec},
+        {QStringLiteral("VideoCodec"), vCodec},
         {QStringLiteral("Context"), QStringLiteral("Streaming")},
         {QStringLiteral("Protocol"), QStringLiteral("hls")},
-        {QStringLiteral("MaxAudioChannels"), QStringLiteral("2")},
+        {QStringLiteral("MaxAudioChannels"), QString::number(channels)},
         {QStringLiteral("MinSegments"), 1},
         {QStringLiteral("BreakOnNonKeyFrames"), true}};
     const auto subtitle = [](const QString &fmt) {
         return QJsonObject{{QStringLiteral("Format"), fmt}, {QStringLiteral("Method"), QStringLiteral("External")}};
     };
+
+    // Resolution cap (only when set): ask the server to keep the transcode within
+    // the chosen width. Auto direct-play (the common path) bypasses this entirely.
+    QJsonArray codecProfiles;
+    if (maxResW > 0) {
+        codecProfiles.append(QJsonObject{
+            {QStringLiteral("Type"), QStringLiteral("Video")},
+            {QStringLiteral("Conditions"), QJsonArray{QJsonObject{
+                {QStringLiteral("Condition"), QStringLiteral("LessThanEqual")},
+                {QStringLiteral("Property"), QStringLiteral("Width")},
+                {QStringLiteral("Value"), QString::number(maxResW)},
+                {QStringLiteral("IsRequired"), false}}}}});
+    }
+
     QJsonObject p;
     p[QStringLiteral("DirectPlayProfiles")] = QJsonArray{videoDirect, audioDirect};
     p[QStringLiteral("TranscodingProfiles")] = QJsonArray{hls};
-    p[QStringLiteral("CodecProfiles")] = QJsonArray{};
+    p[QStringLiteral("CodecProfiles")] = codecProfiles;
     p[QStringLiteral("ContainerProfiles")] = QJsonArray{};
     p[QStringLiteral("ResponseProfiles")] = QJsonArray{};
     p[QStringLiteral("SubtitleProfiles")] = QJsonArray{
