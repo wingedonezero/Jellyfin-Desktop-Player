@@ -60,6 +60,22 @@ Item {
                        / Math.max(0.01, root.player.speed)
         return Qt.formatTime(new Date(Date.now() + remain * 1000), "h:mm AP")
     }
+    // Chapter navigation (web's btnPreviousChapter/btnNextChapter). Previous
+    // restarts the current chapter if we're well into it, else steps back.
+    function prevChapter() {
+        const ch = root.player.chapters
+        if (!ch || ch.length === 0) return
+        const cur = root.player.chapter
+        if (cur >= 0 && cur < ch.length && (root.player.position - ch[cur].time) > 5)
+            root.player.setChapter(cur)
+        else
+            root.player.setChapter(Math.max(0, cur - 1))
+    }
+    function nextChapter() {
+        const ch = root.player.chapters
+        if (!ch || ch.length === 0) return
+        root.player.setChapter(Math.min(ch.length - 1, root.player.chapter + 1))
+    }
     function applyAspect(mode) {
         root.aspectMode = mode
         if (mode === "Cover") {
@@ -332,6 +348,11 @@ Item {
                 spacing: Theme.spacingTiny
 
                 IconButton { text: "⏮"; enabled: Features.playQueue; onClicked: root.previous() } // ⏮ previous
+                IconButton { // ⇤ previous chapter (only with chapters)
+                    text: "⇤"
+                    visible: root.player.chapters.length > 0
+                    onClicked: root.prevChapter()
+                }
                 IconButton { text: "⏪"; onClicked: root.player.skip(-root.skipBack) }  // ⏪ skip back
                 IconButton {
                     text: root.player.paused ? "▶" : "⏸"                          // ▶ / ⏸
@@ -339,6 +360,11 @@ Item {
                     onClicked: root.player.setPaused(!root.player.paused)
                 }
                 IconButton { text: "⏩"; onClicked: root.player.skip(root.skipForward) } // ⏩ skip forward
+                IconButton { // ⇥ next chapter (only with chapters)
+                    text: "⇥"
+                    visible: root.player.chapters.length > 0
+                    onClicked: root.nextChapter()
+                }
                 IconButton { text: "⏭"; enabled: Features.playQueue; onClicked: root.next() } // ⏭ next
 
                 Label {
@@ -356,6 +382,31 @@ Item {
                     text: root.favorite ? "♥" : "♡"                               // ♥ / ♡
                     fg: root.favorite ? Theme.accent : Theme.textPrimary
                     onClicked: root.toggleFavorite()
+                }
+
+                // chapter / scenes jump menu (only when the file has chapters)
+                IconButton {
+                    text: "☰"
+                    font.pixelSize: Theme.fontMedium
+                    visible: root.player.chapters.length > 0
+                    onClicked: chapterMenu.popup()
+                    DarkMenu {
+                        id: chapterMenu
+                        implicitWidth: 300
+                        Instantiator {
+                            model: root.player.chapters
+                            delegate: DarkMenuItem {
+                                required property var modelData
+                                required property int index
+                                text: root.fmt(modelData.time) + "   "
+                                      + (modelData.title && modelData.title.length
+                                         ? modelData.title : qsTr("Chapter %1").arg(index + 1))
+                                onTriggered: root.player.setChapter(index)
+                            }
+                            onObjectAdded: (index, object) => chapterMenu.insertItem(index, object)
+                            onObjectRemoved: (index, object) => chapterMenu.removeItem(object)
+                        }
+                    }
                 }
 
                 // subtitle track menu
