@@ -189,6 +189,18 @@ void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
     });
 }
 
+void JellyfinClient::authorizeQuickConnect(const QString &code)
+{
+    const QString c = QString::fromUtf8(QUrl::toPercentEncoding(code));
+    QNetworkReply *reply = post(QStringLiteral("/QuickConnect/Authorize?code=%1").arg(c), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        Q_EMIT quickConnectResult(ok, ok ? tr("Device authorized — it can now sign in.")
+                                         : tr("Invalid or expired code."));
+    });
+}
+
 void JellyfinClient::saveSession() const
 {
     QSettings s;

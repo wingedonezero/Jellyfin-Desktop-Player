@@ -112,6 +112,9 @@ public:
     Q_INVOKABLE void fetchUserConfig();
     Q_INVOKABLE void setUserConfig(const QString &key, const QVariant &value);
 
+    // Quick Connect: authorize a code shown on another device (this user must be signed in).
+    Q_INVOKABLE void authorizeQuickConnect(const QString &code);
+
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));
@@ -131,6 +134,7 @@ Q_SIGNALS:
     void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
     void userConfigChanged();
+    void quickConnectResult(bool ok, const QString &message);
     void errorOccurred(const QString &message);
 
 private:

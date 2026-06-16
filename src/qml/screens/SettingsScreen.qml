@@ -34,6 +34,8 @@ Item {
     property var subLangs: []
     readonly property var bitrateOptions: bitrates.map(b => ({value: b, text: fmtBitrate(b)}))
     readonly property var segmentActions: [{value: "None", text: qsTr("None")}, {value: "AskToSkip", text: qsTr("Ask to skip")}, {value: "Skip", text: qsTr("Skip automatically")}]
+    readonly property var homeSectionOptions: [{value: "none", text: qsTr("None")}, {value: "resume", text: qsTr("Continue Watching")}, {value: "nextup", text: qsTr("Next Up")}, {value: "mymedia", text: qsTr("My Media")}, {value: "latest", text: qsTr("Latest Media")}]
+    readonly property var homeSectionDefaults: ["resume", "nextup", "mymedia", "latest", "none", "none"]
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
@@ -383,10 +385,17 @@ Item {
             // 2 — Home
             Panel {
                 SectionTitle { text: qsTr("Home") }
-                Hint { text: qsTr("Which rows appear on the home screen. Applies on next launch.") }
-                ToggleRow { label: qsTr("Continue Watching"); on: screen.homeContinue; onSwitched: (v) => { screen.homeContinue = v; screen.setPref("home/continueWatching", v) } }
-                ToggleRow { label: qsTr("Next Up"); on: screen.homeNextUp; onSwitched: (v) => { screen.homeNextUp = v; screen.setPref("home/nextUp", v) } }
-                ToggleRow { label: qsTr("Latest media"); on: screen.homeLatest; onSwitched: (v) => { screen.homeLatest = v; screen.setPref("home/latest", v) } }
+                Hint { text: qsTr("Choose what appears in each row of the home screen, top to bottom. Applies on next launch.") }
+                Repeater {
+                    model: 6
+                    ComboRow {
+                        required property int index
+                        label: qsTr("Row %1").arg(index + 1)
+                        options: screen.homeSectionOptions
+                        value: screen.pref("home/section" + index, screen.homeSectionDefaults[index])
+                        onPicked: (v) => screen.setPref("home/section" + index, v)
+                    }
+                }
             }
 
             // 3 — Playback
@@ -517,12 +526,21 @@ Item {
                 }
             }
 
-            // 6 — Quick Connect
+            // 7 — Quick Connect
             Panel {
                 SectionTitle { text: qsTr("Quick Connect") }
-                Hint { text: qsTr("Authorize a sign-in code from another device. Not implemented yet.") }
-                Field { placeholderText: qsTr("Quick Connect code"); enabled: false }
-                PanelButton { text: qsTr("Authorize"); enabled: false }
+                Hint { text: qsTr("Enter the code shown on another device to authorize it to sign in to your account.") }
+                Field { id: qcCode; placeholderText: qsTr("Quick Connect code"); inputMethodHints: Qt.ImhDigitsOnly }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    Text { id: qcResult; text: ""; color: Theme.watched; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter }
+                    PanelButton { primary: true; text: qsTr("Authorize"); enabled: qcCode.text.length > 0; onClicked: if (screen.client) screen.client.authorizeQuickConnect(qcCode.text) }
+                }
+                Connections {
+                    target: screen.client
+                    function onQuickConnectResult(ok, message) { qcResult.text = message; qcResult.color = ok ? Theme.watched : Theme.error; if (ok) qcCode.clear() }
+                }
             }
 
             // 8 — About
