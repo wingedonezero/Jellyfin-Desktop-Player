@@ -16,6 +16,8 @@ ColumnLayout {
 
     signal itemActivated(var item)   // play
     signal itemOpenDetail(var item)  // open detail
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     Layout.fillWidth: true
     visible: model && model.length > 0
@@ -56,6 +58,8 @@ ColumnLayout {
                 shape: row.shape
                 onActivated: (it) => row.itemActivated(it)
                 onOpenDetail: (it) => row.itemOpenDetail(it)
+                onAddToPlaylist: (it) => row.itemAddToPlaylist(it)
+                onAddToCollection: (it) => row.itemAddToCollection(it)
             }
         }
 

@@ -21,6 +21,8 @@ Item {
     signal itemActivated(var item)
     signal itemOpenDetail(var item)
     signal openFiltered(var props)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     // data per tab
     property var items: []
@@ -134,6 +136,8 @@ Item {
         property string gshape: "poster"
         signal activate(var it)
         signal openDetail(var it)
+        signal addPlaylist(var it)
+        signal addCollection(var it)
         leftMargin: Theme.pagePad; rightMargin: Theme.pagePad; topMargin: Theme.spacingSmall; bottomMargin: Theme.spacingLarge
         cellWidth: (gshape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth) + Theme.spacing
         cellHeight: (gshape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight) + 50
@@ -151,6 +155,8 @@ Item {
                 item: icell.modelData; client: screen.client; shape: icell.grid.gshape
                 onActivated: (it) => icell.grid.activate(it)
                 onOpenDetail: (it) => icell.grid.openDetail(it)
+                onAddToPlaylist: (it) => icell.grid.addPlaylist(it)
+                onAddToCollection: (it) => icell.grid.addCollection(it)
             }
         }
     }
@@ -282,6 +288,8 @@ Item {
                 gshape: "poster"
                 onActivate: (it) => screen.itemActivated(it)
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
+                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onAddCollection: (it) => screen.itemAddToCollection(it)
             }
             // 1 suggestions (rows)
             Flickable {
@@ -304,6 +312,8 @@ Item {
                             shape: collectionType === "tvshows" ? "thumb" : "poster"
                             onItemActivated: (it) => screen.itemActivated(it)
                             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
                         }
                     }
                 }
@@ -314,6 +324,8 @@ Item {
                 gshape: "poster"
                 onActivate: (it) => screen.itemOpenDetail(it)
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
+                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onAddCollection: (it) => screen.itemAddToCollection(it)
             }
             // 3 upcoming
             ItemGrid {
@@ -321,6 +333,8 @@ Item {
                 gshape: "thumb"
                 onActivate: (it) => screen.itemActivated(it)
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
+                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onAddCollection: (it) => screen.itemAddToCollection(it)
             }
             // 4 genres
             ChipGrid {

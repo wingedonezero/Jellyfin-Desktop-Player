@@ -14,6 +14,8 @@ Item {
 
     signal activated(var item)        // play
     signal openDetail(var item)       // open detail page
+    signal addToPlaylist(var item)    // → app-level picker (Main)
+    signal addToCollection(var item)  // → app-level picker (Main)
 
     readonly property int artHeight: shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight
     implicitWidth: shape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth
@@ -24,6 +26,11 @@ Item {
     readonly property bool playable: item && (item.type === "Movie" || item.type === "Episode"
                                               || item.type === "Video" || item.type === "MusicVideo"
                                               || item.type === "Trailer" || item.type === "Audio")
+    // real library items can be added to a collection/playlist (not views/genres/people)
+    readonly property bool canAddTo: item && (item.type === "Movie" || item.type === "Series"
+                                              || item.type === "Episode" || item.type === "Video"
+                                              || item.type === "MusicVideo" || item.type === "Audio"
+                                              || item.type === "MusicAlbum" || item.type === "BoxSet")
     readonly property real progress: {
         if (!item) return 0
         const t = item.playbackTicks || 0
@@ -191,8 +198,8 @@ Item {
             text: (card.item && card.item.played) ? qsTr("Mark as unplayed") : qsTr("Mark as played")
             onTriggered: if (card.client) card.client.setWatched(card.item.id, !(card.item.played === true))
         }
-        DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections }
-        DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists }
+        DarkMenuItem { text: qsTr("Add to collection"); visible: card.canAddTo; enabled: Features.collections; onTriggered: card.addToCollection(card.item) }
+        DarkMenuItem { text: qsTr("Add to playlist"); visible: card.canAddTo; enabled: Features.playlists; onTriggered: card.addToPlaylist(card.item) }
         DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
         DarkMenuItem { text: qsTr("Copy stream URL"); visible: card.playable; onTriggered: if (card.client) card.client.copyStreamUrl(card.item.id) }
         DarkMenuItem { text: qsTr("Delete media"); enabled: Features.deleteMedia }

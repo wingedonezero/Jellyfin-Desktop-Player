@@ -16,6 +16,8 @@ Item {
     signal play(var item)
     signal playQueue(var items, int index)
     signal openDetail(var item)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     property bool favorite: false
     property bool played: false
@@ -30,10 +32,10 @@ Item {
     readonly property bool isPerson: detail && detail.type === "Person"
     readonly property bool isBoxSet: detail && detail.type === "BoxSet"
     readonly property bool isSeason: detail && detail.type === "Season"
+    readonly property bool isPlayableLeaf: detail && (detail.type === "Movie" || detail.type === "Episode"
+                                                     || detail.type === "Video" || detail.type === "MusicVideo")
     property var filmography: []
     property var extras: []
-    property var playlists: []
-    property var collectionsList: []
     property var collectionItems: []   // BoxSet (collection) members
 
     // collection members grouped by type, in a sensible display order
@@ -165,10 +167,6 @@ Item {
                 screen.filmography = items
             } else if (tag === "d:extras:" + screen.itemId) {
                 screen.extras = items
-            } else if (tag === "d:playlists") {
-                screen.playlists = items
-            } else if (tag === "d:collectionsList") {
-                screen.collectionsList = items
             }
         }
     }
@@ -196,55 +194,6 @@ Item {
             color: parent.primary ? Theme.accentText : Theme.textPrimary
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-        }
-    }
-
-    // picker popup: choose an existing playlist/collection or create a new one
-    component AddToPicker: Popup {
-        property var options: []
-        property string heading: ""
-        signal pickExisting(string id)
-        signal createNew(string name)
-        width: 280
-        padding: 8
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-        property bool creating: false
-        onClosed: creating = false
-        contentItem: ColumnLayout {
-            spacing: 2
-            Text { text: heading; color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontNormal; Layout.leftMargin: 6; Layout.bottomMargin: 4 }
-            Repeater {
-                model: options
-                ItemDelegate {
-                    required property var modelData
-                    Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                    onClicked: { pickExisting(modelData.id); close() }
-                    contentItem: Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
-                    background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-                }
-            }
-            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
-            ItemDelegate {
-                visible: !creating
-                Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                onClicked: creating = true
-                contentItem: Text { text: qsTr("＋ New…"); color: Theme.accent; font.pixelSize: Theme.fontNormal; leftPadding: 6; verticalAlignment: Text.AlignVCenter }
-                background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-            }
-            RowLayout {
-                visible: creating
-                Layout.fillWidth: true
-                TextField {
-                    id: newName
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Name")
-                    color: Theme.textPrimary
-                    placeholderTextColor: Theme.textDisabled
-                    background: Rectangle { implicitHeight: 32; radius: Theme.radius; color: Theme.background; border.color: Theme.accent; border.width: 1 }
-                }
-                JIconButton { text: "✓"; implicitWidth: 34; implicitHeight: 34; onClicked: { if (newName.text.length) { createNew(newName.text); newName.clear(); close() } } }
-            }
         }
     }
 
@@ -449,25 +398,12 @@ Item {
                                 onClicked: moreMenu.popup()
                                 DarkMenu {
                                     id: moreMenu
-                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists; onTriggered: { screen.client.fetchPlaylists("d:playlists"); playlistPicker.open() } }
-                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections; onTriggered: { screen.client.fetchCollections("d:collectionsList"); collectionPicker.open() } }
+                                    DarkMenuItem { text: qsTr("Add to playlist"); enabled: Features.playlists; onTriggered: screen.itemAddToPlaylist(screen.detail) }
+                                    DarkMenuItem { text: qsTr("Add to collection"); enabled: Features.collections; onTriggered: screen.itemAddToCollection(screen.detail) }
+                                    DarkMenuItem { text: qsTr("Copy stream URL"); visible: screen.isPlayableLeaf; onTriggered: screen.client.copyStreamUrl(screen.detail.id) }
                                     DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
                                     DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
                                     DarkMenuItem { text: qsTr("Refresh metadata"); enabled: Features.metadataEdit }
-                                }
-                                AddToPicker {
-                                    id: playlistPicker
-                                    x: moreBtn.width - width; y: moreBtn.height + 4
-                                    heading: qsTr("Add to playlist"); options: screen.playlists
-                                    onPickExisting: (id) => screen.client.addToPlaylist(id, screen.detail.id)
-                                    onCreateNew: (name) => screen.client.createPlaylist(name, screen.detail.id)
-                                }
-                                AddToPicker {
-                                    id: collectionPicker
-                                    x: moreBtn.width - width; y: moreBtn.height + 4
-                                    heading: qsTr("Add to collection"); options: screen.collectionsList
-                                    onPickExisting: (id) => screen.client.addToCollection(id, screen.detail.id)
-                                    onCreateNew: (name) => screen.client.createCollection(name, screen.detail.id)
                                 }
                             }
                         }
@@ -510,6 +446,8 @@ Item {
                         shape: "poster"
                         onItemActivated: (it) => screen.play(it)
                         onItemOpenDetail: (it) => screen.openDetail(it)
+                        onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                        onItemAddToCollection: (it) => screen.itemAddToCollection(it)
                     }
                 }
             }
@@ -662,6 +600,8 @@ Item {
                 shape: "thumb"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.play(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             // --- filmography (person pages) ---
@@ -672,6 +612,8 @@ Item {
                 shape: "poster"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             // --- more like this ---
@@ -682,6 +624,8 @@ Item {
                 shape: "poster"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
             }
 
             Item { Layout.preferredHeight: Theme.spacingLarge }

@@ -16,6 +16,8 @@ Item {
     signal itemActivated(var item)   // play
     signal itemOpenDetail(var item)  // open detail
     signal openLibrary(var lib)
+    signal itemAddToPlaylist(var item)
+    signal itemAddToCollection(var item)
 
     property var resumeModel: []
     property var nextUpModel: []
@@ -85,6 +87,8 @@ Item {
             client: screen.client; shape: "thumb"
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
         }
     }
     Component {
@@ -94,6 +98,8 @@ Item {
             client: screen.client; shape: "thumb"
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
         }
     }
     Component {
@@ -120,6 +126,8 @@ Item {
                     client: screen.client; shape: "poster"
                     onItemActivated: (it) => screen.itemActivated(it)
                     onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                    onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                    onItemAddToCollection: (it) => screen.itemAddToCollection(it)
                 }
             }
         }
