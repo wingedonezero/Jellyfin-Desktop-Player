@@ -62,6 +62,24 @@ Item {
     }
     // confirm a destructive action before running it (server actions)
     function confirm(msg, action) { confirmPopup.message = msg; pendingAction = action; confirmPopup.open() }
+    function relTime(iso) {
+        if (!iso) return ""
+        const t = Date.parse(iso); if (isNaN(t)) return ""
+        const diff = (Date.now() - t) / 1000
+        if (diff < 0) return ""
+        if (diff < 60) return qsTr("just now")
+        if (diff < 3600) return qsTr("%1m ago").arg(Math.floor(diff / 60))
+        if (diff < 86400) return qsTr("%1h ago").arg(Math.floor(diff / 3600))
+        return qsTr("%1d ago").arg(Math.floor(diff / 86400))
+    }
+    function durationStr(s, e) {
+        if (!s || !e) return ""
+        const d = (Date.parse(e) - Date.parse(s)) / 1000
+        if (isNaN(d) || d < 0) return ""
+        if (d < 90) return qsTr("%1s").arg(Math.round(d))
+        if (d < 5400) return qsTr("%1m").arg(Math.round(d / 60))
+        return qsTr("%1h").arg(Math.round(d / 3600))
+    }
     function infoRows(d) {
         if (!d || typeof d !== "object") return []
         return Object.keys(d).map(function (k) {
@@ -275,8 +293,18 @@ Item {
                                     Text {
                                         text: {
                                             var s = ("" + (modelData.Category || ""))
-                                            if (modelData.State === "Running") s += "  ·  " + qsTr("Running %1%").arg(Math.round(modelData.CurrentProgressPercentage || 0))
-                                            else if (modelData.LastExecutionResult && modelData.LastExecutionResult.Status) s += "  ·  " + qsTr("Last: %1").arg(modelData.LastExecutionResult.Status)
+                                            if (modelData.State === "Running")
+                                                return s + "  ·  " + qsTr("Running %1%").arg(Math.round(modelData.CurrentProgressPercentage || 0))
+                                            var lr = modelData.LastExecutionResult
+                                            if (lr && lr.Status) {
+                                                s += "  ·  " + lr.Status
+                                                var when = screen.relTime(lr.EndTimeUtc)
+                                                var dur = screen.durationStr(lr.StartTimeUtc, lr.EndTimeUtc)
+                                                if (when) s += " " + when
+                                                if (dur) s += " (" + dur + ")"
+                                            } else {
+                                                s += "  ·  " + qsTr("never run")
+                                            }
                                             return s
                                         }
                                         color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; elide: Text.ElideRight; Layout.fillWidth: true
