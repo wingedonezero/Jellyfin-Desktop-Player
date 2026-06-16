@@ -217,6 +217,10 @@ void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &pol
                        QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
 }
 void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
+void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
+{
+    fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
+}
 
 void JellyfinClient::saveSession() const
 {

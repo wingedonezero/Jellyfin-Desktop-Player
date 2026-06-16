@@ -22,13 +22,15 @@ Item {
     property var usersData: []
     property var selectedUser: null
     property var editPolicy: ({})
+    property var serverConfig: null
+    property var editConfig: ({})
     property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
     // group | label | kind (info/list/stub) | endpoint | primary/secondary field
     readonly property var navModel: [
         { group: qsTr("Server"),   label: qsTr("Dashboard"),     kind: "dashboard" },
-        { group: qsTr("Server"),   label: qsTr("General"),       kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("General"),       kind: "general" },
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "stub" },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
         { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
@@ -62,6 +64,9 @@ Item {
         } else if (selEntry.kind === "users") {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
+        } else if (selEntry.kind === "general") {
+            serverConfig = null; editConfig = ({})
+            client.getJson("/System/Configuration", "admin:config")
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
         }
@@ -126,6 +131,7 @@ Item {
             else if (tag === "admin:dash:sessions") screen.dashSessions = screen.asArray(data)
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
+            else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
         }
     }
 
@@ -161,6 +167,38 @@ Item {
         border.color: danger ? Theme.error : Theme.divider; border.width: 1
         Text { id: lbl; anchors.centerIn: parent; text: db.text; color: db.danger ? Theme.error : Theme.textPrimary; font.pixelSize: Theme.fontSmall }
         MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: db.clicked() }
+    }
+
+    function setConfig(key, val) { var c = Object.assign({}, editConfig); c[key] = val; editConfig = c }
+    component ConfigField: RowLayout {
+        id: cf
+        property string label: ""
+        property string key: ""
+        property bool numeric: false
+        Layout.fillWidth: true
+        Text { text: cf.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        TextField {
+            Layout.preferredWidth: 340
+            text: ("" + (screen.editConfig[cf.key] !== undefined && screen.editConfig[cf.key] !== null ? screen.editConfig[cf.key] : ""))
+            color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+            inputMethodHints: cf.numeric ? Qt.ImhDigitsOnly : Qt.ImhNone
+            onEditingFinished: screen.setConfig(cf.key, cf.numeric ? (parseInt(text) || 0) : text)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
+        }
+    }
+    component ConfigToggle: RowLayout {
+        id: ct
+        property string label: ""
+        property string key: ""
+        Layout.fillWidth: true
+        Text { text: ct.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        Rectangle {
+            id: cs
+            readonly property bool on: screen.editConfig[ct.key] === true
+            width: 44; height: 24; radius: 12; color: on ? Theme.accent : Theme.elevated
+            Rectangle { width: 18; height: 18; radius: 9; y: 3; x: cs.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.setConfig(ct.key, !cs.on) }
+        }
     }
 
     Popup {
@@ -416,6 +454,25 @@ Item {
                     }
                 }
 
+                // general — server configuration editor (edits a deep copy; Save POSTs the whole config)
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "general"
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+                    Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Server name"); key: "ServerName" }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Preferred display language"); key: "UICulture" }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Cache path"); key: "CachePath" }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Metadata path"); key: "MetadataPath" }
+                    ConfigToggle { visible: screen.serverConfig !== null; label: qsTr("Enable Quick Connect"); key: "QuickConnectAvailable" }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Library scan fanout concurrency (0 = auto)"); key: "LibraryScanFanoutConcurrency"; numeric: true }
+                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Parallel image encoding limit (0 = auto)"); key: "ParallelImageEncodingLimit"; numeric: true }
+                    RowLayout {
+                        visible: screen.serverConfig !== null
+                        Layout.topMargin: Theme.spacing
+                        DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save the server's General settings?"), function() { screen.client.postJson("/System/Configuration", screen.editConfig) }) }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -426,7 +483,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "general" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }
