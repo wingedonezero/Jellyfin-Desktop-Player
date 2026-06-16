@@ -22,6 +22,8 @@ Item {
     property var usersData: []
     property var selectedUser: null
     property var editPolicy: ({})
+    property string editUserName: ""
+    readonly property var syncPlayOptions: [{value: "CreateAndJoinGroups", text: qsTr("Allow creating and joining groups")}, {value: "JoinGroups", text: qsTr("Allow joining groups")}, {value: "None", text: qsTr("No access")}]
     property var serverConfig: null
     property var editConfig: ({})
     property var dynOptions: ({})          // dynamically-fetched select options (e.g. {users: [...]})
@@ -405,9 +407,17 @@ Item {
 
     function selectUser(u) {
         selectedUser = u
+        editUserName = ("" + (u && u.Name ? u.Name : ""))
         editPolicy = (u && u.Policy) ? JSON.parse(JSON.stringify(u.Policy)) : ({})
     }
     function setFlag(key, val) { var p = Object.assign({}, editPolicy); p[key] = val; editPolicy = p }
+    // save a user: name via POST /Users/{id} (whole dto), policy via POST /Users/{id}/Policy — mirrors web's Profile save
+    function saveUser() {
+        var u = selectedUser; if (!u || !client) return
+        var dto = JSON.parse(JSON.stringify(u)); dto.Name = editUserName; dto.Policy = editPolicy
+        client.postJson("/Users/" + u.Id, dto)
+        client.setUserPolicy(u.Id, editPolicy)
+    }
 
     // ---- LibraryOptions provider tables — mirrors components/libraryoptionseditor ----
     function typePlural(t) {
@@ -560,6 +570,53 @@ Item {
             color: on ? Theme.accent : Theme.elevated
             Rectangle { width: 18; height: 18; radius: 9; y: 3; x: sw.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.setFlag(pt.flag, !sw.on) }
+        }
+    }
+    component PolicyNumber: RowLayout {
+        id: pn
+        property string label: ""
+        property string flag: ""
+        property real scale: 1     // display = value/scale; save = value*scale (e.g. 1e6 for Mbps)
+        Layout.fillWidth: true
+        Text { text: pn.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        TextField {
+            Layout.preferredWidth: 160
+            text: { var v = screen.editPolicy[pn.flag]; if (v === undefined || v === null) return ""; return pn.scale !== 1 ? ("" + (v / pn.scale)) : ("" + v) }
+            inputMethodHints: Qt.ImhFormattedNumbersOnly; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+            onEditingFinished: screen.setFlag(pn.flag, pn.scale !== 1 ? Math.floor(parseFloat(text || "0") * pn.scale) : (parseInt(text || "0") || 0))
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
+        }
+    }
+    component PolicySelect: RowLayout {
+        id: psel
+        property string label: ""
+        property string flag: ""
+        property var options: []
+        function sync() { for (var i = 0; i < psel.options.length; i++) if (String(psel.options[i].value) === String(screen.editPolicy[psel.flag])) { pbox.currentIndex = i; return } pbox.currentIndex = -1 }
+        Connections { target: screen; function onEditPolicyChanged() { psel.sync() } }
+        Layout.fillWidth: true
+        Text { text: psel.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        ComboBox {
+            id: pbox
+            Layout.preferredWidth: 280; implicitHeight: 34
+            model: psel.options; textRole: "text"
+            Component.onCompleted: psel.sync()
+            onActivated: (idx) => screen.setFlag(psel.flag, psel.options[idx].value)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: pbox.activeFocus || pbox.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+            contentItem: Text { text: pbox.currentIndex >= 0 ? pbox.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            indicator: Text { x: pbox.width - width - 10; y: (pbox.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+            popup: Popup {
+                y: pbox.height + 2; width: pbox.width; implicitHeight: Math.min(plist.contentHeight + 2, 240); padding: 1
+                background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                contentItem: ListView { id: plist; clip: true; model: pbox.popup.visible ? pbox.delegateModel : null; currentIndex: pbox.highlightedIndex; ScrollBar.vertical: ScrollBar {} }
+            }
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: pbox.width; implicitHeight: 32; hoverEnabled: true
+                contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+            }
         }
     }
 
@@ -899,6 +956,7 @@ Item {
     // Re-fetch the library list shortly after a (fire-and-forget) mutation so the
     // UI reflects it without the user re-entering the page.
     Timer { id: libReloadTimer; interval: 800; repeat: false; onTriggered: screen.reloadLibs() }
+    Timer { id: usersReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/Users", "admin:users") }
 
     RowLayout {
         anchors.fill: parent
@@ -1109,27 +1167,52 @@ Item {
                             DashButton { text: qsTr("← Back"); onClicked: screen.selectedUser = null }
                             Text { text: screen.selectedUser ? screen.selectedUser.Name : ""; color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
                         }
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.topMargin: Theme.spacingSmall
+                            Text { text: qsTr("Name"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 280; text: screen.editUserName; onTextEdited: screen.editUserName = text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+
                         Text { text: qsTr("Account"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
-                        PolicyToggle { label: qsTr("Administrator"); flag: "IsAdministrator" }
-                        PolicyToggle { label: qsTr("Disable this user"); flag: "IsDisabled" }
-                        PolicyToggle { label: qsTr("Hide from login screen"); flag: "IsHidden" }
+                        PolicyToggle { label: qsTr("Allow this user to manage the server"); flag: "IsAdministrator" }
+                        PolicyToggle { label: qsTr("Allow collection management"); flag: "EnableCollectionManagement" }
+                        PolicyToggle { label: qsTr("Allow subtitle management"); flag: "EnableSubtitleManagement" }
+
+                        Text { text: qsTr("Feature access"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Allow browsing Live TV"); flag: "EnableLiveTvAccess" }
+                        PolicyToggle { label: qsTr("Allow Live TV recording management"); flag: "EnableLiveTvManagement" }
+
                         Text { text: qsTr("Playback"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
                         PolicyToggle { label: qsTr("Allow media playback"); flag: "EnableMediaPlayback" }
-                        PolicyToggle { label: qsTr("Allow audio transcoding"); flag: "EnableAudioPlaybackTranscoding" }
-                        PolicyToggle { label: qsTr("Allow video transcoding"); flag: "EnableVideoPlaybackTranscoding" }
+                        PolicyToggle { label: qsTr("Allow audio playback that requires transcoding"); flag: "EnableAudioPlaybackTranscoding" }
+                        PolicyToggle { label: qsTr("Allow video playback that requires transcoding"); flag: "EnableVideoPlaybackTranscoding" }
+                        PolicyToggle { label: qsTr("Allow video playback that requires conversion without re-encoding"); flag: "EnablePlaybackRemuxing" }
+                        PolicyToggle { label: qsTr("Force remote media to be converted"); flag: "ForceRemoteSourceTranscoding" }
+                        PolicyNumber { label: qsTr("Remote client bitrate limit (Mbps, 0 = none)"); flag: "RemoteClientBitrateLimit"; scale: 1000000 }
+                        PolicySelect { label: qsTr("SyncPlay access"); flag: "SyncPlayAccess"; options: screen.syncPlayOptions }
+
                         Text { text: qsTr("Permissions"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
-                        PolicyToggle { label: qsTr("Allow downloads"); flag: "EnableContentDownloading" }
-                        PolicyToggle { label: qsTr("Allow collection management"); flag: "EnableCollectionManagement" }
-                        PolicyToggle { label: qsTr("Allow media deletion"); flag: "EnableContentDeletion" }
-                        PolicyToggle { label: qsTr("Remote-control other users"); flag: "EnableRemoteControlOfOtherUsers" }
+                        PolicyToggle { label: qsTr("Allow remote connections to this server"); flag: "EnableRemoteAccess" }
+                        PolicyToggle { label: qsTr("Allow content downloading"); flag: "EnableContentDownloading" }
+                        PolicyToggle { label: qsTr("Allow media deletion from all libraries"); flag: "EnableContentDeletion" }
+                        PolicyToggle { label: qsTr("Allow this user to remote-control other users"); flag: "EnableRemoteControlOfOtherUsers" }
+                        PolicyToggle { label: qsTr("Allow remote control of shared devices"); flag: "EnableSharedDeviceControl" }
                         Text {
                             text: qsTr("Library access: %1").arg((screen.editPolicy.EnableAllFolders === true) ? qsTr("all libraries") : qsTr("%1 selected").arg((screen.editPolicy.EnabledFolders || []).length))
                             color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.topMargin: Theme.spacingSmall
                         }
+
+                        Text { text: qsTr("Account status"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicyToggle { label: qsTr("Disable this user"); flag: "IsDisabled" }
+                        PolicyToggle { label: qsTr("Hide this user from the login screen"); flag: "IsHidden" }
+                        PolicyNumber { label: qsTr("Login attempts before lockout (-1 default, 0 never)"); flag: "LoginAttemptsBeforeLockout" }
+                        PolicyNumber { label: qsTr("Maximum active sessions (0 = unlimited)"); flag: "MaxActiveSessions" }
+
                         RowLayout {
                             Layout.topMargin: Theme.spacing; spacing: Theme.spacingSmall
-                            DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save policy changes for “%1”?").arg(screen.selectedUser.Name), function() { screen.client.setUserPolicy(screen.selectedUser.Id, screen.editPolicy) }) }
-                            DashButton { text: qsTr("Delete user"); danger: true; onClicked: screen.confirm(qsTr("Delete the user “%1”? This cannot be undone.").arg(screen.selectedUser.Name), function() { screen.client.deleteUser(screen.selectedUser.Id); screen.selectedUser = null }) }
+                            DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save changes for “%1”?").arg(screen.selectedUser.Name), function() { screen.saveUser() }) }
+                            DashButton { text: qsTr("Delete user"); danger: true; onClicked: screen.confirm(qsTr("Delete the user “%1”? This cannot be undone.").arg(screen.selectedUser.Name), function() { screen.client.deleteUser(screen.selectedUser.Id); screen.selectedUser = null; screen.usersReloadTimer.restart() }) }
                         }
                     }
                 }
