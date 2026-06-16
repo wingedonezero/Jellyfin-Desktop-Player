@@ -126,6 +126,14 @@ public:
     // Generic JSON POST — server-config editors POST the WHOLE config object back.
     Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
 
+    // Libraries (virtual folders) — admin; the UI confirms before calling these.
+    Q_INVOKABLE void addVirtualFolder(const QString &name, const QString &collectionType, const QString &path);
+    Q_INVOKABLE void removeVirtualFolder(const QString &name);
+    Q_INVOKABLE void renameVirtualFolder(const QString &name, const QString &newName);
+    Q_INVOKABLE void addMediaPath(const QString &name, const QString &path);
+    Q_INVOKABLE void removeMediaPath(const QString &name, const QString &path);
+    Q_INVOKABLE void updateLibraryOptions(const QString &id, const QVariantMap &options);
+
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));

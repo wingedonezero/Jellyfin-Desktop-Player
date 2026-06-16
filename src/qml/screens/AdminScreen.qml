@@ -27,6 +27,15 @@ Item {
     property var dynOptions: ({})          // dynamically-fetched select options (e.g. {users: [...]})
     property var pendingAction: null
     property string _dirPickKey: ""        // config key the directory picker is editing
+    property string _dirPickMode: "config" // config | newlib | addpath
+    property var librariesData: []
+    property var selectedLib: null         // the library being managed (detail view), or null (list)
+    property bool addMode: false           // showing the add-library form
+    property string newLibName: ""
+    property string newLibType: "movies"
+    property string newLibPath: ""
+    property string renameValue: ""
+    readonly property var contentTypes: [{value: "movies", text: qsTr("Movies")}, {value: "tvshows", text: qsTr("Shows")}, {value: "music", text: qsTr("Music")}, {value: "homevideos", text: qsTr("Home Videos & Photos")}, {value: "musicvideos", text: qsTr("Music Videos")}, {value: "books", text: qsTr("Books")}, {value: "boxsets", text: qsTr("Collections")}, {value: "mixed", text: qsTr("Mixed Content")}]
     readonly property var selEntry: navModel[sel] || ({})
 
     // field sets for the data-driven server-config editors (kind "config")
@@ -168,7 +177,7 @@ Item {
         { group: qsTr("Server"),   label: qsTr("General"),       kind: "config", ep: "/System/Configuration", fields: screen.generalFields },
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "config", ep: "/System/Configuration/branding", fields: screen.brandingFields },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
-        { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "libraries" },
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "config", ep: "/System/Configuration", fields: screen.metadataFields },
         { group: qsTr("Server"),   label: qsTr("NFO"),           kind: "config", ep: "/System/Configuration/xbmcmetadata", fields: screen.nfoFields },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "config", ep: "/System/Configuration/encoding", fields: screen.encodingFields },
@@ -208,6 +217,9 @@ Item {
         } else if (entry.kind === "users") {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
+        } else if (entry.kind === "libraries") {
+            librariesData = []; selectedLib = null; addMode = false
+            client.getJson("/Library/VirtualFolders", "admin:libs")
         } else if (entry.kind === "config") {
             serverConfig = null; editConfig = ({}); dynOptions = ({})
             client.getJson(entry.ep, "admin:config")
@@ -228,7 +240,11 @@ Item {
     }
     // confirm a destructive action before running it (server actions)
     function confirm(msg, action) { confirmPopup.message = msg; pendingAction = action; confirmPopup.open() }
-    function openDirPicker(key) { _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
+    function openDirPicker(key) { _dirPickMode = "config"; _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
+    function pickNewLibFolder() { _dirPickMode = "newlib"; dirPicker.openAt("") }
+    function pickAddPathFolder() { _dirPickMode = "addpath"; dirPicker.openAt("") }
+    function selectLib(lib) { selectedLib = lib; renameValue = ("" + (lib.Name || "")) }
+    function reloadLibs() { if (client) client.getJson("/Library/VirtualFolders", "admin:libs") }
     function relTime(iso) {
         if (!iso) return ""
         const t = Date.parse(iso); if (isNaN(t)) return ""
@@ -288,6 +304,13 @@ Item {
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
             else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
+            else if (tag === "admin:libs") {
+                screen.librariesData = screen.asArray(data)
+                if (screen.selectedLib) { // re-point to the refreshed entry so the detail view updates
+                    var ll = screen.librariesData
+                    for (var li = 0; li < ll.length; li++) if (ll[li].ItemId === screen.selectedLib.ItemId) { screen.selectedLib = ll[li]; break }
+                }
+            }
             else if (tag.indexOf("admin:opt:") === 0) {
                 var key = tag.substring(10)
                 var src = screen.asArray(data)
@@ -495,8 +518,17 @@ Item {
     DirectoryPicker {
         id: dirPicker
         client: screen.client
-        onPicked: (chosenPath) => screen.setConfig(screen._dirPickKey, chosenPath)
+        onPicked: (chosenPath) => {
+            if (screen._dirPickMode === "config") screen.setConfig(screen._dirPickKey, chosenPath)
+            else if (screen._dirPickMode === "newlib") screen.newLibPath = chosenPath
+            else if (screen._dirPickMode === "addpath" && screen.selectedLib)
+                screen.confirm(qsTr("Add folder “%1” to “%2”?").arg(chosenPath).arg(screen.selectedLib.Name),
+                               function () { screen.client.addMediaPath(screen.selectedLib.Name, chosenPath); screen.libReloadTimer.restart() })
+        }
     }
+    // Re-fetch the library list shortly after a (fire-and-forget) mutation so the
+    // UI reflects it without the user re-entering the page.
+    Timer { id: libReloadTimer; interval: 800; repeat: false; onTriggered: screen.reloadLibs() }
 
     RowLayout {
         anchors.fill: parent
@@ -782,6 +814,135 @@ Item {
                     }
                 }
 
+                // libraries — virtual-folder CRUD (list / add / per-library detail)
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "libraries"
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+
+                    // list
+                    ColumnLayout {
+                        visible: screen.selectedLib === null && !screen.addMode
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        DashButton { text: qsTr("＋  Add media library"); onClicked: { screen.newLibName = ""; screen.newLibType = "movies"; screen.newLibPath = ""; screen.addMode = true } }
+                        Repeater {
+                            model: screen.librariesData
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                    ColumnLayout {
+                                        Layout.fillWidth: true; spacing: 2
+                                        Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal }
+                                        Text { text: ("" + (modelData.CollectionType || qsTr("mixed"))) + "  ·  " + qsTr("%1 folder(s)").arg((modelData.Locations || []).length); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny }
+                                    }
+                                    DashButton { text: qsTr("Manage"); onClicked: screen.selectLib(modelData) }
+                                    DashButton { text: qsTr("Delete"); danger: true; onClicked: screen.confirm(qsTr("Delete the library “%1”? (Your media files are not deleted.)").arg(modelData.Name), function () { screen.client.removeVirtualFolder(modelData.Name); screen.libReloadTimer.restart() }) }
+                                }
+                            }
+                        }
+                        Text { visible: screen.librariesData.length === 0; text: qsTr("No libraries yet."); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
+                    }
+
+                    // add library
+                    ColumnLayout {
+                        visible: screen.addMode
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.addMode = false }
+                            Text { text: qsTr("Add media library"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Content type"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            ComboBox {
+                                id: typeCombo
+                                Layout.preferredWidth: 340; implicitHeight: 34
+                                model: screen.contentTypes; textRole: "text"
+                                Component.onCompleted: { for (var i = 0; i < screen.contentTypes.length; i++) if (screen.contentTypes[i].value === screen.newLibType) { currentIndex = i; break } }
+                                onActivated: (idx) => screen.newLibType = screen.contentTypes[idx].value
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: typeCombo.activeFocus || typeCombo.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+                                contentItem: Text { text: typeCombo.displayText; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                                indicator: Text { x: typeCombo.width - width - 10; y: (typeCombo.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                popup: Popup {
+                                    y: typeCombo.height + 2; width: typeCombo.width; implicitHeight: Math.min(tcl.contentHeight + 2, 300); padding: 1
+                                    background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                                    contentItem: ListView { id: tcl; clip: true; model: typeCombo.popup.visible ? typeCombo.delegateModel : null; currentIndex: typeCombo.highlightedIndex; ScrollBar.vertical: ScrollBar {} }
+                                }
+                                delegate: ItemDelegate {
+                                    required property var modelData
+                                    required property int index
+                                    width: typeCombo.width; implicitHeight: 32; hoverEnabled: true
+                                    contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter }
+                                    background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+                                }
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Display name"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            TextField { Layout.preferredWidth: 340; text: screen.newLibName; onTextEdited: screen.newLibName = text; placeholderText: qsTr("e.g. Movies"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Folder"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            TextField { Layout.preferredWidth: 340; readOnly: true; text: screen.newLibPath; placeholderText: qsTr("(none selected)"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1; implicitHeight: 34 } }
+                            DashButton { text: qsTr("Browse…"); onClicked: screen.pickNewLibFolder() }
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing
+                            DashButton {
+                                text: qsTr("Create library")
+                                onClicked: screen.confirm(qsTr("Create the “%1” library?").arg(screen.newLibName || qsTr("(unnamed)")),
+                                    function () { screen.client.addVirtualFolder(screen.newLibName, screen.newLibType === "mixed" ? "" : screen.newLibType, screen.newLibPath); screen.addMode = false; screen.libReloadTimer.restart() })
+                            }
+                        }
+                    }
+
+                    // per-library detail
+                    ColumnLayout {
+                        visible: screen.selectedLib !== null
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.selectedLib = null }
+                            Text { text: screen.selectedLib ? screen.selectedLib.Name : ""; color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Text { text: qsTr("Rename"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField { Layout.preferredWidth: 340; text: screen.renameValue; onTextEdited: screen.renameValue = text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                            DashButton { text: qsTr("Rename"); onClicked: screen.confirm(qsTr("Rename “%1” to “%2”?").arg(screen.selectedLib.Name).arg(screen.renameValue),
+                                function () { screen.client.renameVirtualFolder(screen.selectedLib.Name, screen.renameValue); screen.selectedLib = null; screen.libReloadTimer.restart() }) }
+                        }
+                        Text { text: qsTr("Folders"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacing }
+                        Repeater {
+                            model: screen.selectedLib ? (screen.selectedLib.Locations || []) : []
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 40; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                    Text { text: ("" + modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                                    DashButton { text: qsTr("Remove"); danger: true; onClicked: screen.confirm(qsTr("Remove folder “%1” from “%2”?").arg("" + modelData).arg(screen.selectedLib.Name),
+                                        function () { screen.client.removeMediaPath(screen.selectedLib.Name, "" + modelData); screen.libReloadTimer.restart() }) }
+                                }
+                            }
+                        }
+                        DashButton { text: qsTr("Add folder"); onClicked: screen.pickAddPathFolder() }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacingLarge
+                            DashButton { text: qsTr("Delete library"); danger: true; onClicked: screen.confirm(qsTr("Delete the library “%1”? (Your media files are not deleted.)").arg(screen.selectedLib.Name),
+                                function () { screen.client.removeVirtualFolder(screen.selectedLib.Name); screen.selectedLib = null; screen.libReloadTimer.restart() }) }
+                        }
+                        Text { text: qsTr("Library options (real-time monitoring, metadata, image extraction…) editing is coming next."); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.topMargin: Theme.spacing }
+                    }
+                }
+
                 // stub
                 Text {
                     visible: screen.selEntry.kind === "stub"
@@ -792,7 +953,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.selEntry.kind !== "libraries" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }

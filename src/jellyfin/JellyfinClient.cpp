@@ -254,6 +254,44 @@ void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
     fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
 }
 
+// --- libraries (virtual folders) — fire-and-forget; the UI confirms first ----
+static QString enc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
+
+void JellyfinClient::addVirtualFolder(const QString &name, const QString &collectionType, const QString &path)
+{
+    QString q = QStringLiteral("/Library/VirtualFolders?refreshLibrary=true&name=%1").arg(enc(name));
+    if (!collectionType.isEmpty()) q += QStringLiteral("&collectionType=%1").arg(collectionType);
+    if (!path.isEmpty()) q += QStringLiteral("&paths=%1").arg(enc(path));
+    const QJsonObject body{{QStringLiteral("LibraryOptions"), QJsonObject{}}}; // server applies defaults
+    fireAndForget(post(q, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::removeVirtualFolder(const QString &name)
+{
+    fireAndForget(del(QStringLiteral("/Library/VirtualFolders?name=%1").arg(enc(name))));
+}
+void JellyfinClient::renameVirtualFolder(const QString &name, const QString &newName)
+{
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Name?name=%1&newName=%2").arg(enc(name), enc(newName)),
+                       QByteArray()));
+}
+void JellyfinClient::addMediaPath(const QString &name, const QString &path)
+{
+    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Path"), path}};
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Paths?refreshLibrary=true"),
+                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::removeMediaPath(const QString &name, const QString &path)
+{
+    fireAndForget(del(QStringLiteral("/Library/VirtualFolders/Paths?name=%1&path=%2").arg(enc(name), enc(path))));
+}
+void JellyfinClient::updateLibraryOptions(const QString &id, const QVariantMap &options)
+{
+    const QJsonObject body{{QStringLiteral("Id"), id},
+                           {QStringLiteral("LibraryOptions"), QJsonObject::fromVariantMap(options)}};
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/LibraryOptions"),
+                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+
 void JellyfinClient::saveSession() const
 {
     QSettings s;
