@@ -126,6 +126,14 @@ public:
     // Generic JSON POST — server-config editors POST the WHOLE config object back.
     Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
 
+    // Libraries (virtual folders) — admin; the UI confirms before calling these.
+    Q_INVOKABLE void addVirtualFolder(const QString &name, const QString &collectionType, const QString &path);
+    Q_INVOKABLE void removeVirtualFolder(const QString &name);
+    Q_INVOKABLE void renameVirtualFolder(const QString &name, const QString &newName);
+    Q_INVOKABLE void addMediaPath(const QString &name, const QString &path);
+    Q_INVOKABLE void removeMediaPath(const QString &name, const QString &path);
+    Q_INVOKABLE void updateLibraryOptions(const QString &id, const QVariantMap &options);
+
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));
@@ -154,6 +162,7 @@ private:
     QNetworkReply *post(const QString &pathWithQuery, const QByteArray &json) const;
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
+    void getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft);
     void saveSession() const;  // persist server+token to QSettings
     static QVariantList parseItems(const QByteArray &json);
     static QVariantMap parseItem(const QJsonObject &o);

@@ -24,49 +24,197 @@ Item {
     property var editPolicy: ({})
     property var serverConfig: null
     property var editConfig: ({})
+    property var dynOptions: ({})          // dynamically-fetched select options (e.g. {users: [...]})
     property var pendingAction: null
+    property string _dirPickKey: ""        // config key the directory picker is editing
+    property string _dirPickMode: "config" // config | newlib | addpath
+    property var librariesData: []
+    property var selectedLib: null         // the library being managed (detail view), or null (list)
+    property bool addMode: false           // showing the add-library form
+    property string newLibName: ""
+    property string newLibType: "movies"
+    property string newLibPath: ""
+    property string renameValue: ""
+    readonly property var contentTypes: [{value: "movies", text: qsTr("Movies")}, {value: "tvshows", text: qsTr("Shows")}, {value: "music", text: qsTr("Music")}, {value: "homevideos", text: qsTr("Home Videos & Photos")}, {value: "musicvideos", text: qsTr("Music Videos")}, {value: "books", text: qsTr("Books")}, {value: "boxsets", text: qsTr("Collections")}, {value: "mixed", text: qsTr("Mixed Content")}]
     readonly property var selEntry: navModel[sel] || ({})
 
     // field sets for the data-driven server-config editors (kind "config")
     readonly property var generalFields: [
-        {label: qsTr("Server name"), key: "ServerName", type: "text"},
-        {label: qsTr("Preferred display language"), key: "UICulture", type: "text"},
-        {label: qsTr("Cache path"), key: "CachePath", type: "text"},
-        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text"},
-        {label: qsTr("Enable Quick Connect"), key: "QuickConnectAvailable", type: "toggle"},
-        {label: qsTr("Library scan fanout concurrency (0 = auto)"), key: "LibraryScanFanoutConcurrency", type: "number"},
-        {label: qsTr("Parallel image encoding limit (0 = auto)"), key: "ParallelImageEncodingLimit", type: "number"}
+        {group: qsTr("Settings"), label: qsTr("Server name"), key: "ServerName", type: "text", help: qsTr("This name will be used to identify the server and will default to the server's hostname.")},
+        {label: qsTr("Preferred display language"), key: "UICulture", type: "select", optionsKey: "uiCultures", help: qsTr("Translating Jellyfin is an ongoing project. <a href=\"https://jellyfin.org/docs/general/contributing/#translating\">Learn how you can contribute.</a>")},
+        {group: qsTr("Paths"), label: qsTr("Cache path"), key: "CachePath", type: "text", browse: true, help: qsTr("Specify a custom location for server cache files such as images. Leave blank to use the server default.")},
+        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text", browse: true, help: qsTr("Specify a custom location for downloaded artwork and metadata.")},
+        {group: qsTr("Quick Connect"), label: qsTr("Enable Quick Connect on this server"), key: "QuickConnectAvailable", type: "toggle"},
+        {group: qsTr("Performance"), label: qsTr("Parallel library scan tasks limit"), key: "LibraryScanFanoutConcurrency", type: "number", help: qsTr("Maximum number of parallel tasks during library scans. Leaving this empty will choose a limit based on your system's core count. WARNING: Setting this number too high may cause issues with network file systems; if you encounter problems lower this number.")},
+        {label: qsTr("Parallel image encoding limit"), key: "ParallelImageEncodingLimit", type: "number", help: qsTr("Maximum number of image encodings that are allowed to run in parallel. Leaving this empty will choose a limit based on your system's core count.")}
     ]
     readonly property var brandingFields: [
         {label: qsTr("Enable splash screen"), key: "SplashscreenEnabled", type: "toggle"},
-        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text"},
-        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text"}
+        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text", help: qsTr("A message that will be displayed at the bottom of the login page.")},
+        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text", help: qsTr("Apply your custom CSS code for theming/branding on the web interface.")}
     ]
     readonly property var metadataFields: [
-        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "text"},
-        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "text"},
+        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
+        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
         {label: qsTr("Dummy chapter duration (seconds)"), key: "DummyChapterDuration", type: "number"},
         {label: qsTr("Chapter image resolution"), key: "ChapterImageResolution", type: "text"}
     ]
     readonly property var networkFields: [
-        {label: qsTr("Base URL"), key: "BaseUrl", type: "text"},
-        {label: qsTr("Enable HTTPS"), key: "EnableHttps", type: "toggle"},
-        {label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle"},
-        {label: qsTr("HTTP port"), key: "InternalHttpPort", type: "number"},
-        {label: qsTr("HTTPS port"), key: "InternalHttpsPort", type: "number"},
-        {label: qsTr("Public HTTP port"), key: "PublicHttpPort", type: "number"},
-        {label: qsTr("Allow remote connections"), key: "EnableRemoteAccess", type: "toggle"},
-        {label: qsTr("Enable auto-discovery"), key: "AutoDiscovery", type: "toggle"},
-        {label: qsTr("Certificate path"), key: "CertificatePath", type: "text"}
+        {group: qsTr("Server addresses"), label: qsTr("Local HTTP port number"), key: "InternalHttpPort", type: "number", help: qsTr("The TCP port number for the HTTP server.")},
+        {label: qsTr("Enable HTTPS"), key: "EnableHttps", type: "toggle", help: qsTr("Listen on the configured HTTPS port. A valid certificate must also be supplied for this to take effect.")},
+        {label: qsTr("Local HTTPS port number"), key: "InternalHttpsPort", type: "number", help: qsTr("The TCP port number for the HTTPS server.")},
+        {label: qsTr("Base URL"), key: "BaseUrl", type: "text", help: qsTr("Add a custom subdirectory to the server URL. For example: https://example.com/<baseurl>")},
+        {label: qsTr("Bind to local network address"), key: "LocalNetworkAddresses", type: "list", help: qsTr("Override the local IP address for the HTTP server. If left empty, the server will bind to all available addresses. Changing this value requires a restart.")},
+        {label: qsTr("LAN networks"), key: "LocalNetworkSubnets", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries for networks that will be considered on local network. If left blank, all RFC1918 addresses are considered local.")},
+        {label: qsTr("Known proxies"), key: "KnownProxies", type: "list", help: qsTr("Comma separated list of IP addresses or hostnames of known proxies. Required to make proper use of 'X-Forwarded-For' headers. Requires a reboot after saving.")},
+        {group: qsTr("HTTPS settings"), label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle", help: qsTr("If checked, the server will automatically redirect all requests over HTTP to HTTPS. No effect if the server is not listening on HTTPS.")},
+        {label: qsTr("Custom SSL certificate path"), key: "CertificatePath", type: "text", browse: true, help: qsTr("Path to a PKCS #12 file containing a certificate and private key to enable TLS support on a custom domain.")},
+        {label: qsTr("Certificate password"), key: "CertificatePassword", type: "password", help: qsTr("If your certificate requires a password, please enter it here.")},
+        {group: qsTr("Remote access"), label: qsTr("Allow remote connections to this server"), key: "EnableRemoteAccess", type: "toggle", help: qsTr("If unchecked, all remote connections will be blocked.")},
+        {label: qsTr("Remote IP address filter"), key: "RemoteIPFilter", type: "list", help: qsTr("Comma separated list of IP addresses or IP/netmask entries that will be allowed to connect remotely. If left blank, all remote addresses will be allowed.")},
+        {label: qsTr("Treat the remote IP filter as a blacklist (off = whitelist)"), key: "IsRemoteIPFilterBlacklist", type: "toggle"},
+        {label: qsTr("Public HTTP port number"), key: "PublicHttpPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTP port.")},
+        {label: qsTr("Public HTTPS port number"), key: "PublicHttpsPort", type: "number", help: qsTr("The public port number that should be mapped to the local HTTPS port.")},
+        {group: qsTr("IP protocols"), label: qsTr("Enable IPv4"), key: "EnableIPv4", type: "toggle", help: qsTr("Enable IPv4 functionality.")},
+        {label: qsTr("Enable IPv6"), key: "EnableIPv6", type: "toggle", help: qsTr("Enable IPv6 functionality.")},
+        {group: qsTr("Network discovery"), label: qsTr("Enable Auto Discovery"), key: "AutoDiscovery", type: "toggle", help: qsTr("Allow applications to automatically detect Jellyfin by using UDP port 7359.")}
     ]
     readonly property var encodingFields: [
-        {label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "text"},
-        {label: qsTr("Encoding thread count (-1 = auto)"), key: "EncodingThreadCount", type: "number"},
-        {label: qsTr("Transcode temp path"), key: "TranscodingTempPath", type: "text"},
-        {label: qsTr("H.264 CRF"), key: "H264Crf", type: "number"},
-        {label: qsTr("Allow HEVC encoding"), key: "AllowHevcEncoding", type: "toggle"},
-        {label: qsTr("Enable throttling"), key: "EnableThrottling", type: "toggle"},
-        {label: qsTr("Enable audio VBR"), key: "EnableAudioVbr", type: "toggle"}
+        {group: qsTr("Hardware acceleration"), label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "select", help: qsTr("Hardware acceleration requires additional configuration."),
+         options: [{value: "none", text: qsTr("None")}, {value: "amf", text: "AMD AMF"}, {value: "nvenc", text: "Nvidia NVENC"}, {value: "qsv", text: "Intel Quicksync (QSV)"}, {value: "vaapi", text: "Video Acceleration API (VAAPI)"}, {value: "rkmpp", text: "Rockchip MPP (RKMPP)"}, {value: "videotoolbox", text: "Apple VideoToolBox"}, {value: "v4l2m2m", text: "Video4Linux2 (V4L2)"}]},
+        {label: qsTr("VA-API device"), key: "VaapiDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "vaapi"}, help: qsTr("This is the render node that is used for hardware acceleration.")},
+        {label: qsTr("QSV device"), key: "QsvDevice", type: "text", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}, help: qsTr("Specify the device for Intel QSV on a multi-GPU system. On Linux this is the render node, e.g. /dev/dri/renderD128; on Windows the device index from 0.")},
+        {label: qsTr("Enable hardware decoding for"), key: "HardwareDecodingCodecs", type: "list", showWhen: {key: "HardwareAccelerationType", neq: "none"}, help: qsTr("Comma-separated list of codecs to hardware-decode (e.g. h264, hevc, mpeg2video, vc1, vp8, vp9, av1).")},
+        {label: qsTr("HEVC 10bit decoding"), key: "EnableDecodingColorDepth10Hevc", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("VP9 10bit decoding"), key: "EnableDecodingColorDepth10Vp9", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("HEVC RExt 8/10bit decoding"), key: "EnableDecodingColorDepth10HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("HEVC RExt 12bit decoding"), key: "EnableDecodingColorDepth12HevcRext", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("Enable enhanced NVDEC decoder"), key: "EnableEnhancedNvdecDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "nvenc"}, help: qsTr("Enhanced NVDEC implementation; disable to use CUVID if you encounter decoding errors.")},
+        {label: qsTr("Prefer OS native DXVA or VA-API decoders"), key: "PreferSystemNativeHwDecoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "qsv"}},
+        {label: qsTr("Enable hardware encoding"), key: "EnableHardwareEncoding", type: "toggle", showWhen: {key: "HardwareAccelerationType", neq: "none"}},
+        {label: qsTr("Enable Intel Low-Power H.264 hardware encoder"), key: "EnableIntelLowPowerH264HwEncoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}},
+        {label: qsTr("Enable Intel Low-Power HEVC hardware encoder"), key: "EnableIntelLowPowerHevcHwEncoder", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("On Linux these must be disabled if the i915 HuC firmware is not configured.")},
+
+        {group: qsTr("Encoding format"), label: qsTr("Allow encoding in HEVC format"), key: "AllowHevcEncoding", type: "toggle", help: qsTr("The video format Jellyfin transcodes to. Software encoding is used when hardware acceleration for the format is unavailable. H264 is always enabled.")},
+        {label: qsTr("Allow encoding in AV1 format"), key: "AllowAv1Encoding", type: "toggle"},
+
+        {group: qsTr("Tone mapping"), label: qsTr("Tone mapping algorithm"), key: "TonemappingAlgorithm", type: "select", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("If unfamiliar with these options, keep the default. The recommended value is 'BT.2390'."),
+         options: [{value: "none", text: qsTr("None")}, {value: "clip", text: "Clip"}, {value: "linear", text: "Linear"}, {value: "gamma", text: "Gamma"}, {value: "reinhard", text: "Reinhard"}, {value: "hable", text: "Hable"}, {value: "mobius", text: "Mobius"}, {value: "bt2390", text: "BT.2390"}]},
+        {label: qsTr("Tone mapping mode"), key: "TonemappingMode", type: "select", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]}, help: qsTr("If you experience blown-out highlights try switching to RGB mode."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "max", text: "MAX"}, {value: "rgb", text: "RGB"}, {value: "lum", text: "LUM"}, {value: "itp", text: "ITP"}]},
+        {label: qsTr("Tone mapping range"), key: "TonemappingRange", type: "select", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Output color range. Auto matches the input range."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "tv", text: "TV"}, {value: "pc", text: "PC"}]},
+        {label: qsTr("Tone mapping desat"), key: "TonemappingDesat", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Desaturate highlights exceeding this brightness. Recommended value 0 (disable).")},
+        {label: qsTr("Tone mapping peak"), key: "TonemappingPeak", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Override the embedded peak metadata for the input signal. Default 100 (1000nit).")},
+        {label: qsTr("Tone mapping param"), key: "TonemappingParam", type: "float", showWhen: {key: "HardwareAccelerationType", neq: "v4l2m2m"}, help: qsTr("Tune the tone mapping algorithm. Generally leave blank.")},
+        {label: qsTr("Enable tone mapping"), key: "EnableTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]}, help: qsTr("Transforms HDR to SDR while keeping detail and color. Works with 10bit HDR10, HLG and DoVi; requires the corresponding GPGPU runtime.")},
+        {label: qsTr("Enable VPP tone mapping"), key: "EnableVppTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Full Intel driver based tone-mapping. Works only on certain hardware with HDR10 videos.")},
+        {label: qsTr("VPP tone mapping brightness gain"), key: "VppTonemappingBrightness", type: "float", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Recommended value 16.")},
+        {label: qsTr("VPP tone mapping contrast gain"), key: "VppTonemappingContrast", type: "float", showWhen: {key: "HardwareAccelerationType", oneOf: ["qsv", "vaapi"]}, help: qsTr("Recommended value 1.")},
+        {label: qsTr("Enable VideoToolbox tone mapping"), key: "EnableVideoToolboxTonemapping", type: "toggle", showWhen: {key: "HardwareAccelerationType", eq: "videotoolbox"}, help: qsTr("Works with most HDR formats (HDR10, HDR10+, HLG) but not Dolby Vision Profile 5.")},
+
+        {group: qsTr("Encoding quality"), label: qsTr("Encoding preset"), key: "EncoderPreset", type: "select", help: qsTr("Pick a faster value to improve performance, or a slower value to improve quality."),
+         options: [{value: "auto", text: qsTr("Auto")}, {value: "veryslow", text: "veryslow"}, {value: "slower", text: "slower"}, {value: "slow", text: "slow"}, {value: "medium", text: "medium"}, {value: "fast", text: "fast"}, {value: "faster", text: "faster"}, {value: "veryfast", text: "veryfast"}, {value: "superfast", text: "superfast"}, {value: "ultrafast", text: "ultrafast"}]},
+        {label: qsTr("H.265 encoding CRF"), key: "H265Crf", type: "number"},
+        {label: qsTr("H.264 encoding CRF"), key: "H264Crf", type: "number", help: qsTr("The 'Constant Rate Factor' for the x264/x265 software encoders. Values 0-51, lower = better quality / larger files. Sane values 18-28 (x264 default 23, x265 28). Hardware encoders ignore this.")},
+        {label: qsTr("Transcoding thread count (-1 = auto, 0 = max)"), key: "EncodingThreadCount", type: "number", help: qsTr("Max threads when transcoding. Reducing lowers CPU usage but may not convert fast enough for smooth playback.")},
+        {label: qsTr("Max muxing queue size"), key: "MaxMuxingQueueSize", type: "number", help: qsTr("Packets buffered while streams initialize. Increase if you meet \"Too many packets buffered for output stream\" errors. Recommended 2048.")},
+
+        {group: qsTr("Deinterlacing"), label: qsTr("Deinterlacing method"), key: "DeinterlaceMethod", type: "select", help: qsTr("Method used when software transcoding interlaced content. Hardware deinterlacing is used instead when available."),
+         options: [{value: "yadif", text: "YADIF"}, {value: "bwdif", text: "BWDIF"}]},
+        {label: qsTr("Double the frame rate when deinterlacing"), key: "DeinterlaceDoubleRate", type: "toggle", help: qsTr("Uses the field rate (bob deinterlacing), doubling the frame rate for full motion like interlaced video on a TV.")},
+
+        {group: qsTr("Subtitles & audio"), label: qsTr("Allow subtitle extraction on the fly"), key: "EnableSubtitleExtraction", type: "toggle", help: qsTr("Extract embedded subtitles to plain text to help avoid transcoding. Can be slow on some systems; disable to burn in instead when not natively supported.")},
+        {label: qsTr("Enable VBR audio encoding"), key: "EnableAudioVbr", type: "toggle", help: qsTr("Better quality-to-bitrate, but in rare cases may cause buffering/compatibility issues.")},
+        {label: qsTr("Audio boost when downmixing"), key: "DownMixAudioBoost", type: "float", help: qsTr("Boost audio when downmixing. A value of one preserves the original volume.")},
+        {label: qsTr("Stereo downmix algorithm"), key: "DownMixStereoAlgorithm", type: "select", help: qsTr("Algorithm used to downmix multi-channel audio to stereo."),
+         options: [{value: "None", text: qsTr("None")}, {value: "Dave750", text: "Dave750"}, {value: "NightmodeDialogue", text: "Nightmode Dialogue"}, {value: "Rfc7845", text: "RFC7845"}, {value: "Ac4", text: "AC-4"}]},
+
+        {group: qsTr("Paths"), label: qsTr("Transcode path"), key: "TranscodingTempPath", type: "text", browse: true, help: qsTr("Custom path for transcode files served to clients. Leave blank to use the server default.")},
+        {label: qsTr("Fallback font folder path"), key: "FallbackFontPath", type: "text", browse: true, help: qsTr("Fonts used by some clients to render subtitles.")},
+        {label: qsTr("Enable fallback fonts"), key: "EnableFallbackFont", type: "toggle", help: qsTr("Enable custom alternate fonts to avoid incorrect subtitle rendering.")},
+
+        {group: qsTr("Transcode throttling"), label: qsTr("Throttle transcodes"), key: "EnableThrottling", type: "toggle", help: qsTr("When a transcode gets far enough ahead of playback, pause it to use fewer resources. Turn off if you experience playback issues.")},
+        {label: qsTr("Throttle after (seconds)"), key: "ThrottleDelaySeconds", type: "number", help: qsTr("Seconds after which the transcoder is throttled. Must be large enough for the client to keep a healthy buffer. Only works if throttling is enabled.")},
+        {label: qsTr("Delete segments"), key: "EnableSegmentDeletion", type: "toggle", help: qsTr("Delete old segments after the client downloads them, avoiding storing the whole transcoded file. Turn off if you experience playback issues.")},
+        {label: qsTr("Time to keep segments (seconds)"), key: "SegmentKeepSeconds", type: "number", help: qsTr("Seconds to keep segments after the client downloads them. Only works if segment deletion is enabled.")}
+    ]
+    readonly property var resumeFields: [
+        {label: qsTr("Minimum resume percentage"), key: "MinResumePct", type: "number", help: qsTr("Titles are assumed unplayed if stopped before this time.")},
+        {label: qsTr("Maximum resume percentage"), key: "MaxResumePct", type: "number", help: qsTr("Titles are assumed fully played if stopped after this time.")},
+        {label: qsTr("Minimum audiobook resume (%)"), key: "MinAudiobookResume", type: "number", help: qsTr("Titles are assumed unplayed if stopped before this time.")},
+        {label: qsTr("Maximum audiobook resume (%)"), key: "MaxAudiobookResume", type: "number", help: qsTr("Titles are assumed fully played if stopped when the remaining duration is less than this value.")},
+        {label: qsTr("Minimum resume duration (seconds)"), key: "MinResumeDurationSeconds", type: "number", help: qsTr("The shortest video length in seconds that will save playback location and let you resume.")}
+    ]
+    readonly property var streamingFields: [
+        {label: qsTr("Remote client bitrate limit (Mbps, 0 = unlimited)"), key: "RemoteClientBitrateLimit", type: "number", scale: 1000000, help: qsTr("An optional per-stream bitrate limit for all out of network devices. This is useful to prevent devices from requesting a higher bitrate than your internet connection can handle. This may result in increased CPU load on your server in order to transcode videos on the fly to a lower bitrate.")}
+    ]
+    readonly property var nfoFields: [
+        {label: qsTr("Kodi metadata user"), key: "UserId", type: "select", optionsKey: "users", help: qsTr("Save watch data to NFO files for other applications to use.")},
+        {label: qsTr("Save image paths in NFO"), key: "SaveImagePathsInNfo", type: "toggle", help: qsTr("This is recommended if you have image file names that don't conform to Kodi guidelines.")},
+        {label: qsTr("Enable path substitution"), key: "EnablePathSubstitution", type: "toggle", help: qsTr("Enable path substitution of image paths using the server's path substitution settings.")},
+        {label: qsTr("Duplicate extra thumbnails (extrafanart/extrathumbs)"), key: "EnableExtraThumbsDuplication", type: "toggle", help: qsTr("When downloading images they can be saved into both extrafanart and extrathumbs for maximum Kodi skin compatibility.")}
+    ]
+    // Trickplay lives in the nested ServerConfiguration.TrickplayOptions object → dot-path keys.
+    readonly property var trickplayFields: [
+        {label: qsTr("Enable hardware decoding"), key: "TrickplayOptions.EnableHwAcceleration", type: "toggle"},
+        {label: qsTr("Enable hardware encoding"), key: "TrickplayOptions.EnableHwEncoding", type: "toggle", help: qsTr("Currently only available on QSV, VA-API, VideoToolbox and RKMPP, this option has no effect on other hardware acceleration methods.")},
+        {label: qsTr("Key-frame-only extraction"), key: "TrickplayOptions.EnableKeyFrameOnlyExtraction", type: "toggle", help: qsTr("Extract key frames only for significantly faster processing with less accurate timing. If the configured hardware decoder does not support this mode, will use the software decoder instead.")},
+        {label: qsTr("Scan behavior"), key: "TrickplayOptions.ScanBehavior", type: "select", options: [{value: "NonBlocking", text: qsTr("Non-blocking")}, {value: "Blocking", text: qsTr("Blocking")}], help: qsTr("The default behavior is non blocking, which will add media to the library before trickplay generation is done. Blocking will ensure trickplay files are generated before media is added to the library, but will make scans significantly longer.")},
+        {label: qsTr("Process priority"), key: "TrickplayOptions.ProcessPriority", type: "select", options: [{value: "High", text: qsTr("High")}, {value: "AboveNormal", text: qsTr("Above normal")}, {value: "Normal", text: qsTr("Normal")}, {value: "BelowNormal", text: qsTr("Below normal")}, {value: "Idle", text: qsTr("Idle")}], help: qsTr("Setting this lower or higher will determine how the CPU prioritizes the ffmpeg trickplay generation process in relation to other processes. If you notice slowdown while generating trickplay images but don't want to fully stop their generation, try lowering this as well as the thread count.")},
+        {label: qsTr("Image interval (ms)"), key: "TrickplayOptions.Interval", type: "number", help: qsTr("Interval of time (ms) between each new trickplay image.")},
+        {label: qsTr("Width resolutions (comma-separated)"), key: "TrickplayOptions.WidthResolutions", type: "csv", help: qsTr("Comma separated list of the widths (px) that trickplay images will be generated at. All images should generate proportionally to the source, so a width of 320 on a 16:9 video ends up around 320x180.")},
+        {label: qsTr("Tile width (images per tile)"), key: "TrickplayOptions.TileWidth", type: "number", help: qsTr("Maximum number of images per tile in the X direction.")},
+        {label: qsTr("Tile height (images per tile)"), key: "TrickplayOptions.TileHeight", type: "number", help: qsTr("Maximum number of images per tile in the Y direction.")},
+        {label: qsTr("JPEG quality (1–100)"), key: "TrickplayOptions.JpegQuality", type: "number", help: qsTr("The JPEG compression quality for trickplay images.")},
+        {label: qsTr("Qscale (2–31)"), key: "TrickplayOptions.Qscale", type: "number", help: qsTr("The quality scale of images output by ffmpeg, with 2 being the highest quality and 31 being the lowest.")},
+        {label: qsTr("Process threads (0 = auto)"), key: "TrickplayOptions.ProcessThreads", type: "number", help: qsTr("The number of threads to pass to the '-threads' argument of ffmpeg.")}
+    ]
+    // LibraryOptions field visibility by content type (mirrors web's setContentType).
+    readonly property var tChapter: ["homevideos", "movies", "musicvideos", "tvshows", "mixed"]      // chapter + trickplay
+    readonly property var tEmbedded: ["movies", "tvshows", "homevideos", "musicvideos", "mixed"]      // embedded titles
+    readonly property var tSubs: ["movies", "tvshows", "musicvideos", "mixed"]                        // subtitles
+    // Per-library LibraryOptions (edited against a deep copy of the selected
+    // library's options; Save → updateLibraryOptions). Mirrors web's
+    // libraryoptionseditor: each field's `types` gates it to applicable content
+    // types (so e.g. Collections/boxsets shows only the basic settings). The
+    // per-type fetcher-order tables are out of scope. Reuses cultures/countries.
+    readonly property var libraryOptionsFields: [
+        {group: qsTr("Library"), label: qsTr("Enable the library"), key: "Enabled", type: "toggle", help: qsTr("Disabling the library will hide it from all user views.")},
+        {label: qsTr("Download metadata and images from the internet"), key: "EnableInternetProviders", type: "toggle"},
+        {label: qsTr("Preferred download language"), key: "PreferredMetadataLanguage", type: "select", optionsKey: "cultures"},
+        {label: qsTr("Country / Region"), key: "MetadataCountryCode", type: "select", optionsKey: "countries"},
+        {label: qsTr("Automatically refresh metadata from the internet (days; 0 = never)"), key: "AutomaticRefreshIntervalDays", type: "number"},
+        {label: qsTr("Save artwork into media folders"), key: "SaveLocalMetadata", type: "toggle", help: qsTr("Saving artwork into media folders puts it where it can be easily edited.")},
+        {label: qsTr("Enable real-time monitoring"), key: "EnableRealtimeMonitor", type: "toggle", help: qsTr("Changes to files will be processed immediately on supported file systems.")},
+        {label: qsTr("Display photos"), key: "EnablePhotos", type: "toggle", types: ["homevideos"], help: qsTr("Images will be detected and displayed alongside other media files.")},
+        {label: qsTr("Enable LUFS scan"), key: "EnableLUFSScan", type: "toggle", types: ["music"], help: qsTr("Lets clients normalize playback loudness across tracks. Makes library scans longer and use more resources.")},
+        {label: qsTr("Automatically add to collection"), key: "AutomaticallyAddToCollection", type: "toggle", types: ["movies", "mixed"], help: qsTr("When at least 2 movies share the same collection name, they are added to the collection automatically.")},
+        {label: qsTr("Automatically merge series spread across multiple folders"), key: "EnableAutomaticSeriesGrouping", type: "toggle", types: ["tvshows"], help: qsTr("Series spread across multiple folders in this library are merged into a single series.")},
+        {label: qsTr("Special season display name"), key: "SeasonZeroDisplayName", type: "text", types: ["tvshows"]},
+
+        {group: qsTr("Embedded info"), label: qsTr("Prefer embedded titles over filenames"), key: "EnableEmbeddedTitles", type: "toggle", types: screen.tEmbedded, help: qsTr("Title to use when no internet or local metadata is available.")},
+        {label: qsTr("Prefer embedded titles over filenames for extras"), key: "EnableEmbeddedExtrasTitles", type: "toggle", types: screen.tEmbedded, help: qsTr("Extras often share the parent's embedded name; check to use embedded titles for them anyway.")},
+        {label: qsTr("Prefer embedded episode information over filenames"), key: "EnableEmbeddedEpisodeInfos", type: "toggle", types: ["tvshows"], help: qsTr("Use embedded episode information when available.")},
+        {label: qsTr("Disable different types of embedded subtitles"), key: "AllowEmbeddedSubtitles", type: "select", types: screen.tSubs, options: [{value: "AllowAll", text: qsTr("Allow All")}, {value: "AllowText", text: qsTr("Allow Text")}, {value: "AllowImage", text: qsTr("Allow Image")}, {value: "AllowNone", text: qsTr("Allow None")}], help: qsTr("Disable subtitles packaged within media containers. Requires a full library refresh.")},
+
+        {group: qsTr("Trickplay"), label: qsTr("Enable trickplay image extraction"), key: "EnableTrickplayImageExtraction", type: "toggle", types: screen.tChapter, help: qsTr("Trickplay images span the content and show a preview when scrubbing through videos.")},
+        {label: qsTr("Extract trickplay images during the library scan"), key: "ExtractTrickplayImagesDuringLibraryScan", type: "toggle", types: screen.tChapter, help: qsTr("Otherwise they are extracted during the trickplay scheduled task.")},
+        {label: qsTr("Save trickplay images next to media"), key: "SaveTrickplayWithMedia", type: "toggle", types: screen.tChapter, help: qsTr("Puts trickplay images next to your media for easy migration and access.")},
+
+        {group: qsTr("Chapter images"), label: qsTr("Enable chapter image extraction"), key: "EnableChapterImageExtraction", type: "toggle", types: screen.tChapter, help: qsTr("Lets clients display graphical scene-selection menus. Can be slow and resource intensive.")},
+        {label: qsTr("Extract chapter images during the library scan"), key: "ExtractChapterImagesDuringLibraryScan", type: "toggle", types: screen.tChapter, help: qsTr("Otherwise they are extracted during the chapter-images scheduled task.")},
+
+        {group: qsTr("Subtitle downloads"), label: qsTr("Only download subtitles that perfectly match the video"), key: "RequirePerfectSubtitleMatch", type: "toggle", types: screen.tSubs, help: qsTr("Filters to subtitles verified with your exact file. Unchecking increases coverage but risks mistimed/incorrect subtitles.")},
+        {label: qsTr("Skip if the default audio track matches the download language"), key: "SkipSubtitlesIfAudioTrackMatches", type: "toggle", types: screen.tSubs, help: qsTr("Uncheck to ensure all videos have subtitles regardless of audio language.")},
+        {label: qsTr("Skip if the video already contains embedded subtitles"), key: "SkipSubtitlesIfEmbeddedSubtitlesPresent", type: "toggle", types: screen.tSubs, help: qsTr("Keeping text subtitles means more efficient delivery and less transcoding.")},
+        {label: qsTr("Save subtitles into media folders"), key: "SaveSubtitlesWithMedia", type: "toggle", types: screen.tSubs, help: qsTr("Storing subtitles next to video files makes them easier to manage.")},
+
+        {group: qsTr("Lyrics"), label: qsTr("Save lyrics into media folders"), key: "SaveLyricsWithMedia", type: "toggle", types: ["music"], help: qsTr("Storing lyrics next to audio files makes them easier to manage.")},
+
+        {group: qsTr("Audio tags"), label: qsTr("Prefer ARTISTS tag if available"), key: "PreferNonstandardArtistsTag", type: "toggle", types: ["music"], help: qsTr("Use the non-standard ARTISTS tag instead of ARTIST when available.")},
+        {label: qsTr("Use custom tag delimiters"), key: "UseCustomTagDelimiters", type: "toggle", types: ["music"], help: qsTr("Split artist/genre tags with custom characters.")},
+        {label: qsTr("Custom tag delimiters (comma-separated)"), key: "CustomTagDelimiters", type: "list", types: ["music"]}
     ]
 
     // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
@@ -75,10 +223,13 @@ Item {
         { group: qsTr("Server"),   label: qsTr("General"),       kind: "config", ep: "/System/Configuration", fields: screen.generalFields },
         { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "config", ep: "/System/Configuration/branding", fields: screen.brandingFields },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
-        { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "libraries" },
         { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "config", ep: "/System/Configuration", fields: screen.metadataFields },
+        { group: qsTr("Server"),   label: qsTr("NFO"),           kind: "config", ep: "/System/Configuration/xbmcmetadata", fields: screen.nfoFields },
         { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "config", ep: "/System/Configuration/encoding", fields: screen.encodingFields },
-        { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("Resume"),        kind: "config", ep: "/System/Configuration", fields: screen.resumeFields },
+        { group: qsTr("Server"),   label: qsTr("Streaming"),     kind: "config", ep: "/System/Configuration", fields: screen.streamingFields },
+        { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "config", ep: "/System/Configuration", fields: screen.trickplayFields },
         { group: qsTr("Devices"),  label: qsTr("Devices"),       kind: "list", ep: "/Devices", fmt: "devices" },
         { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", fmt: "activity" },
         { group: qsTr("Live TV"),  label: qsTr("Live TV"),       kind: "stub" },
@@ -94,27 +245,53 @@ Item {
     onSelChanged: loadSel()
     Component.onCompleted: loadSel()
     function loadSel() {
+        // Read the entry FRESH from navModel[sel]. We must NOT use the selEntry
+        // binding here: loadSel runs from onSelChanged (sel's change handler), and
+        // at that point the selEntry binding hasn't re-evaluated yet — it still
+        // holds the PREVIOUS tab's entry, which made every navigation load the
+        // wrong (off-by-one) tab and left the panel blank.
+        var entry = navModel[sel] || ({})
         panelData = null
         if (!client) return
-        if (selEntry.kind === "dashboard") {
+        if (entry.kind === "dashboard") {
             client.getJson("/System/Info", "admin:dash:info")
             client.getJson("/Items/Counts", "admin:dash:counts")
             client.getJson("/Sessions", "admin:dash:sessions")
-        } else if (selEntry.kind === "tasks") {
+        } else if (entry.kind === "tasks") {
             tasksData = []
             client.getJson("/ScheduledTasks", "admin:tasks")
-        } else if (selEntry.kind === "users") {
+        } else if (entry.kind === "users") {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
-        } else if (selEntry.kind === "config") {
-            serverConfig = null; editConfig = ({})
-            client.getJson(selEntry.ep, "admin:config")
-        } else if (selEntry.kind !== "stub") {
-            client.getJson(selEntry.ep, "admin:panel")
+        } else if (entry.kind === "libraries") {
+            librariesData = []; selectedLib = null; addMode = false; dynOptions = ({})
+            client.getJson("/Library/VirtualFolders", "admin:libs")
+            fetchOptionSources(libraryOptionsFields) // cultures/countries for the per-library options editor
+        } else if (entry.kind === "config") {
+            serverConfig = null; editConfig = ({}); dynOptions = ({})
+            client.getJson(entry.ep, "admin:config")
+            fetchOptionSources(entry.fields)
+        } else if (entry.kind !== "stub") {
+            client.getJson(entry.ep, "admin:panel")
+        }
+    }
+    // GET any dynamic dropdown option sources the field set needs (deduped); tagged admin:opt:<key>
+    readonly property var optionEndpoints: ({ users: "/Users", uiCultures: "/Localization/Options", cultures: "/Localization/Cultures", countries: "/Localization/Countries" })
+    function fetchOptionSources(fields) {
+        var seen = ({})
+        var fs = fields || []
+        for (var i = 0; i < fs.length; i++) {
+            var k = fs[i].optionsKey
+            if (k && !seen[k] && optionEndpoints[k]) { seen[k] = true; client.getJson(optionEndpoints[k], "admin:opt:" + k) }
         }
     }
     // confirm a destructive action before running it (server actions)
     function confirm(msg, action) { confirmPopup.message = msg; pendingAction = action; confirmPopup.open() }
+    function openDirPicker(key) { _dirPickMode = "config"; _dirPickKey = key; dirPicker.openAt(cfgGet(key) || "") }
+    function pickNewLibFolder() { _dirPickMode = "newlib"; dirPicker.openAt("") }
+    function pickAddPathFolder() { _dirPickMode = "addpath"; dirPicker.openAt("") }
+    function selectLib(lib) { selectedLib = lib; renameValue = ("" + (lib.Name || "")); editConfig = lib.LibraryOptions ? JSON.parse(JSON.stringify(lib.LibraryOptions)) : ({}) }
+    function reloadLibs() { if (client) client.getJson("/Library/VirtualFolders", "admin:libs") }
     function relTime(iso) {
         if (!iso) return ""
         const t = Date.parse(iso); if (isNaN(t)) return ""
@@ -174,6 +351,23 @@ Item {
             else if (tag === "admin:tasks") screen.tasksData = screen.asArray(data)
             else if (tag === "admin:users") screen.usersData = screen.asArray(data)
             else if (tag === "admin:config") { screen.serverConfig = data; screen.editConfig = data ? JSON.parse(JSON.stringify(data)) : ({}) }
+            else if (tag === "admin:libs") {
+                screen.librariesData = screen.asArray(data)
+                if (screen.selectedLib) { // re-point to the refreshed entry so the detail view updates
+                    var ll = screen.librariesData
+                    for (var li = 0; li < ll.length; li++) if (ll[li].ItemId === screen.selectedLib.ItemId) { screen.selectedLib = ll[li]; break }
+                }
+            }
+            else if (tag.indexOf("admin:opt:") === 0) {
+                var key = tag.substring(10)
+                var src = screen.asArray(data)
+                var opts = []
+                if (key === "users") { opts.push({value: "", text: qsTr("None")}); for (var i = 0; i < src.length; i++) opts.push({value: src[i].Id, text: src[i].Name}) }
+                else if (key === "uiCultures") { for (var j = 0; j < src.length; j++) opts.push({value: src[j].Value || "", text: src[j].Name}) }
+                else if (key === "cultures") { opts.push({value: "", text: qsTr("Any language")}); for (var m = 0; m < src.length; m++) opts.push({value: src[m].TwoLetterISOLanguageName || "", text: src[m].DisplayName || src[m].Name}) }
+                else if (key === "countries") { opts.push({value: "", text: qsTr("Any country")}); for (var n = 0; n < src.length; n++) opts.push({value: src[n].TwoLetterISORegionName || "", text: src[n].DisplayName || src[n].Name}) }
+                var dd = Object.assign({}, screen.dynOptions); dd[key] = opts; screen.dynOptions = dd
+            }
         }
     }
 
@@ -211,22 +405,86 @@ Item {
         MouseArea { id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: db.clicked() }
     }
 
-    function setConfig(key, val) { var c = Object.assign({}, editConfig); c[key] = val; editConfig = c }
+    // editConfig accessors with dot-path support (e.g. "TrickplayOptions.Interval").
+    // setConfig deep-clones so a nested edit still flips the top-level ref (reactivity).
+    function cfgGet(path) {
+        var o = editConfig
+        var parts = ("" + path).split(".")
+        for (var i = 0; i < parts.length; i++) {
+            if (o === null || o === undefined) return undefined
+            o = o[parts[i]]
+        }
+        return o
+    }
+    function setConfig(path, val) {
+        var c = editConfig ? JSON.parse(JSON.stringify(editConfig)) : ({})
+        var parts = ("" + path).split(".")
+        var o = c
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (o[parts[i]] === null || o[parts[i]] === undefined) o[parts[i]] = ({})
+            o = o[parts[i]]
+        }
+        o[parts[parts.length - 1]] = val
+        editConfig = c
+    }
+    // Optional per-field conditional visibility: showWhen {key, eq|neq|oneOf}
+    // evaluated against the live editConfig (e.g. show VAAPI device only for vaapi).
+    function fieldVisible(fld) {
+        if (!fld) return true
+        // per-library-type gating for LibraryOptions (mirrors web's setContentType):
+        // a field with a `types` list only shows for the selected library's type.
+        if (fld.types) {
+            var ct = selectedLib ? (selectedLib.CollectionType || "mixed") : "mixed"
+            if (fld.types.indexOf(ct) < 0) return false
+        }
+        if (!fld.showWhen) return true
+        var w = fld.showWhen
+        var cur = cfgGet(w.key)
+        if (w.eq !== undefined) return cur === w.eq
+        if (w.neq !== undefined) return cur !== w.neq
+        if (w.oneOf !== undefined) return w.oneOf.indexOf(cur) >= 0
+        return true
+    }
     component ConfigField: RowLayout {
         id: cf
         property string label: ""
         property string key: ""
-        property bool numeric: false
+        property string mode: "text"     // text | number | float | csv (int list) | list (string list)
+        property real scale: 1           // number display divisor (e.g. 1e6 = bps shown as Mbps)
+        property bool secret: false      // mask the input (passwords)
+        property bool browse: false      // show a "Browse…" button → server directory picker
+        function display() {
+            var v = screen.cfgGet(cf.key)
+            if (v === undefined || v === null) return ""
+            if (cf.mode === "csv") return (typeof v !== "string" && v.length !== undefined) ? v.join(",") : ("" + v)
+            if (cf.mode === "list") return (typeof v !== "string" && v.length !== undefined) ? v.join(", ") : ("" + v)
+            if (cf.mode === "number" && cf.scale !== 1) return v ? ("" + (v / cf.scale)) : ""
+            return "" + v
+        }
+        function commit(t) {
+            if (cf.mode === "csv")
+                screen.setConfig(cf.key, ("" + t).replace(/\s/g, "").split(",").filter(function (x) { return x.length }).map(Number))
+            else if (cf.mode === "list")
+                screen.setConfig(cf.key, ("" + t).split(",").map(function (x) { return x.trim() }).filter(function (x) { return x.length }))
+            else if (cf.mode === "float")
+                screen.setConfig(cf.key, parseFloat(t) || 0)
+            else if (cf.mode === "number")
+                screen.setConfig(cf.key, cf.scale !== 1 ? Math.trunc(cf.scale * (parseFloat(t) || 0)) : (parseInt(t) || 0))
+            else
+                screen.setConfig(cf.key, t)
+        }
         Layout.fillWidth: true
         Text { text: cf.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
         TextField {
             Layout.preferredWidth: 340
-            text: ("" + (screen.editConfig[cf.key] !== undefined && screen.editConfig[cf.key] !== null ? screen.editConfig[cf.key] : ""))
+            text: cf.display()
             color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
-            inputMethodHints: cf.numeric ? Qt.ImhDigitsOnly : Qt.ImhNone
-            onEditingFinished: screen.setConfig(cf.key, cf.numeric ? (parseInt(text) || 0) : text)
+            echoMode: cf.secret ? TextInput.Password : TextInput.Normal
+            inputMethodHints: (cf.mode === "number" || cf.mode === "float") ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+            onEditingFinished: cf.commit(text)
             background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
         }
+        DashButton { visible: cf.browse; text: qsTr("Browse…"); onClicked: screen.openDirPicker(cf.key) }
     }
     component ConfigToggle: RowLayout {
         id: ct
@@ -236,10 +494,106 @@ Item {
         Text { text: ct.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
         Rectangle {
             id: cs
-            readonly property bool on: screen.editConfig[ct.key] === true
+            readonly property bool on: screen.cfgGet(ct.key) === true
             width: 44; height: 24; radius: 12; color: on ? Theme.accent : Theme.elevated
             Rectangle { width: 18; height: 18; radius: 9; y: 3; x: cs.on ? 23 : 3; color: Theme.textPrimary; Behavior on x { NumberAnimation { duration: 120 } } }
             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: screen.setConfig(ct.key, !cs.on) }
+        }
+    }
+    component ConfigSelect: RowLayout {
+        id: csel
+        property string label: ""
+        property string key: ""
+        property var options: []          // [{value, text}]
+        function syncIndex() {
+            var cur = screen.cfgGet(csel.key)
+            if (cur === undefined || cur === null) cur = "" // null resolves to the "Any/None" option
+            for (var i = 0; i < csel.options.length; i++)
+                if (String(csel.options[i].value) === String(cur)) { cbox.currentIndex = i; return }
+            cbox.currentIndex = -1
+        }
+        onOptionsChanged: syncIndex()
+        // editConfig is assigned just after serverConfig, but the Repeater builds us
+        // synchronously on the serverConfig change — so re-sync once editConfig lands.
+        Connections { target: screen; function onEditConfigChanged() { csel.syncIndex() } }
+        Layout.fillWidth: true
+        Text { text: csel.label; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+        ComboBox {
+            id: cbox
+            Layout.preferredWidth: 340
+            implicitHeight: 34
+            model: csel.options
+            textRole: "text"
+            Component.onCompleted: csel.syncIndex()
+            onActivated: (idx) => screen.setConfig(csel.key, csel.options[idx].value)
+            background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: cbox.activeFocus || cbox.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+            contentItem: Text { text: cbox.currentIndex >= 0 ? cbox.displayText : qsTr("—"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+            indicator: Text { x: cbox.width - width - 10; y: (cbox.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+            popup: Popup {
+                y: cbox.height + 2; width: cbox.width
+                implicitHeight: Math.min(clist.contentHeight + 2, 300); padding: 1
+                background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                contentItem: ListView {
+                    id: clist
+                    clip: true
+                    model: cbox.popup.visible ? cbox.delegateModel : null
+                    currentIndex: cbox.highlightedIndex
+                    ScrollBar.vertical: ScrollBar { active: true }
+                }
+            }
+            delegate: ItemDelegate {
+                required property var modelData
+                required property int index
+                width: cbox.width; implicitHeight: 32; hoverEnabled: true
+                contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+            }
+        }
+    }
+
+    // Reusable renderer for a field descriptor list (group headers + control +
+    // helper text + showWhen), editing the shared editConfig via cfgGet/setConfig.
+    // Used by the server-config pages AND a library's LibraryOptions.
+    component ConfigFieldList: ColumnLayout {
+        id: cfl
+        property var fields: []
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Component { id: cflField; ConfigField { label: parent.modelData.label; key: parent.modelData.key; mode: parent.modelData.type === "csv" ? "csv" : (parent.modelData.type === "number" ? "number" : (parent.modelData.type === "float" ? "float" : (parent.modelData.type === "list" ? "list" : "text"))); scale: parent.modelData.scale || 1; secret: parent.modelData.type === "password"; browse: parent.modelData.browse === true } }
+        Component { id: cflToggle; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
+        Component { id: cflSelect; ConfigSelect { label: parent.modelData.label; key: parent.modelData.key; options: parent.modelData.options || (parent.modelData.optionsKey ? (screen.dynOptions[parent.modelData.optionsKey] || []) : []) } }
+        Repeater {
+            model: cfl.fields
+            ColumnLayout {
+                id: fieldRow
+                required property var modelData
+                required property int index
+                Layout.fillWidth: true
+                visible: screen.fieldVisible(fieldRow.modelData)
+                spacing: 3
+                Text {
+                    visible: !!fieldRow.modelData.group && (fieldRow.index === 0 || cfl.fields[fieldRow.index - 1].group !== fieldRow.modelData.group)
+                    text: fieldRow.modelData.group || ""
+                    color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+                    Layout.topMargin: fieldRow.index === 0 ? 0 : Theme.spacing
+                    Layout.bottomMargin: 2
+                }
+                Loader {
+                    property var modelData: fieldRow.modelData
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: item ? item.implicitHeight : 0
+                    sourceComponent: modelData.type === "toggle" ? cflToggle : (modelData.type === "select" ? cflSelect : cflField)
+                }
+                Text {
+                    visible: !!fieldRow.modelData.help
+                    text: fieldRow.modelData.help || ""
+                    color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
+                    textFormat: Text.StyledText; linkColor: Theme.accent
+                    onLinkActivated: (l) => Qt.openUrlExternally(l)
+                    wrapMode: Text.Wrap; Layout.fillWidth: true; Layout.leftMargin: 4; Layout.maximumWidth: 760
+                    Layout.bottomMargin: Theme.spacingSmall
+                }
+            }
         }
     }
 
@@ -261,6 +615,21 @@ Item {
             }
         }
     }
+
+    DirectoryPicker {
+        id: dirPicker
+        client: screen.client
+        onPicked: (chosenPath) => {
+            if (screen._dirPickMode === "config") screen.setConfig(screen._dirPickKey, chosenPath)
+            else if (screen._dirPickMode === "newlib") screen.newLibPath = chosenPath
+            else if (screen._dirPickMode === "addpath" && screen.selectedLib)
+                screen.confirm(qsTr("Add folder “%1” to “%2”?").arg(chosenPath).arg(screen.selectedLib.Name),
+                               function () { screen.client.addMediaPath(screen.selectedLib.Name, chosenPath); screen.libReloadTimer.restart() })
+        }
+    }
+    // Re-fetch the library list shortly after a (fire-and-forget) mutation so the
+    // UI reflects it without the user re-entering the page.
+    Timer { id: libReloadTimer; interval: 800; repeat: false; onTriggered: screen.reloadLibs() }
 
     RowLayout {
         anchors.fill: parent
@@ -501,21 +870,147 @@ Item {
                     visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; numeric: parent.modelData.type === "number" } }
-                    Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
-                    Repeater {
-                        model: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : []
-                        Loader {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: item ? item.implicitHeight : 0
-                            sourceComponent: modelData.type === "toggle" ? cfgToggleComp : cfgFieldComp
-                        }
-                    }
+                    ConfigFieldList { fields: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : [] }
                     RowLayout {
                         visible: screen.serverConfig !== null
                         Layout.topMargin: Theme.spacing
                         DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save these server settings?"), function() { screen.client.postJson(screen.selEntry.ep, screen.editConfig) }) }
+                    }
+                }
+
+                // libraries — virtual-folder CRUD (list / add / per-library detail)
+                ColumnLayout {
+                    visible: screen.selEntry.kind === "libraries"
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+
+                    // list
+                    ColumnLayout {
+                        visible: screen.selectedLib === null && !screen.addMode
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        DashButton { text: qsTr("＋  Add media library"); onClicked: { screen.newLibName = ""; screen.newLibType = "movies"; screen.newLibPath = ""; screen.addMode = true } }
+                        Repeater {
+                            model: screen.librariesData
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                    ColumnLayout {
+                                        Layout.fillWidth: true; spacing: 2
+                                        Text { text: ("" + (modelData.Name || "—")); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal }
+                                        Text { text: ("" + (modelData.CollectionType || qsTr("mixed"))) + "  ·  " + qsTr("%1 folder(s)").arg((modelData.Locations || []).length); color: Theme.textSecondary; font.pixelSize: Theme.fontTiny }
+                                    }
+                                    DashButton { text: qsTr("Manage"); onClicked: screen.selectLib(modelData) }
+                                    DashButton { text: qsTr("Delete"); danger: true; onClicked: screen.confirm(qsTr("Delete the library “%1”? (Your media files are not deleted.)").arg(modelData.Name), function () { screen.client.removeVirtualFolder(modelData.Name); screen.libReloadTimer.restart() }) }
+                                }
+                            }
+                        }
+                        Text { visible: screen.librariesData.length === 0; text: qsTr("No libraries yet."); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
+                    }
+
+                    // add library
+                    ColumnLayout {
+                        visible: screen.addMode
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.addMode = false }
+                            Text { text: qsTr("Add media library"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Content type"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            ComboBox {
+                                id: typeCombo
+                                Layout.preferredWidth: 340; implicitHeight: 34
+                                model: screen.contentTypes; textRole: "text"
+                                Component.onCompleted: { for (var i = 0; i < screen.contentTypes.length; i++) if (screen.contentTypes[i].value === screen.newLibType) { currentIndex = i; break } }
+                                onActivated: (idx) => screen.newLibType = screen.contentTypes[idx].value
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: typeCombo.activeFocus || typeCombo.hovered ? Theme.accent : Theme.divider; border.width: 1 }
+                                contentItem: Text { text: typeCombo.displayText; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; rightPadding: 26; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                                indicator: Text { x: typeCombo.width - width - 10; y: (typeCombo.height - height) / 2; text: "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                popup: Popup {
+                                    y: typeCombo.height + 2; width: typeCombo.width; implicitHeight: Math.min(tcl.contentHeight + 2, 300); padding: 1
+                                    background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+                                    contentItem: ListView { id: tcl; clip: true; model: typeCombo.popup.visible ? typeCombo.delegateModel : null; currentIndex: typeCombo.highlightedIndex; ScrollBar.vertical: ScrollBar {} }
+                                }
+                                delegate: ItemDelegate {
+                                    required property var modelData
+                                    required property int index
+                                    width: typeCombo.width; implicitHeight: 32; hoverEnabled: true
+                                    contentItem: Text { text: modelData.text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; leftPadding: 10; verticalAlignment: Text.AlignVCenter }
+                                    background: Rectangle { color: hovered ? Theme.surfaceHover : "transparent" }
+                                }
+                            }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Display name"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            TextField { Layout.preferredWidth: 340; text: screen.newLibName; onTextEdited: screen.newLibName = text; placeholderText: qsTr("e.g. Movies"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Folder"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4 }
+                            TextField { Layout.preferredWidth: 340; readOnly: true; text: screen.newLibPath; placeholderText: qsTr("(none selected)"); color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1; implicitHeight: 34 } }
+                            DashButton { text: qsTr("Browse…"); onClicked: screen.pickNewLibFolder() }
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing
+                            DashButton {
+                                text: qsTr("Create library")
+                                onClicked: screen.confirm(qsTr("Create the “%1” library?").arg(screen.newLibName || qsTr("(unnamed)")),
+                                    function () { screen.client.addVirtualFolder(screen.newLibName, screen.newLibType === "mixed" ? "" : screen.newLibType, screen.newLibPath); screen.addMode = false; screen.libReloadTimer.restart() })
+                            }
+                        }
+                    }
+
+                    // per-library detail
+                    ColumnLayout {
+                        visible: screen.selectedLib !== null
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.selectedLib = null }
+                            Text { text: screen.selectedLib ? screen.selectedLib.Name : ""; color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Text { text: qsTr("Rename"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField { Layout.preferredWidth: 340; text: screen.renameValue; onTextEdited: screen.renameValue = text; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                            DashButton { text: qsTr("Rename"); onClicked: screen.confirm(qsTr("Rename “%1” to “%2”?").arg(screen.selectedLib.Name).arg(screen.renameValue),
+                                function () { screen.client.renameVirtualFolder(screen.selectedLib.Name, screen.renameValue); screen.selectedLib = null; screen.libReloadTimer.restart() }) }
+                        }
+                        Text { text: qsTr("Folders"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacing }
+                        Repeater {
+                            model: screen.selectedLib ? (screen.selectedLib.Locations || []) : []
+                            Rectangle {
+                                required property var modelData
+                                Layout.fillWidth: true; implicitHeight: 40; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacing
+                                    Text { text: ("" + modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                                    DashButton { text: qsTr("Remove"); danger: true; onClicked: screen.confirm(qsTr("Remove folder “%1” from “%2”?").arg("" + modelData).arg(screen.selectedLib.Name),
+                                        function () { screen.client.removeMediaPath(screen.selectedLib.Name, "" + modelData); screen.libReloadTimer.restart() }) }
+                                }
+                            }
+                        }
+                        DashButton { text: qsTr("Add folder"); onClicked: screen.pickAddPathFolder() }
+
+                        Text { text: qsTr("Library options"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingLarge }
+                        ConfigFieldList { fields: screen.libraryOptionsFields }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacing
+                            DashButton { text: qsTr("Save library options"); onClicked: screen.confirm(qsTr("Save library options for “%1”?").arg(screen.selectedLib.Name), function () { screen.client.updateLibraryOptions(screen.selectedLib.ItemId, screen.editConfig) }) }
+                        }
+
+                        RowLayout {
+                            Layout.topMargin: Theme.spacingLarge
+                            DashButton { text: qsTr("Delete library"); danger: true; onClicked: screen.confirm(qsTr("Delete the library “%1”? (Your media files are not deleted.)").arg(screen.selectedLib.Name),
+                                function () { screen.client.removeVirtualFolder(screen.selectedLib.Name); screen.selectedLib = null; screen.libReloadTimer.restart() }) }
+                        }
                     }
                 }
 
@@ -529,7 +1024,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.selEntry.kind !== "libraries" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }

@@ -159,6 +159,14 @@ Item {
         onTracksChanged: console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
     }
 
+    // Keep the screen + both monitors awake while a file is actively playing
+    // (released on pause/stop, matching mpv). Embedded libmpv can't inhibit the
+    // compositor itself under the render API, so the host holds the D-Bus
+    // screensaver/power inhibitions instead.
+    ScreenSaverInhibitor {
+        inhibited: player.playing && !player.paused
+    }
+
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true

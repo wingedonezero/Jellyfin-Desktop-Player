@@ -46,6 +46,10 @@ JellyfinClient::JellyfinClient(QObject *parent)
     , m_deviceId(makeDeviceId())
     , m_deviceName(QSysInfo::machineHostName())
 {
+    // Abort a request if no data transfers for 20s, instead of hanging forever
+    // and holding one of Qt's 6 per-host connection slots (which, once enough
+    // stall, starves every later request → blank admin panels).
+    m_net->setTransferTimeout(20000);
 }
 
 void JellyfinClient::setServerUrl(const QString &url)
@@ -142,14 +146,42 @@ void JellyfinClient::logout()
 
 void JellyfinClient::getJson(const QString &path, const QString &requestTag)
 {
+    getJsonAttempt(path, requestTag, 1); // one retry on transient failure
+}
+
+// A GET that emits jsonReady only on a genuinely valid response, and retries
+// once on a transient failure — a stalled/reset/half-closed keep-alive
+// connection can "finish" with NoError but an EMPTY body, which previously got
+// handed to QML as empty data (panels rendered blank). We treat empty/invalid
+// bodies as failures, retry once on a fresh connection, and never retry a real
+// client error (status >= 400). Every outcome is logged for diagnosis.
+void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft)
+{
     QNetworkReply *reply = get(path);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError err = reply->error();
+        const QVariant data = QJsonDocument::fromJson(body).toVariant();
+        if (err == QNetworkReply::NoError && data.isValid()) {
+            if (qEnvironmentVariableIsSet("JFD_NETLOG")) // opt-in full request trace
+                qInfo().noquote() << "[net] GET" << path << "->" << status << body.size() << "bytes ok";
+            Q_EMIT jsonReady(requestTag, data);
             return;
         }
-        Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(reply->readAll()).toVariant());
+        const bool willRetry = triesLeft > 0 && status < 400;
+        qWarning().noquote() << "[net] GET" << path << "status" << status
+                             << "err" << int(err) << reply->errorString()
+                             << "body" << body.size() << "bytes"
+                             << (willRetry ? "— retrying" : "— FAILED");
+        if (willRetry) {
+            getJsonAttempt(path, requestTag, triesLeft - 1);
+            return;
+        }
+        Q_EMIT errorOccurred(reply->errorString().isEmpty()
+                                 ? QStringLiteral("Empty/invalid response for %1 (HTTP %2)").arg(path).arg(status)
+                                 : reply->errorString());
     });
 }
 
@@ -220,6 +252,44 @@ void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStri
 void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
 {
     fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
+}
+
+// --- libraries (virtual folders) — fire-and-forget; the UI confirms first ----
+static QString enc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
+
+void JellyfinClient::addVirtualFolder(const QString &name, const QString &collectionType, const QString &path)
+{
+    QString q = QStringLiteral("/Library/VirtualFolders?refreshLibrary=true&name=%1").arg(enc(name));
+    if (!collectionType.isEmpty()) q += QStringLiteral("&collectionType=%1").arg(collectionType);
+    if (!path.isEmpty()) q += QStringLiteral("&paths=%1").arg(enc(path));
+    const QJsonObject body{{QStringLiteral("LibraryOptions"), QJsonObject{}}}; // server applies defaults
+    fireAndForget(post(q, QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::removeVirtualFolder(const QString &name)
+{
+    fireAndForget(del(QStringLiteral("/Library/VirtualFolders?name=%1").arg(enc(name))));
+}
+void JellyfinClient::renameVirtualFolder(const QString &name, const QString &newName)
+{
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Name?name=%1&newName=%2").arg(enc(name), enc(newName)),
+                       QByteArray()));
+}
+void JellyfinClient::addMediaPath(const QString &name, const QString &path)
+{
+    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Path"), path}};
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Paths?refreshLibrary=true"),
+                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
+}
+void JellyfinClient::removeMediaPath(const QString &name, const QString &path)
+{
+    fireAndForget(del(QStringLiteral("/Library/VirtualFolders/Paths?name=%1&path=%2").arg(enc(name), enc(path))));
+}
+void JellyfinClient::updateLibraryOptions(const QString &id, const QVariantMap &options)
+{
+    const QJsonObject body{{QStringLiteral("Id"), id},
+                           {QStringLiteral("LibraryOptions"), QJsonObject::fromVariantMap(options)}};
+    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/LibraryOptions"),
+                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
 }
 
 void JellyfinClient::saveSession() const
