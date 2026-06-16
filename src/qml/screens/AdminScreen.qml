@@ -27,22 +27,64 @@ Item {
     property var pendingAction: null
     readonly property var selEntry: navModel[sel] || ({})
 
-    // group | label | kind (info/list/stub) | endpoint | primary/secondary field
+    // field sets for the data-driven server-config editors (kind "config")
+    readonly property var generalFields: [
+        {label: qsTr("Server name"), key: "ServerName", type: "text"},
+        {label: qsTr("Preferred display language"), key: "UICulture", type: "text"},
+        {label: qsTr("Cache path"), key: "CachePath", type: "text"},
+        {label: qsTr("Metadata path"), key: "MetadataPath", type: "text"},
+        {label: qsTr("Enable Quick Connect"), key: "QuickConnectAvailable", type: "toggle"},
+        {label: qsTr("Library scan fanout concurrency (0 = auto)"), key: "LibraryScanFanoutConcurrency", type: "number"},
+        {label: qsTr("Parallel image encoding limit (0 = auto)"), key: "ParallelImageEncodingLimit", type: "number"}
+    ]
+    readonly property var brandingFields: [
+        {label: qsTr("Enable splash screen"), key: "SplashscreenEnabled", type: "toggle"},
+        {label: qsTr("Login disclaimer"), key: "LoginDisclaimer", type: "text"},
+        {label: qsTr("Custom CSS"), key: "CustomCss", type: "text"}
+    ]
+    readonly property var metadataFields: [
+        {label: qsTr("Preferred metadata language"), key: "PreferredMetadataLanguage", type: "text"},
+        {label: qsTr("Country code"), key: "MetadataCountryCode", type: "text"},
+        {label: qsTr("Dummy chapter duration (seconds)"), key: "DummyChapterDuration", type: "number"},
+        {label: qsTr("Chapter image resolution"), key: "ChapterImageResolution", type: "text"}
+    ]
+    readonly property var networkFields: [
+        {label: qsTr("Base URL"), key: "BaseUrl", type: "text"},
+        {label: qsTr("Enable HTTPS"), key: "EnableHttps", type: "toggle"},
+        {label: qsTr("Require HTTPS"), key: "RequireHttps", type: "toggle"},
+        {label: qsTr("HTTP port"), key: "InternalHttpPort", type: "number"},
+        {label: qsTr("HTTPS port"), key: "InternalHttpsPort", type: "number"},
+        {label: qsTr("Public HTTP port"), key: "PublicHttpPort", type: "number"},
+        {label: qsTr("Allow remote connections"), key: "EnableRemoteAccess", type: "toggle"},
+        {label: qsTr("Enable auto-discovery"), key: "AutoDiscovery", type: "toggle"},
+        {label: qsTr("Certificate path"), key: "CertificatePath", type: "text"}
+    ]
+    readonly property var encodingFields: [
+        {label: qsTr("Hardware acceleration"), key: "HardwareAccelerationType", type: "text"},
+        {label: qsTr("Encoding thread count (-1 = auto)"), key: "EncodingThreadCount", type: "number"},
+        {label: qsTr("Transcode temp path"), key: "TranscodingTempPath", type: "text"},
+        {label: qsTr("H.264 CRF"), key: "H264Crf", type: "number"},
+        {label: qsTr("Allow HEVC encoding"), key: "AllowHevcEncoding", type: "toggle"},
+        {label: qsTr("Enable throttling"), key: "EnableThrottling", type: "toggle"},
+        {label: qsTr("Enable audio VBR"), key: "EnableAudioVbr", type: "toggle"}
+    ]
+
+    // group | label | kind (config/info/list/stub) | endpoint | fields | primary/secondary | fmt
     readonly property var navModel: [
         { group: qsTr("Server"),   label: qsTr("Dashboard"),     kind: "dashboard" },
-        { group: qsTr("Server"),   label: qsTr("General"),       kind: "general" },
-        { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("General"),       kind: "config", ep: "/System/Configuration", fields: screen.generalFields },
+        { group: qsTr("Server"),   label: qsTr("Branding"),      kind: "config", ep: "/System/Configuration/branding", fields: screen.brandingFields },
         { group: qsTr("Server"),   label: qsTr("Users"),         kind: "users" },
         { group: qsTr("Server"),   label: qsTr("Libraries"),     kind: "stub" },
-        { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "stub" },
-        { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "stub" },
+        { group: qsTr("Server"),   label: qsTr("Metadata"),      kind: "config", ep: "/System/Configuration", fields: screen.metadataFields },
+        { group: qsTr("Server"),   label: qsTr("Playback / Transcoding"), kind: "config", ep: "/System/Configuration/encoding", fields: screen.encodingFields },
         { group: qsTr("Server"),   label: qsTr("Trickplay"),     kind: "stub" },
         { group: qsTr("Devices"),  label: qsTr("Devices"),       kind: "list", ep: "/Devices", fmt: "devices" },
         { group: qsTr("Devices"),  label: qsTr("Activity"),      kind: "list", ep: "/System/ActivityLog/Entries?Limit=60", fmt: "activity" },
         { group: qsTr("Live TV"),  label: qsTr("Live TV"),       kind: "stub" },
         { group: qsTr("Live TV"),  label: qsTr("DVR"),           kind: "stub" },
         { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "list", ep: "/Plugins", fmt: "plugins" },
-        { group: qsTr("Advanced"), label: qsTr("Networking"),    kind: "stub" },
+        { group: qsTr("Advanced"), label: qsTr("Networking"),    kind: "config", ep: "/System/Configuration/network", fields: screen.networkFields },
         { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", primary: "AppName", secondary: "DateCreated" },
         { group: qsTr("Advanced"), label: qsTr("Backups"),       kind: "stub" },
         { group: qsTr("Advanced"), label: qsTr("Logs"),          kind: "list", ep: "/System/Logs", primary: "Name", secondary: "Size" },
@@ -64,9 +106,9 @@ Item {
         } else if (selEntry.kind === "users") {
             usersData = []; selectedUser = null
             client.getJson("/Users", "admin:users")
-        } else if (selEntry.kind === "general") {
+        } else if (selEntry.kind === "config") {
             serverConfig = null; editConfig = ({})
-            client.getJson("/System/Configuration", "admin:config")
+            client.getJson(selEntry.ep, "admin:config")
         } else if (selEntry.kind !== "stub") {
             client.getJson(selEntry.ep, "admin:panel")
         }
@@ -454,22 +496,26 @@ Item {
                     }
                 }
 
-                // general — server configuration editor (edits a deep copy; Save POSTs the whole config)
+                // config — data-driven server config editor; edits a deep copy, Save POSTs the whole object to selEntry.ep
                 ColumnLayout {
-                    visible: screen.selEntry.kind === "general"
+                    visible: screen.selEntry.kind === "config"
                     Layout.fillWidth: true; spacing: Theme.spacingSmall
                     Text { visible: screen.serverConfig === null; text: qsTr("Loading…"); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Server name"); key: "ServerName" }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Preferred display language"); key: "UICulture" }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Cache path"); key: "CachePath" }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Metadata path"); key: "MetadataPath" }
-                    ConfigToggle { visible: screen.serverConfig !== null; label: qsTr("Enable Quick Connect"); key: "QuickConnectAvailable" }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Library scan fanout concurrency (0 = auto)"); key: "LibraryScanFanoutConcurrency"; numeric: true }
-                    ConfigField { visible: screen.serverConfig !== null; label: qsTr("Parallel image encoding limit (0 = auto)"); key: "ParallelImageEncodingLimit"; numeric: true }
+                    Component { id: cfgFieldComp; ConfigField { label: parent.modelData.label; key: parent.modelData.key; numeric: parent.modelData.type === "number" } }
+                    Component { id: cfgToggleComp; ConfigToggle { label: parent.modelData.label; key: parent.modelData.key } }
+                    Repeater {
+                        model: (screen.serverConfig !== null && screen.selEntry.fields) ? screen.selEntry.fields : []
+                        Loader {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: item ? item.implicitHeight : 0
+                            sourceComponent: modelData.type === "toggle" ? cfgToggleComp : cfgFieldComp
+                        }
+                    }
                     RowLayout {
                         visible: screen.serverConfig !== null
                         Layout.topMargin: Theme.spacing
-                        DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save the server's General settings?"), function() { screen.client.postJson("/System/Configuration", screen.editConfig) }) }
+                        DashButton { text: qsTr("Save changes"); onClicked: screen.confirm(qsTr("Save these server settings?"), function() { screen.client.postJson(screen.selEntry.ep, screen.editConfig) }) }
                     }
                 }
 
@@ -483,7 +529,7 @@ Item {
 
                 // info (key/value)
                 Text {
-                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "general" && screen.panelData === null
+                    visible: screen.selEntry.kind !== "stub" && screen.selEntry.kind !== "dashboard" && screen.selEntry.kind !== "tasks" && screen.selEntry.kind !== "users" && screen.selEntry.kind !== "config" && screen.panelData === null
                     text: qsTr("Loading…")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 }
