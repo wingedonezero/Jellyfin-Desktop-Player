@@ -19,6 +19,13 @@ Item {
     property var dashCounts: null
     property var dashSessions: []
     property var tasksData: []
+    property var selectedTask: null       // task whose triggers are being edited
+    property var editTriggers: []
+    property string trigType: "IntervalTrigger"
+    property int trigHours: 24
+    property int trigHour: 3
+    property string trigDay: "Sunday"
+    readonly property var trigTypeOptions: [{value: "StartupTrigger", text: qsTr("On startup")}, {value: "IntervalTrigger", text: qsTr("Interval")}, {value: "DailyTrigger", text: qsTr("Daily")}, {value: "WeeklyTrigger", text: qsTr("Weekly")}]
     property var usersData: []
     property var selectedUser: null
     property var editPolicy: ({})
@@ -304,7 +311,7 @@ Item {
             client.getJson("/Items/Counts", "admin:dash:counts")
             client.getJson("/Sessions", "admin:dash:sessions")
         } else if (entry.kind === "tasks") {
-            tasksData = []
+            tasksData = []; selectedTask = null
             client.getJson("/ScheduledTasks", "admin:tasks")
         } else if (entry.kind === "users") {
             usersData = []; selectedUser = null; userAddMode = false
@@ -362,6 +369,25 @@ Item {
         if (d < 5400) return qsTr("%1m").arg(Math.round(d / 60))
         return qsTr("%1h").arg(Math.round(d / 3600))
     }
+    // --- scheduled-task triggers (POST /ScheduledTasks/{id}/Triggers with the full list) ---
+    function selectTask(t) { selectedTask = t; editTriggers = (t && t.Triggers) ? JSON.parse(JSON.stringify(t.Triggers)) : [] }
+    function trigLabel(tr) {
+        if (tr.Type === "StartupTrigger") return qsTr("On startup")
+        if (tr.Type === "IntervalTrigger") return qsTr("Every %1h").arg(Math.round((tr.IntervalTicks || 0) / 36000000000))
+        var hr = Math.round((tr.TimeOfDayTicks || 0) / 36000000000)
+        if (tr.Type === "DailyTrigger") return qsTr("Daily at %1:00").arg(hr)
+        if (tr.Type === "WeeklyTrigger") return qsTr("%1 at %2:00").arg("" + tr.DayOfWeek).arg(hr)
+        return ("" + tr.Type)
+    }
+    function addTrigger() {
+        var t = ({Type: trigType})
+        if (trigType === "IntervalTrigger") t.IntervalTicks = Math.max(1, trigHours) * 36000000000
+        else if (trigType === "DailyTrigger") t.TimeOfDayTicks = trigHour * 36000000000
+        else if (trigType === "WeeklyTrigger") { t.DayOfWeek = trigDay; t.TimeOfDayTicks = trigHour * 36000000000 }
+        var a = JSON.parse(JSON.stringify(editTriggers)); a.push(t); editTriggers = a
+    }
+    function removeTrigger(i) { var a = JSON.parse(JSON.stringify(editTriggers)); a.splice(i, 1); editTriggers = a }
+    function saveTriggers() { if (selectedTask && client) { client.updateTaskTriggers(selectedTask.Id, editTriggers); selectedTask = null; tasksReloadTimer.restart() } }
     function infoRows(d) {
         if (!d || typeof d !== "object") return []
         return Object.keys(d).map(function (k) {
@@ -1141,6 +1167,7 @@ Item {
     Timer { id: libReloadTimer; interval: 800; repeat: false; onTriggered: screen.reloadLibs() }
     Timer { id: usersReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/Users", "admin:users") }
     Timer { id: panelReloadTimer; interval: 800; repeat: false; onTriggered: { var e = screen.navModel[screen.sel]; if (screen.client && e && e.ep) screen.client.getJson(e.ep, "admin:panel") } }
+    Timer { id: tasksReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/ScheduledTasks", "admin:tasks") }
     function promptInput(title, placeholder, initial, action) { inputPopup.title = title; inputPopup.placeholder = placeholder; screen.inputValue = initial || ""; screen.inputAction = action; inputField.text = initial || ""; inputPopup.open(); inputField.forceActiveFocus() }
 
     RowLayout {
@@ -1285,7 +1312,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: Theme.spacingSmall
                     Repeater {
-                        model: screen.tasksData
+                        model: screen.selectedTask === null ? screen.tasksData : []
                         Rectangle {
                             required property var modelData
                             Layout.fillWidth: true; implicitHeight: 56; radius: Theme.radius; color: Theme.surface
@@ -1314,9 +1341,59 @@ Item {
                                         color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; elide: Text.ElideRight; Layout.fillWidth: true
                                     }
                                 }
+                                DashButton { text: qsTr("Triggers"); onClicked: screen.selectTask(modelData) }
                                 DashButton { visible: modelData.State !== "Running"; text: qsTr("Run"); onClicked: screen.confirm(qsTr("Run “%1” now?").arg(modelData.Name), function() { screen.client.runScheduledTask(modelData.Id) }) }
                                 DashButton { visible: modelData.State === "Running"; text: qsTr("Stop"); danger: true; onClicked: screen.client.stopScheduledTask(modelData.Id) }
                             }
+                        }
+                    }
+
+                    // task triggers editor
+                    ColumnLayout {
+                        visible: screen.selectedTask !== null
+                        Layout.fillWidth: true; spacing: Theme.spacingSmall
+                        RowLayout {
+                            Layout.fillWidth: true
+                            DashButton { text: qsTr("← Back"); onClicked: screen.selectedTask = null }
+                            Text { text: screen.selectedTask ? screen.selectedTask.Name : ""; color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter }
+                        }
+                        Text { text: qsTr("Triggers"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        Repeater {
+                            model: screen.editTriggers
+                            Rectangle {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true; implicitHeight: 34; radius: Theme.radius; color: Theme.surface
+                                RowLayout {
+                                    anchors.fill: parent; anchors.leftMargin: Theme.spacingSmall; anchors.rightMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                                    Text { text: screen.trigLabel(modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true }
+                                    DashButton { text: qsTr("Remove"); danger: true; onClicked: screen.removeTrigger(index) }
+                                }
+                            }
+                        }
+                        Text { visible: screen.editTriggers.length === 0; text: qsTr("No triggers — this task only runs manually."); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+
+                        Text { text: qsTr("Add a trigger"); color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true; Layout.topMargin: Theme.spacingSmall }
+                        PolicySelect { label: qsTr("Type"); options: screen.trigTypeOptions; currentValue: screen.trigType; onChanged: (v) => screen.trigType = v }
+                        RowLayout {
+                            visible: screen.trigType === "IntervalTrigger"
+                            Layout.fillWidth: true
+                            Text { text: qsTr("Every (hours)"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 80; text: "" + screen.trigHours; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.trigHours = Math.max(1, parseInt(text) || 1); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        PolicySelect { visible: screen.trigType === "WeeklyTrigger"; label: qsTr("Day"); options: screen.dayOptions; currentValue: screen.trigDay; onChanged: (v) => screen.trigDay = v }
+                        RowLayout {
+                            visible: screen.trigType === "DailyTrigger" || screen.trigType === "WeeklyTrigger"
+                            Layout.fillWidth: true
+                            Text { text: qsTr("At hour (0–23)"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 4; verticalAlignment: Text.AlignVCenter }
+                            TextField { Layout.preferredWidth: 80; text: "" + screen.trigHour; inputMethodHints: Qt.ImhDigitsOnly; onEditingFinished: screen.trigHour = Math.max(0, Math.min(23, parseInt(text) || 0)); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 } }
+                        }
+                        RowLayout {
+                            Layout.topMargin: Theme.spacingSmall; spacing: Theme.spacingSmall
+                            DashButton { text: qsTr("Add trigger"); onClicked: screen.addTrigger() }
+                            DashButton { text: qsTr("Save triggers"); onClicked: screen.confirm(qsTr("Save triggers for “%1”?").arg(screen.selectedTask.Name), function () { screen.saveTriggers() }) }
                         }
                     }
                 }
