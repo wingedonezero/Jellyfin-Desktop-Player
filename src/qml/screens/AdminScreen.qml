@@ -48,6 +48,10 @@ Item {
     property string _dirPickKey: ""        // config key the directory picker is editing
     property string _dirPickMode: "config" // config | newlib | addpath
     property var librariesData: []
+    property string logName: ""            // currently-open log file (empty = list view)
+    property string logContent: ""
+    property string inputValue: ""         // generic input dialog
+    property var inputAction: null
     property var selectedLib: null         // the library being managed (detail view), or null (list)
     property bool addMode: false           // showing the add-library form
     property string newLibName: ""
@@ -267,9 +271,9 @@ Item {
         { group: qsTr("Live TV"),  label: qsTr("DVR"),           kind: "stub" },
         { group: qsTr("Plugins"),  label: qsTr("Plugins"),       kind: "list", ep: "/Plugins", fmt: "plugins" },
         { group: qsTr("Advanced"), label: qsTr("Networking"),    kind: "config", ep: "/System/Configuration/network", fields: screen.networkFields },
-        { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", primary: "AppName", secondary: "DateCreated" },
+        { group: qsTr("Advanced"), label: qsTr("API Keys"),      kind: "list", ep: "/Auth/Keys", fmt: "apikeys", primary: "AppName", secondary: "DateCreated" },
         { group: qsTr("Advanced"), label: qsTr("Backups"),       kind: "stub" },
-        { group: qsTr("Advanced"), label: qsTr("Logs"),          kind: "list", ep: "/System/Logs", primary: "Name", secondary: "Size" },
+        { group: qsTr("Advanced"), label: qsTr("Logs"),          kind: "list", ep: "/System/Logs", fmt: "logs", primary: "Name", secondary: "Size" },
         { group: qsTr("Advanced"), label: qsTr("Scheduled Tasks"), kind: "tasks" }
     ]
 
@@ -282,7 +286,7 @@ Item {
         // holds the PREVIOUS tab's entry, which made every navigation load the
         // wrong (off-by-one) tab and left the panel blank.
         var entry = navModel[sel] || ({})
-        panelData = null
+        panelData = null; logName = ""
         if (!client) return
         if (entry.kind === "dashboard") {
             client.getJson("/System/Info", "admin:dash:info")
@@ -366,6 +370,8 @@ Item {
     function listTitle(entry, item) {
         if (!item) return "—"
         if (entry.fmt === "devices") return ("" + (item.CustomName || item.Name || "—"))
+        if (entry.fmt === "apikeys") return ("" + (item.AppName || "—"))
+        if (entry.fmt === "logs") return ("" + (item.Name || "—"))
         return ("" + (item.Name || item[entry.primary] || "—"))
     }
     function listSub(entry, item) {
@@ -374,6 +380,8 @@ Item {
         if (entry.fmt === "activity") parts = [relTime(item.Date), item.Severity, item.ShortOverview]
         else if (entry.fmt === "devices") parts = [item.AppName, item.LastUserName, item.DateLastActivity ? relTime(item.DateLastActivity) : ""]
         else if (entry.fmt === "plugins") parts = [item.Version ? ("v" + item.Version) : "", item.Status, item.Description]
+        else if (entry.fmt === "apikeys") parts = [("" + (item.AccessToken || "")), item.DateCreated ? relTime(item.DateCreated) : ""]
+        else if (entry.fmt === "logs") parts = [item.Size ? (Math.round(item.Size / 1024) + " KB") : ""]
         else return entry.secondary ? ("" + (item[entry.secondary] || "")) : ""
         return parts.filter(function (x) { return x }).join("  ·  ")
     }
@@ -433,6 +441,7 @@ Item {
                 var dd = Object.assign({}, screen.dynOptions); dd[key] = opts; screen.dynOptions = dd
             }
         }
+        function onTextReady(tag, content) { if (tag === "admin:logfile") screen.logContent = content }
     }
 
     function selectUser(u) {
@@ -1029,6 +1038,32 @@ Item {
         }
     }
 
+    // generic single-field input dialog (rename device, new API key, …)
+    Popup {
+        id: inputPopup
+        property string title: ""
+        property string placeholder: ""
+        x: (screen.width - width) / 2; y: (screen.height - height) / 2
+        modal: true; dim: true; width: 380; padding: Theme.spacing
+        background: Rectangle { color: Theme.elevated; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        contentItem: ColumnLayout {
+            spacing: Theme.spacing
+            Text { text: inputPopup.title; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.fillWidth: true }
+            TextField {
+                id: inputField
+                Layout.fillWidth: true; placeholderText: inputPopup.placeholder
+                color: Theme.textPrimary; placeholderTextColor: Theme.textDisabled; font.pixelSize: Theme.fontSmall
+                onAccepted: { inputPopup.close(); if (screen.inputAction) screen.inputAction(text) }
+                background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: parent.activeFocus ? Theme.accent : Theme.divider; border.width: 1; implicitHeight: 34 }
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight; spacing: Theme.spacingSmall
+                DashButton { text: qsTr("Cancel"); onClicked: inputPopup.close() }
+                DashButton { text: qsTr("OK"); onClicked: { inputPopup.close(); if (screen.inputAction) screen.inputAction(inputField.text) } }
+            }
+        }
+    }
+
     // per-type image "Fetcher settings" (ImageOptions) — mirrors imageOptionsEditor
     Popup {
         id: fsDialog
@@ -1092,6 +1127,8 @@ Item {
     // UI reflects it without the user re-entering the page.
     Timer { id: libReloadTimer; interval: 800; repeat: false; onTriggered: screen.reloadLibs() }
     Timer { id: usersReloadTimer; interval: 800; repeat: false; onTriggered: if (screen.client) screen.client.getJson("/Users", "admin:users") }
+    Timer { id: panelReloadTimer; interval: 800; repeat: false; onTriggered: { var e = screen.navModel[screen.sel]; if (screen.client && e && e.ep) screen.client.getJson(e.ep, "admin:panel") } }
+    function promptInput(title, placeholder, initial, action) { inputPopup.title = title; inputPopup.placeholder = placeholder; screen.inputValue = initial || ""; screen.inputAction = action; inputField.text = initial || ""; inputPopup.open(); inputField.forceActiveFocus() }
 
     RowLayout {
         anchors.fill: parent
@@ -1711,38 +1748,59 @@ Item {
                     }
                 }
 
-                // list (rows) — 2-line, formatted per panel via listTitle/listSub
+                // list (rows) — 2-line, formatted per panel; action-capable panels get row buttons + a toolbar
+                RowLayout {
+                    visible: screen.selEntry.kind === "list" && screen.selEntry.fmt === "apikeys" && screen.logName === ""
+                    Layout.fillWidth: true
+                    DashButton { text: qsTr("＋  New API key"); onClicked: screen.promptInput(qsTr("New API key"), qsTr("App name"), "", function (name) { if (name && name.length) { screen.client.createApiKey(name); screen.panelReloadTimer.restart() } }) }
+                }
                 Repeater {
-                    model: screen.selEntry.kind === "list" ? screen.listRows(screen.panelData) : []
+                    model: (screen.selEntry.kind === "list" && screen.logName === "") ? screen.listRows(screen.panelData) : []
                     Rectangle {
                         required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: 52
-                        radius: Theme.radius
-                        color: Theme.surface
-                        ColumnLayout {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left; anchors.right: parent.right
-                            anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing
-                            spacing: 2
-                            Text {
-                                text: screen.listTitle(screen.selEntry, modelData)
-                                color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
-                                Layout.fillWidth: true; elide: Text.ElideRight
+                        Layout.fillWidth: true; implicitHeight: 52; radius: Theme.radius; color: Theme.surface
+                        RowLayout {
+                            anchors.fill: parent; anchors.leftMargin: Theme.spacing; anchors.rightMargin: Theme.spacing; spacing: Theme.spacingSmall
+                            ColumnLayout {
+                                Layout.fillWidth: true; spacing: 2
+                                Text { text: screen.listTitle(screen.selEntry, modelData); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Text { text: screen.listSub(screen.selEntry, modelData); visible: text.length > 0; color: Theme.textSecondary; font.pixelSize: Theme.fontTiny; Layout.fillWidth: true; elide: Text.ElideRight }
                             }
-                            Text {
-                                text: screen.listSub(screen.selEntry, modelData)
-                                visible: text.length > 0
-                                color: Theme.textSecondary; font.pixelSize: Theme.fontTiny
-                                Layout.fillWidth: true; elide: Text.ElideRight
-                            }
+                            DashButton { visible: screen.selEntry.fmt === "logs"; text: qsTr("View"); onClicked: { screen.logName = ("" + modelData.Name); screen.logContent = qsTr("Loading…"); screen.client.getText("/System/Logs/Log?name=" + encodeURIComponent(modelData.Name), "admin:logfile") } }
+                            DashButton { visible: screen.selEntry.fmt === "devices"; text: qsTr("Rename"); onClicked: screen.promptInput(qsTr("Rename device"), qsTr("Custom name"), ("" + (modelData.CustomName || modelData.Name || "")), function (n) { screen.client.renameDevice(modelData.Id, n); screen.panelReloadTimer.restart() }) }
+                            DashButton { visible: screen.selEntry.fmt === "devices"; text: qsTr("Delete"); danger: true; onClicked: screen.confirm(qsTr("Delete the device “%1”?").arg(("" + (modelData.CustomName || modelData.Name))), function () { screen.client.deleteDevice(modelData.Id); screen.panelReloadTimer.restart() }) }
+                            DashButton { visible: screen.selEntry.fmt === "apikeys"; text: qsTr("Revoke"); danger: true; onClicked: screen.confirm(qsTr("Revoke this API key (%1)?").arg(("" + (modelData.AppName || ""))), function () { screen.client.revokeApiKey(modelData.AccessToken); screen.panelReloadTimer.restart() }) }
+                            DashButton { visible: screen.selEntry.fmt === "plugins"; text: (("" + modelData.Status) === "Disabled") ? qsTr("Enable") : qsTr("Disable"); onClicked: screen.confirm(qsTr("%1 the plugin “%2”?").arg((("" + modelData.Status) === "Disabled") ? qsTr("Enable") : qsTr("Disable")).arg(("" + modelData.Name)), function () { screen.client.setPluginEnabled(modelData.Id, ("" + modelData.Version), (("" + modelData.Status) === "Disabled")); screen.panelReloadTimer.restart() }) }
+                            DashButton { visible: screen.selEntry.fmt === "plugins"; text: qsTr("Uninstall"); danger: true; onClicked: screen.confirm(qsTr("Uninstall the plugin “%1”?").arg(("" + modelData.Name)), function () { screen.client.uninstallPlugin(modelData.Id, ("" + modelData.Version)); screen.panelReloadTimer.restart() }) }
                         }
                     }
                 }
                 Text {
-                    visible: screen.selEntry.kind === "list" && screen.panelData !== null && screen.listRows(screen.panelData).length === 0
+                    visible: screen.selEntry.kind === "list" && screen.logName === "" && screen.panelData !== null && screen.listRows(screen.panelData).length === 0
                     text: qsTr("Nothing here.")
                     color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
+                }
+
+                // --- log file viewer (Logs panel → View) ---
+                ColumnLayout {
+                    visible: screen.logName !== ""
+                    Layout.fillWidth: true; spacing: Theme.spacingSmall
+                    RowLayout {
+                        Layout.fillWidth: true
+                        DashButton { text: qsTr("← Back"); onClicked: { screen.logName = ""; screen.logContent = "" } }
+                        Text { text: screen.logName; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.fillWidth: true; leftPadding: Theme.spacing; verticalAlignment: Text.AlignVCenter; elide: Text.ElideMiddle }
+                        DashButton { text: qsTr("Copy"); onClicked: { logView.selectAll(); logView.copy(); logView.deselect() } }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true; Layout.preferredHeight: 520; radius: Theme.radius; color: Theme.background; border.color: Theme.divider; border.width: 1
+                        Flickable {
+                            anchors.fill: parent; anchors.margins: Theme.spacingSmall; clip: true
+                            contentWidth: logView.paintedWidth; contentHeight: logView.paintedHeight
+                            ScrollBar.vertical: ScrollBar {}
+                            ScrollBar.horizontal: ScrollBar {}
+                            TextEdit { id: logView; text: screen.logContent; readOnly: true; selectByMouse: true; color: Theme.textPrimary; font.family: "monospace"; font.pixelSize: Theme.fontTiny; wrapMode: TextEdit.NoWrap }
+                        }
+                    }
                 }
             }
         }
