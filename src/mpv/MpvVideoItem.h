@@ -81,6 +81,7 @@ class MpvVideoItem : public QQuickFramebufferObject
     Q_PROPERTY(int chapter READ chapter NOTIFY chapterChanged)
     Q_PROPERTY(double subDelay READ subDelay NOTIFY subDelayChanged)
     Q_PROPERTY(double audioDelay READ audioDelay NOTIFY audioDelayChanged)
+    Q_PROPERTY(QVariantList bufferedRanges READ bufferedRanges NOTIFY bufferedRangesChanged)
 
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
@@ -100,6 +101,7 @@ public:
     int chapter() const { return m_chapter; }
     double subDelay() const { return m_subDelay; }
     double audioDelay() const { return m_audioDelay; }
+    QVariantList bufferedRanges() const { return m_bufferedRanges; }
 
     // --- playback control ---
     Q_INVOKABLE void play(const QString &url);
@@ -134,6 +136,7 @@ Q_SIGNALS:
     void chapterChanged();
     void subDelayChanged();
     void audioDelayChanged();
+    void bufferedRangesChanged();
 
 private:
     static void onMpvWakeup(void *ctx); // called from an mpv-owned thread
@@ -142,6 +145,7 @@ private:
     void handlePropertyChange(mpv_event_property *prop);
     void updateTracks(const QVariantList &trackList);
     void updateChapters(const QVariantList &chapterList);
+    void updateBufferedRanges(const QVariantMap &cacheState);
 
     double m_position = 0.0;
     double m_duration = 0.0;
@@ -155,6 +159,7 @@ private:
     int m_chapter = -1;
     double m_subDelay = 0.0;
     double m_audioDelay = 0.0;
+    QVariantList m_bufferedRanges; // [{start,end}] seconds, from demuxer-cache-state
 
     std::shared_ptr<MpvHandle> m_mpv;
     std::shared_ptr<MpvRenderResources> m_resources;

@@ -276,6 +276,18 @@ Item {
                         height: 5
                         radius: 3
                         color: Theme.divider
+                        // buffered ranges (mpv cache), drawn under the progress fill
+                        Repeater {
+                            model: root.player.bufferedRanges
+                            Rectangle {
+                                visible: root.player.duration > 0
+                                height: parent.height
+                                radius: 3
+                                color: Theme.bufferedBar
+                                x: Math.max(0, (modelData.start / root.player.duration) * parent.width)
+                                width: Math.max(0, ((modelData.end - modelData.start) / root.player.duration) * parent.width)
+                            }
+                        }
                         Rectangle {
                             width: scrubber.visualPosition * parent.width
                             height: parent.height

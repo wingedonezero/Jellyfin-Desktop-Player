@@ -193,6 +193,7 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
     mpv_observe_property(handle, 0, "sub-delay", MPV_FORMAT_DOUBLE);
     mpv_observe_property(handle, 0, "audio-delay", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(handle, 0, "demuxer-cache-state", MPV_FORMAT_NODE);
 
     mpv_set_wakeup_callback(handle, onMpvWakeup, this);
 
@@ -413,6 +414,8 @@ void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
     } else if (name == "audio-delay" && prop->format == MPV_FORMAT_DOUBLE) {
         m_audioDelay = *static_cast<double *>(prop->data);
         Q_EMIT audioDelayChanged();
+    } else if (name == "demuxer-cache-state" && prop->format == MPV_FORMAT_NODE) {
+        updateBufferedRanges(nodeToVariant(static_cast<mpv_node *>(prop->data)).toMap());
     }
 }
 
@@ -428,6 +431,23 @@ void MpvVideoItem::updateChapters(const QVariantList &chapterList)
         m_chapters.append(chapter);
     }
     Q_EMIT chaptersChanged();
+}
+
+void MpvVideoItem::updateBufferedRanges(const QVariantMap &cacheState)
+{
+    QVariantList ranges;
+    const QVariantList seekable = cacheState.value(QStringLiteral("seekable-ranges")).toList();
+    for (const QVariant &rv : seekable) {
+        const QVariantMap r = rv.toMap();
+        ranges.append(QVariantMap{
+            {QStringLiteral("start"), r.value(QStringLiteral("start")).toDouble()},
+            {QStringLiteral("end"), r.value(QStringLiteral("end")).toDouble()}});
+    }
+    // demuxer-cache-state ticks often; only notify QML when the ranges change
+    if (ranges != m_bufferedRanges) {
+        m_bufferedRanges = ranges;
+        Q_EMIT bufferedRangesChanged();
+    }
 }
 
 void MpvVideoItem::updateTracks(const QVariantList &trackList)
