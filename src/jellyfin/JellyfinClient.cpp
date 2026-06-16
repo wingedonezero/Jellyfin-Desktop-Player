@@ -46,6 +46,10 @@ JellyfinClient::JellyfinClient(QObject *parent)
     , m_deviceId(makeDeviceId())
     , m_deviceName(QSysInfo::machineHostName())
 {
+    // Abort a request if no data transfers for 20s, instead of hanging forever
+    // and holding one of Qt's 6 per-host connection slots (which, once enough
+    // stall, starves every later request → blank admin panels).
+    m_net->setTransferTimeout(20000);
 }
 
 void JellyfinClient::setServerUrl(const QString &url)
@@ -142,14 +146,42 @@ void JellyfinClient::logout()
 
 void JellyfinClient::getJson(const QString &path, const QString &requestTag)
 {
+    getJsonAttempt(path, requestTag, 1); // one retry on transient failure
+}
+
+// A GET that emits jsonReady only on a genuinely valid response, and retries
+// once on a transient failure — a stalled/reset/half-closed keep-alive
+// connection can "finish" with NoError but an EMPTY body, which previously got
+// handed to QML as empty data (panels rendered blank). We treat empty/invalid
+// bodies as failures, retry once on a fresh connection, and never retry a real
+// client error (status >= 400). Every outcome is logged for diagnosis.
+void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft)
+{
     QNetworkReply *reply = get(path);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError err = reply->error();
+        const QVariant data = QJsonDocument::fromJson(body).toVariant();
+        if (err == QNetworkReply::NoError && data.isValid()) {
+            if (qEnvironmentVariableIsSet("JFD_NETLOG")) // opt-in full request trace
+                qInfo().noquote() << "[net] GET" << path << "->" << status << body.size() << "bytes ok";
+            Q_EMIT jsonReady(requestTag, data);
             return;
         }
-        Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(reply->readAll()).toVariant());
+        const bool willRetry = triesLeft > 0 && status < 400;
+        qWarning().noquote() << "[net] GET" << path << "status" << status
+                             << "err" << int(err) << reply->errorString()
+                             << "body" << body.size() << "bytes"
+                             << (willRetry ? "— retrying" : "— FAILED");
+        if (willRetry) {
+            getJsonAttempt(path, requestTag, triesLeft - 1);
+            return;
+        }
+        Q_EMIT errorOccurred(reply->errorString().isEmpty()
+                                 ? QStringLiteral("Empty/invalid response for %1 (HTTP %2)").arg(path).arg(status)
+                                 : reply->errorString());
     });
 }
 

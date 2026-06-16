@@ -154,6 +154,7 @@ private:
     QNetworkReply *post(const QString &pathWithQuery, const QByteArray &json) const;
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
+    void getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft);
     void saveSession() const;  // persist server+token to QSettings
     static QVariantList parseItems(const QByteArray &json);
     static QVariantMap parseItem(const QJsonObject &o);
