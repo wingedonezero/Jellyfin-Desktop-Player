@@ -35,6 +35,8 @@ Item {
     property var sugRecs: []   // movie recommendation categories [{title,items}]
     property var sugLatest: []
     property var sugNext: []
+    property var favItems: []
+    property var episodeItems: []
 
     property int tab: 0
     property string viewMode: "poster"  // poster | thumb | banner | list (per-library)
@@ -53,15 +55,16 @@ Item {
         if (filteredView) return []
         if (collectionType === "movies")
             return [{ label: qsTr("Movies"), kind: "items" }, { label: qsTr("Suggestions"), kind: "suggestions" },
-                    { label: qsTr("Collections"), kind: "collections" }, { label: qsTr("Genres"), kind: "genres" }]
+                    { label: qsTr("Favorites"), kind: "favorites" }, { label: qsTr("Collections"), kind: "collections" },
+                    { label: qsTr("Genres"), kind: "genres" }]
         if (collectionType === "tvshows")
             return [{ label: qsTr("Series"), kind: "items" }, { label: qsTr("Suggestions"), kind: "suggestions" },
                     { label: qsTr("Upcoming"), kind: "upcoming" }, { label: qsTr("Genres"), kind: "genres" },
-                    { label: qsTr("Networks"), kind: "networks" }]
+                    { label: qsTr("Networks"), kind: "networks" }, { label: qsTr("Episodes"), kind: "episodes" }]
         return [{ label: qsTr("Items"), kind: "items" }, { label: qsTr("Genres"), kind: "genres" }]
     }
     readonly property string curKind: filteredView ? "items" : (tabs[tab] ? tabs[tab].kind : "items")
-    readonly property var kindIndex: ({ items: 0, suggestions: 1, collections: 2, upcoming: 3, genres: 4, networks: 5 })
+    readonly property var kindIndex: ({ items: 0, suggestions: 1, collections: 2, upcoming: 3, genres: 4, networks: 5, favorites: 6, episodes: 7 })
 
     readonly property string itemsTag: "lib:items:" + parentId + ":" + genreId + ":" + studioId + ":" + (favorites ? "f" : "")
     readonly property var suggestions: {
@@ -82,6 +85,7 @@ Item {
             if (isNaN(pageSize) || pageSize < 0) pageSize = 100
         }
         reloadItems()
+        loadKind(curKind)  // load the initial tab's content if it isn't the items grid
     }
     function setViewMode(m) { viewMode = m; if (config) config.setValue("library/view/" + parentId, m) }
     // Compute the kind FRESH from the current tab — the curKind binding is still
@@ -115,6 +119,10 @@ Item {
             else client.fetchRecommendations(parentId, "lib:sugRecs:" + parentId)
             client.fetchLatest(parentId, "lib:sugLatest:" + parentId)
         }
+        else if (kind === "favorites" && favItems.length === 0)
+            client.fetchItems(parentId, "lib:fav:" + parentId, sortBy, sortOrder, "&Filters=IsFavorite&Recursive=true&IncludeItemTypes=Movie&Limit=300")
+        else if (kind === "episodes" && episodeItems.length === 0)
+            client.fetchItems(parentId, "lib:eps:" + parentId, sortBy, sortOrder, "&IncludeItemTypes=Episode&Recursive=true&Limit=300")
     }
     function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; startIndex = 0; reloadItems() }
     function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); startIndex = 0; reloadItems() }
@@ -140,6 +148,8 @@ Item {
             else if (tag === "lib:upcoming:" + screen.parentId) screen.upcoming = its
             else if (tag === "lib:sugLatest:" + screen.parentId) screen.sugLatest = its
             else if (tag === "lib:sugNext:" + screen.parentId) screen.sugNext = its
+            else if (tag === "lib:fav:" + screen.parentId) screen.favItems = its
+            else if (tag === "lib:eps:" + screen.parentId) screen.episodeItems = its
         }
         function onItemsPageReady(tag, its, total, start) {
             if (tag === screen.itemsTag) { screen.items = its; screen.totalCount = total }
@@ -477,6 +487,26 @@ Item {
             ChipGrid {
                 chips: screen.studios
                 onChosen: (s) => screen.openFiltered({ parentId: screen.parentId, collectionType: screen.collectionType, studioId: s.id, pageTitle: s.name })
+            }
+            // 6 favorites (movies)
+            ItemGrid {
+                gitems: screen.favItems
+                gshape: "poster"
+                onActivate: (it) => screen.itemActivated(it)
+                onOpenDetail: (it) => screen.itemOpenDetail(it)
+                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onAddCollection: (it) => screen.itemAddToCollection(it)
+                onCardAct: (verb, it) => screen.cardAction(verb, it)
+            }
+            // 7 episodes (tv)
+            ItemGrid {
+                gitems: screen.episodeItems
+                gshape: "thumb"
+                onActivate: (it) => screen.itemActivated(it)
+                onOpenDetail: (it) => screen.itemOpenDetail(it)
+                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onAddCollection: (it) => screen.itemAddToCollection(it)
+                onCardAct: (verb, it) => screen.cardAction(verb, it)
             }
         }
     }
