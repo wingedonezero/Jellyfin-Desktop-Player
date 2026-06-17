@@ -42,6 +42,8 @@ Item {
     property string sortOrder: "Ascending"
     property string playedFilter: "all" // all | unplayed | played | resumable
     property bool favFilter: false
+    property string nameStartsWith: ""  // alphabet picker (NameStartsWith)
+    readonly property var alphabet: ["✕","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
 
     readonly property bool filteredView: favorites || genreId !== "" || studioId !== ""
     readonly property var tabs: {
@@ -91,9 +93,9 @@ Item {
     function reloadItems() {
         if (!client) return
         if (favorites) { client.fetchFavorites(itemsTag); return }
-        if (genreId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart()); return }
-        if (studioId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart()); return }
-        if (parentId !== "") client.fetchItems(parentId, itemsTag, sortBy, sortOrder, filterPart())
+        if (genreId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart() + namePart()); return }
+        if (studioId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart() + namePart()); return }
+        if (parentId !== "") client.fetchItems(parentId, itemsTag, sortBy, sortOrder, filterPart() + namePart())
     }
     function loadKind(kind) {
         if (!client) return
@@ -107,7 +109,10 @@ Item {
             client.fetchLatest(parentId, "lib:sugLatest:" + parentId)
         }
     }
-    function setSort(s) { sortBy = s; reloadItems() }
+    function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; reloadItems() }
+    function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); reloadItems() }
+    function alphaSel(l) { return l === "✕" ? (nameStartsWith === "") : (nameStartsWith === l) }
+    function namePart() { return nameStartsWith !== "" ? ("&NameStartsWith=" + encodeURIComponent(nameStartsWith)) : "" }
 
     Connections {
         target: screen.client
@@ -273,11 +278,19 @@ Item {
                 DarkMenu {
                     id: sortMenu
                     DarkMenuItem { text: qsTr("Name"); onTriggered: screen.setSort("SortName") }
-                    DarkMenuItem { text: qsTr("Date added"); onTriggered: screen.setSort("DateCreated") }
-                    DarkMenuItem { text: qsTr("Release date"); onTriggered: screen.setSort("PremiereDate") }
-                    DarkMenuItem { text: qsTr("Community rating"); onTriggered: screen.setSort("CommunityRating") }
-                    DarkMenuItem { text: qsTr("Runtime"); onTriggered: screen.setSort("Runtime") }
+                    DarkMenuItem { text: qsTr("Community rating"); onTriggered: screen.setSort("CommunityRating,SortName") }
+                    DarkMenuItem { text: qsTr("Critic rating"); onTriggered: screen.setSort("CriticRating,SortName") }
+                    DarkMenuItem { text: qsTr("Date added"); onTriggered: screen.setSort("DateCreated,SortName") }
+                    DarkMenuItem { text: qsTr("Date played"); onTriggered: screen.setSort("DatePlayed,SortName") }
+                    DarkMenuItem { text: qsTr("Parental rating"); onTriggered: screen.setSort("OfficialRating,SortName") }
+                    DarkMenuItem { text: qsTr("Play count"); onTriggered: screen.setSort("PlayCount,SortName") }
+                    DarkMenuItem { text: qsTr("Release date"); onTriggered: screen.setSort("ProductionYear,PremiereDate,SortName") }
+                    DarkMenuItem { text: qsTr("Runtime"); onTriggered: screen.setSort("Runtime,SortName") }
                 }
+            }
+            JIconButton {
+                text: screen.sortOrder === "Ascending" ? "↑" : "↓"
+                onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.reloadItems() }
             }
             JIconButton {
                 id: filterBtn
@@ -332,8 +345,10 @@ Item {
             Item {
                 id: itemsPane
                 readonly property bool wide: screen.viewMode === "list" || screen.viewMode === "banner"
+                readonly property bool alphaOn: screen.curKind === "items" && screen.sortBy.indexOf("SortName") === 0
                 ItemGrid {
                     anchors.fill: parent
+                    anchors.rightMargin: itemsPane.alphaOn ? 22 : 0
                     visible: !itemsPane.wide
                     gitems: itemsPane.wide ? [] : screen.items
                     gshape: screen.viewMode === "thumb" ? "thumb" : "poster"
@@ -345,6 +360,7 @@ Item {
                 }
                 WideList {
                     anchors.fill: parent
+                    anchors.rightMargin: itemsPane.alphaOn ? 22 : 0
                     visible: itemsPane.wide
                     litems: itemsPane.wide ? screen.items : []
                     lmode: screen.viewMode === "banner" ? "banner" : "list"
@@ -353,6 +369,27 @@ Item {
                     onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
                     onAddCollection: (it) => screen.itemAddToCollection(it)
                     onCardAct: (verb, it) => screen.cardAction(verb, it)
+                }
+                // alphabet picker (NameStartsWith) — only when sorting by name
+                Column {
+                    visible: itemsPane.alphaOn
+                    anchors { right: parent.right; rightMargin: 3; verticalCenter: parent.verticalCenter }
+                    Repeater {
+                        model: screen.alphabet
+                        Item {
+                            id: al
+                            required property var modelData
+                            width: 16; height: 17
+                            Text {
+                                anchors.centerIn: parent
+                                text: al.modelData
+                                font.pixelSize: Theme.fontTiny
+                                font.bold: screen.alphaSel(al.modelData)
+                                color: screen.alphaSel(al.modelData) ? Theme.accent : Theme.textSecondary
+                            }
+                            TapHandler { onTapped: screen.setAlpha(al.modelData) }
+                        }
+                    }
                 }
             }
             // 1 suggestions (rows)
