@@ -37,6 +37,7 @@ Item {
     property var sugNext: []
     property var favItems: []
     property var episodeItems: []
+    property var genrePreview: ({})   // genreId → preview items (genres-tab rows)
 
     property int tab: 0
     property string viewMode: "poster"  // poster | thumb | banner | list (per-library)
@@ -180,6 +181,14 @@ Item {
         else if (kind === "episodes" && episodeItems.length === 0)
             client.fetchItems(parentId, "lib:eps:" + parentId, sortBy, sortOrder, "&IncludeItemTypes=Episode&Recursive=true&Limit=300")
     }
+    // jellyfin-web genres tab: one preview row per genre (Random sample, capped)
+    function loadGenrePreviews(list) {
+        if (!client) return
+        var inc = includeType() !== "" ? ("&IncludeItemTypes=" + includeType()) : ""
+        for (var i = 0; i < list.length; i++)
+            client.fetchItems(parentId, "lib:gpre:" + list[i].id, "Random", "Ascending",
+                              "&GenreIds=" + list[i].id + "&Recursive=true" + inc + "&Limit=12")
+    }
     function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; startIndex = 0; reloadItems() }
     function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); startIndex = 0; reloadItems() }
     function alphaSel(l) { return l === "✕" ? (nameStartsWith === "") : (nameStartsWith === l) }
@@ -198,7 +207,11 @@ Item {
         target: screen.client
         function onItemsReady(tag, its) {
             if (tag === screen.itemsTag) screen.items = its
-            else if (tag === "lib:genres:" + screen.parentId) screen.genres = its
+            else if (tag === "lib:genres:" + screen.parentId) { screen.genres = its; screen.loadGenrePreviews(its) }
+            else if (tag.indexOf("lib:gpre:") === 0) {
+                var gid = tag.substring(9)
+                var m = Object.assign({}, screen.genrePreview); m[gid] = its; screen.genrePreview = m
+            }
             else if (tag === "lib:studios:" + screen.parentId) screen.studios = its
             else if (tag === "lib:collections:" + screen.parentId) screen.collections = its
             else if (tag === "lib:upcoming:" + screen.parentId) screen.upcoming = its
@@ -526,10 +539,35 @@ Item {
                 onAddCollection: (it) => screen.itemAddToCollection(it)
                 onCardAct: (verb, it) => screen.cardAction(verb, it)
             }
-            // 4 genres
-            ChipGrid {
-                chips: screen.genres
-                onChosen: (g) => screen.openFiltered({ parentId: screen.parentId, collectionType: screen.collectionType, genreId: g.id, pageTitle: g.name })
+            // 4 genres — a preview row per genre (jellyfin-web genres tab)
+            Flickable {
+                contentWidth: width
+                contentHeight: genreCol.implicitHeight + Theme.spacingLarge
+                clip: true
+                ScrollBar.vertical: ScrollBar {}
+                ColumnLayout {
+                    id: genreCol
+                    width: parent.width
+                    y: Theme.spacing
+                    spacing: Theme.spacingLarge
+                    Repeater {
+                        model: screen.genres
+                        MediaRow {
+                            required property var modelData
+                            title: modelData.name
+                            titleLink: true
+                            model: screen.genrePreview[modelData.id] || []
+                            client: screen.client
+                            shape: "poster"
+                            onItemActivated: (it) => screen.itemActivated(it)
+                            onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                            onCardAction: (verb, it) => screen.cardAction(verb, it)
+                            onTitleClicked: screen.openFiltered({ parentId: screen.parentId, collectionType: screen.collectionType, genreId: modelData.id, pageTitle: modelData.name })
+                        }
+                    }
+                }
             }
             // 5 networks (studios)
             ChipGrid {
