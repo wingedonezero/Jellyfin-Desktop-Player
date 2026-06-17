@@ -417,18 +417,21 @@ void JellyfinClient::fetchResume(const QString &requestTag)
                  requestTag);
 }
 
-void JellyfinClient::fetchNextUp(const QString &requestTag)
+void JellyfinClient::fetchNextUp(const QString &requestTag, const QString &seriesId)
 {
-    // Honor the user's Display prefs (Settings → Display): cap how far back a
-    // show stays in Next Up, and optionally keep already-watched episodes.
-    // These live in the shared QSettings the QML AppConfig writes.
     const QSettings cfg;
     QString extra;
-    // web default = 365 days; an explicit 0 means "no limit".
-    const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 365).toInt();
-    if (maxDays > 0)
-        extra += QStringLiteral("&NextUpDateCutoff=%1")
-                     .arg(QDateTime::currentDateTimeUtc().addDays(-maxDays).toString(Qt::ISODate));
+    if (!seriesId.isEmpty()) {
+        // a series' own Next Up (detail row / series Play) — no date cutoff
+        extra += QStringLiteral("&SeriesId=%1").arg(seriesId);
+    } else {
+        // Home row: honor the user's Display prefs (Settings → Display) — cap how
+        // far back a show stays in Next Up. web default = 365 days; 0 = no limit.
+        const int maxDays = cfg.value(QStringLiteral("display/maxDaysNextUp"), 365).toInt();
+        if (maxDays > 0)
+            extra += QStringLiteral("&NextUpDateCutoff=%1")
+                         .arg(QDateTime::currentDateTimeUtc().addDays(-maxDays).toString(Qt::ISODate));
+    }
     if (cfg.value(QStringLiteral("display/rewatchingNextUp"), false).toBool())
         extra += QStringLiteral("&EnableRewatching=true");
 

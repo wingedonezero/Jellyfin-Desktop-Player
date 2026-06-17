@@ -53,7 +53,8 @@ public:
     // --- browse (each emits itemsReady with a requestTag to route the result) ---
     Q_INVOKABLE void fetchUserViews(const QString &requestTag = QStringLiteral("views"));
     Q_INVOKABLE void fetchResume(const QString &requestTag = QStringLiteral("resume"));
-    Q_INVOKABLE void fetchNextUp(const QString &requestTag = QStringLiteral("nextup"));
+    Q_INVOKABLE void fetchNextUp(const QString &requestTag = QStringLiteral("nextup"),
+                                 const QString &seriesId = QString());
     Q_INVOKABLE void fetchLatest(const QString &parentId,
                                  const QString &requestTag = QStringLiteral("latest"));
     Q_INVOKABLE void fetchItems(const QString &parentId,

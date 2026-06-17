@@ -196,6 +196,11 @@ Item {
         id: ctxMenu
         DarkMenuItem { text: qsTr("Play"); visible: card.playable; onTriggered: card.activated(card.item) }
         DarkMenuItem {
+            text: qsTr("Play from beginning")
+            visible: card.playable && card.item && (card.item.playbackTicks > 0)
+            onTriggered: { var it = Object.assign({}, card.item); it.playbackTicks = 0; card.activated(it) }
+        }
+        DarkMenuItem {
             text: (card.item && card.item.isFavorite) ? qsTr("Remove from favorites") : qsTr("Add to favorites")
             onTriggered: if (card.client) card.client.setFavorite(card.item.id, !(card.item.isFavorite === true))
         }

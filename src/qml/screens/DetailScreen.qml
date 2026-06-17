@@ -96,7 +96,11 @@ Item {
     }
     function playPrimary() {
         if (!detail) return
-        if (isSeries || isSeason) {
+        if (isSeries) {
+            // web: the series Play button starts at the global Next Up episode and
+            // queues the whole series from there (crosses seasons)
+            client.fetchNextUp("d:seriesplay:" + detail.id, detail.id)
+        } else if (isSeason) {
             if (episodes.length > 0) {
                 let ep = episodes[0]
                 for (let i = 0; i < episodes.length; ++i)
@@ -108,6 +112,27 @@ Item {
         } else {
             screen.play(detail)
         }
+    }
+    function shuffle() {
+        if (!detail) return
+        if (isSeries) client.fetchEpisodes(detail.id, "", "d:shuffle:" + detail.id) // whole series
+        else if (isSeason) playShuffled(episodes)
+        else if (isBoxSet) playShuffled(playableChildren)
+    }
+    function playShuffled(list) {
+        if (!list || list.length === 0) return
+        var a = list.slice()
+        for (var i = a.length - 1; i > 0; --i) { // Fisher–Yates
+            var j = Math.floor(Math.random() * (i + 1))
+            var t = a[i]; a[i] = a[j]; a[j] = t
+        }
+        screen.playQueue(a, 0)
+    }
+    // play an item ignoring its saved resume position (web's "Play from beginning")
+    function playFromStart(item) {
+        var it = Object.assign({}, item)
+        it.playbackTicks = 0
+        screen.play(it)
     }
     function fmtRuntime(ticks) {
         const m = Math.round((ticks || 0) / 600000000)
@@ -168,6 +193,11 @@ Item {
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
                 if (items.length > 0) screen.selectSeason(items[0])
+            } else if (screen.detail && tag === "d:seriesplay:" + screen.detail.id) {
+                if (items.length > 0) screen.play(items[0])              // → auto-queues the series
+                else if (screen.episodes.length > 0) screen.playEpisode(screen.episodes[0]) // all watched → rewatch
+            } else if (screen.detail && tag === "d:shuffle:" + screen.detail.id) {
+                screen.playShuffled(items)
             } else if (tag.indexOf("d:episodes:") === 0) {
                 screen.episodes = items
             } else if (tag === "d:children:" + screen.itemId) {
@@ -392,6 +422,19 @@ Item {
                                 enabled: (screen.isSeries || screen.isSeason) ? screen.episodes.length > 0
                                          : screen.isBoxSet ? screen.playableChildren.length > 0 : true
                                 onClicked: screen.playPrimary()
+                            }
+                            JIconButton {
+                                text: "↺"  // play from beginning (web's replay), only when resumable
+                                visible: screen.isPlayableLeaf && screen.detail && screen.detail.playbackTicks > 0
+                                onClicked: screen.playFromStart(screen.detail)
+                            }
+                            JIconButton {
+                                text: "⇄"  // shuffle (series / season / collection)
+                                visible: screen.isSeries || screen.isSeason || screen.isBoxSet
+                                enabled: screen.isSeries ? screen.seasons.length > 0
+                                         : screen.isSeason ? screen.episodes.length > 0
+                                         : screen.playableChildren.length > 0
+                                onClicked: screen.shuffle()
                             }
                             JIconButton {
                                 text: screen.favorite ? "♥" : "♡"
