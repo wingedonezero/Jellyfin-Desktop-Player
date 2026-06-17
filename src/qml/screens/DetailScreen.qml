@@ -185,6 +185,17 @@ Item {
         var p = (n) => (n < 10 ? "0" + n : "" + n)
         return (h > 0 ? h + ":" + p(m) : "" + m) + ":" + p(sec)
     }
+    readonly property bool hasLogo: !!(detail && detail.logoTag && detail.logoTag.length > 0)
+    property bool overviewExpanded: false
+    function peopleByType(t) {
+        var pp = (detail && detail.people) ? detail.people : []
+        return pp.filter(p => p.type === t)
+    }
+    function fmtDate(iso) {
+        if (!iso) return ""
+        var d = new Date(iso)
+        return isNaN(d.getTime()) ? "" : d.toLocaleDateString(Qt.locale(), Locale.LongFormat)
+    }
     readonly property bool hasLinks: !!(detail && detail.externalUrls && detail.externalUrls.length > 0)
 
     Connections {
@@ -195,6 +206,7 @@ Item {
                 screen.favorite = screen.detail.isFavorite === true
                 screen.played = screen.detail.played === true
                 screen.cast = screen.detail.people || []
+                screen.overviewExpanded = false
                 if (screen.isPerson) {
                     screen.client.fetchByPerson(screen.detail.id, "d:filmography:" + screen.itemId)
                 } else {
@@ -464,7 +476,20 @@ Item {
                                 color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                             }
                         }
+                        // logo image (replaces the text title when present, like web)
+                        Image {
+                            visible: screen.hasLogo
+                            source: screen.hasLogo
+                                    ? screen.client.imageUrl(screen.detail.id, "Logo", 160, screen.detail.logoTag) : ""
+                            fillMode: Image.PreserveAspectFit
+                            horizontalAlignment: Image.AlignLeft
+                            Layout.preferredHeight: 72
+                            Layout.maximumWidth: 380
+                            Layout.fillWidth: true
+                            asynchronous: true; cache: true
+                        }
                         Text {
+                            visible: !screen.hasLogo
                             text: screen.detail ? (screen.detail.name || "") : ""
                             color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true
                             elide: Text.ElideRight; Layout.fillWidth: true
@@ -479,12 +504,49 @@ Item {
                                 Text { text: screen.detail ? (Math.round(screen.detail.communityRating * 10) / 10) : ""
                                        color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
                             }
+                            // critic rating (Rotten Tomatoes %), fresh/rotten coloured
+                            Text {
+                                visible: screen.detail && screen.detail.criticRating > 0
+                                text: Math.round(screen.detail ? screen.detail.criticRating : 0) + "% " + qsTr("critics")
+                                color: (screen.detail && screen.detail.criticRating >= 60) ? Theme.watched : Theme.error
+                                font.pixelSize: Theme.fontNormal
+                            }
                         }
                         Text {
                             text: (screen.detail && screen.detail.genres) ? screen.detail.genres.join(", ") : ""
                             visible: text.length > 0
                             color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
                             elide: Text.ElideRight; Layout.fillWidth: true
+                        }
+                        // director / writer rows
+                        Repeater {
+                            model: [{ label: qsTr("Director"), people: screen.peopleByType("Director") },
+                                    { label: qsTr("Writer"),   people: screen.peopleByType("Writer") }]
+                                   .filter(r => r.people.length > 0)
+                            RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSmall
+                                Text { text: modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                                Text { text: modelData.people.map(p => p.name).join(", "); color: Theme.textPrimary
+                                       font.pixelSize: Theme.fontSmall; elide: Text.ElideRight; Layout.fillWidth: true }
+                            }
+                        }
+                        // person: born / died / birthplace
+                        Repeater {
+                            model: !screen.isPerson ? [] :
+                                   [{ label: qsTr("Born"),       value: screen.fmtDate(screen.detail.premiereDate) },
+                                    { label: qsTr("Died"),       value: screen.fmtDate(screen.detail.endDate) },
+                                    { label: qsTr("Birthplace"), value: (screen.detail.productionLocations || []).join(", ") }]
+                                   .filter(r => r.value && r.value.length > 0)
+                            RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSmall
+                                Text { text: modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 90 }
+                                Text { text: modelData.value; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                       elide: Text.ElideRight; Layout.fillWidth: true }
+                            }
                         }
 
                         RowLayout {
@@ -563,10 +625,38 @@ Item {
                     wrapMode: Text.Wrap; Layout.fillWidth: true
                 }
                 Text {
+                    id: overviewText
                     text: (screen.detail && screen.detail.overview) ? screen.detail.overview : ""
                     visible: text.length > 0
                     color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
                     wrapMode: Text.Wrap; Layout.fillWidth: true; lineHeight: 1.25
+                    maximumLineCount: screen.overviewExpanded ? 10000 : 4
+                    elide: Text.ElideRight
+                }
+                Text { // Show more / Show less (only when the overview overflows)
+                    visible: overviewText.visible && (overviewText.truncated || screen.overviewExpanded)
+                    text: screen.overviewExpanded ? qsTr("Show less") : qsTr("Show more")
+                    color: showMoreHover.hovered ? Theme.accentHover : Theme.accent
+                    font.pixelSize: Theme.fontSmall
+                    HoverHandler { id: showMoreHover }
+                    TapHandler { onTapped: screen.overviewExpanded = !screen.overviewExpanded }
+                }
+                // tags
+                Flow {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Theme.spacingSmall
+                    spacing: Theme.spacingSmall
+                    visible: screen.detail && screen.detail.tags && screen.detail.tags.length > 0
+                    Repeater {
+                        model: screen.detail ? (screen.detail.tags || []) : []
+                        Rectangle {
+                            required property var modelData
+                            implicitWidth: tgt.implicitWidth + 16; implicitHeight: 26; radius: 13
+                            color: Theme.surface; border.color: Theme.divider; border.width: 1
+                            Text { id: tgt; anchors.centerIn: parent; text: modelData
+                                   color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        }
+                    }
                 }
             }
 

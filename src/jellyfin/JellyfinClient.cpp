@@ -27,7 +27,8 @@ const QString kImageTypes = QStringLiteral("EnableImageTypes=Primary,Thumb,Backd
 // Fuller field set for a single detail page (cast, studios, tagline, etc.).
 const QString kDetailFields = QStringLiteral(
     "Fields=Overview,Genres,People,Studios,Taglines,RunTimeTicks,ProductionYear,"
-    "CommunityRating,OfficialRating,SeriesName,MediaSources,ExternalUrls");
+    "CommunityRating,CriticRating,OfficialRating,SeriesName,MediaSources,ExternalUrls,"
+    "Tags,ProductionLocations,PremiereDate");
 
 // A stable per-machine device id so the server recognises this client across runs.
 QString makeDeviceId()
@@ -699,7 +700,10 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     m[QStringLiteral("productionYear")] = o.value(QStringLiteral("ProductionYear")).toInt();
     m[QStringLiteral("runTimeTicks")] = o.value(QStringLiteral("RunTimeTicks")).toDouble();
     m[QStringLiteral("communityRating")] = o.value(QStringLiteral("CommunityRating")).toDouble();
+    m[QStringLiteral("criticRating")] = o.value(QStringLiteral("CriticRating")).toDouble();
     m[QStringLiteral("officialRating")] = o.value(QStringLiteral("OfficialRating")).toString();
+    m[QStringLiteral("premiereDate")] = o.value(QStringLiteral("PremiereDate")).toString(); // person birthday too
+    m[QStringLiteral("endDate")] = o.value(QStringLiteral("EndDate")).toString();           // person death too
     m[QStringLiteral("seriesName")] = o.value(QStringLiteral("SeriesName")).toString();
     m[QStringLiteral("seriesId")] = o.value(QStringLiteral("SeriesId")).toString();
     m[QStringLiteral("seasonId")] = o.value(QStringLiteral("SeasonId")).toString();
@@ -713,6 +717,7 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     const QJsonObject tags = o.value(QStringLiteral("ImageTags")).toObject();
     m[QStringLiteral("imageTag")] = tags.value(QStringLiteral("Primary")).toString();
     m[QStringLiteral("imageTagThumb")] = tags.value(QStringLiteral("Thumb")).toString();
+    m[QStringLiteral("logoTag")] = tags.value(QStringLiteral("Logo")).toString();
     m[QStringLiteral("hasBackdrop")] = !o.value(QStringLiteral("BackdropImageTags")).toArray().isEmpty();
 
     // genres
@@ -723,6 +728,13 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     }
     m[QStringLiteral("genres")] = genres;
 
+    // tags (detail)
+    QVariantList tagList;
+    const QJsonArray tagArr = o.value(QStringLiteral("Tags")).toArray();
+    for (const QJsonValue &t : tagArr)
+        tagList.append(t.toString());
+    m[QStringLiteral("tags")] = tagList;
+
     // studios + tagline (detail)
     QVariantList studios;
     const QJsonArray studioArr = o.value(QStringLiteral("Studios")).toArray();
@@ -730,6 +742,11 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
         studios.append(s.toObject().value(QStringLiteral("Name")).toString());
     }
     m[QStringLiteral("studios")] = studios;
+    QVariantList prodLocs;
+    const QJsonArray plArr = o.value(QStringLiteral("ProductionLocations")).toArray();
+    for (const QJsonValue &p : plArr)
+        prodLocs.append(p.toString());
+    m[QStringLiteral("productionLocations")] = prodLocs;
     const QJsonArray taglines = o.value(QStringLiteral("Taglines")).toArray();
     m[QStringLiteral("tagline")] = taglines.isEmpty() ? QString() : taglines.first().toString();
 
