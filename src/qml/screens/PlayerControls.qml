@@ -12,12 +12,17 @@ import JellyfinDesktop
 Item {
     id: root
     required property var player
+    property var client: null            // for building trickplay tile URLs
+    property var trickInfo: null         // selected trickplay resolution info, or null
+    property string trickItemId: ""      // item id for the trickplay sheet URL
+    property alias scrubberHovered: scrubHover.hovered
     property string title: ""
     property bool favorite: false
     property int repeatMode: 0 // 0 none, 1 one, 2 all
     property int maxBitrate: 0 // 0 = Auto (direct play)
     property int skipBack: 10
     property int skipForward: 30
+    property bool showRemaining: false // duration label shows -remaining instead of total
 
     signal back()
     signal toggleFullscreen()
@@ -26,6 +31,7 @@ Item {
     signal next()
     signal cycleRepeat()
     signal setQuality(int bitrate)
+    signal toggleRemaining()
 
     // Local skin state (the mpv side is authoritative for speed/delays).
     property string aspectMode: "Auto"
@@ -53,6 +59,22 @@ Item {
         const remain = Math.max(0, root.player.duration - root.player.position)
                        / Math.max(0.01, root.player.speed)
         return Qt.formatTime(new Date(Date.now() + remain * 1000), "h:mm AP")
+    }
+    // Chapter navigation (web's btnPreviousChapter/btnNextChapter). Previous
+    // restarts the current chapter if we're well into it, else steps back.
+    function prevChapter() {
+        const ch = root.player.chapters
+        if (!ch || ch.length === 0) return
+        const cur = root.player.chapter
+        if (cur >= 0 && cur < ch.length && (root.player.position - ch[cur].time) > 5)
+            root.player.setChapter(cur)
+        else
+            root.player.setChapter(Math.max(0, cur - 1))
+    }
+    function nextChapter() {
+        const ch = root.player.chapters
+        if (!ch || ch.length === 0) return
+        root.player.setChapter(Math.min(ch.length - 1, root.player.chapter + 1))
     }
     function applyAspect(mode) {
         root.aspectMode = mode
@@ -244,6 +266,9 @@ Item {
                     to: Math.max(1, root.player.duration)
                     property bool seeking: false
 
+                    // passive hover tracking for the trickplay/time preview bubble
+                    HoverHandler { id: scrubHover; enabled: root.player.duration > 0 }
+
                     background: Rectangle {
                         x: scrubber.leftPadding
                         y: scrubber.topPadding + scrubber.availableHeight / 2 - height / 2
@@ -251,6 +276,18 @@ Item {
                         height: 5
                         radius: 3
                         color: Theme.divider
+                        // buffered ranges (mpv cache), drawn under the progress fill
+                        Repeater {
+                            model: root.player.bufferedRanges
+                            Rectangle {
+                                visible: root.player.duration > 0
+                                height: parent.height
+                                radius: 3
+                                color: Theme.bufferedBar
+                                x: Math.max(0, (modelData.start / root.player.duration) * parent.width)
+                                width: Math.max(0, ((modelData.end - modelData.start) / root.player.duration) * parent.width)
+                            }
+                        }
                         Rectangle {
                             width: scrubber.visualPosition * parent.width
                             height: parent.height
@@ -299,7 +336,22 @@ Item {
                     }
                 }
 
-                Label { text: root.fmt(root.player.duration); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                // total duration, or -remaining; click to toggle (web parity)
+                Label {
+                    id: durationLabel
+                    text: root.showRemaining
+                          ? "-" + root.fmt(Math.max(0, root.player.duration - root.player.position))
+                          : root.fmt(root.player.duration)
+                    color: durMa.containsMouse ? Theme.accent : Theme.textPrimary
+                    font.pixelSize: Theme.fontSmall
+                    MouseArea {
+                        id: durMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggleRemaining()
+                    }
+                }
             }
 
             // --- control row ---
@@ -308,6 +360,11 @@ Item {
                 spacing: Theme.spacingTiny
 
                 IconButton { text: "⏮"; enabled: Features.playQueue; onClicked: root.previous() } // ⏮ previous
+                IconButton { // ⇤ previous chapter (only with chapters)
+                    text: "⇤"
+                    visible: root.player.chapters.length > 0
+                    onClicked: root.prevChapter()
+                }
                 IconButton { text: "⏪"; onClicked: root.player.skip(-root.skipBack) }  // ⏪ skip back
                 IconButton {
                     text: root.player.paused ? "▶" : "⏸"                          // ▶ / ⏸
@@ -315,6 +372,11 @@ Item {
                     onClicked: root.player.setPaused(!root.player.paused)
                 }
                 IconButton { text: "⏩"; onClicked: root.player.skip(root.skipForward) } // ⏩ skip forward
+                IconButton { // ⇥ next chapter (only with chapters)
+                    text: "⇥"
+                    visible: root.player.chapters.length > 0
+                    onClicked: root.nextChapter()
+                }
                 IconButton { text: "⏭"; enabled: Features.playQueue; onClicked: root.next() } // ⏭ next
 
                 Label {
@@ -332,6 +394,31 @@ Item {
                     text: root.favorite ? "♥" : "♡"                               // ♥ / ♡
                     fg: root.favorite ? Theme.accent : Theme.textPrimary
                     onClicked: root.toggleFavorite()
+                }
+
+                // chapter / scenes jump menu (only when the file has chapters)
+                IconButton {
+                    text: "☰"
+                    font.pixelSize: Theme.fontMedium
+                    visible: root.player.chapters.length > 0
+                    onClicked: chapterMenu.popup()
+                    DarkMenu {
+                        id: chapterMenu
+                        implicitWidth: 300
+                        Instantiator {
+                            model: root.player.chapters
+                            delegate: DarkMenuItem {
+                                required property var modelData
+                                required property int index
+                                text: root.fmt(modelData.time) + "   "
+                                      + (modelData.title && modelData.title.length
+                                         ? modelData.title : qsTr("Chapter %1").arg(index + 1))
+                                onTriggered: root.player.setChapter(index)
+                            }
+                            onObjectAdded: (index, object) => chapterMenu.insertItem(index, object)
+                            onObjectRemoved: (index, object) => chapterMenu.removeItem(object)
+                        }
+                    }
                 }
 
                 // subtitle track menu
@@ -559,6 +646,94 @@ Item {
                 }
 
                 IconButton { text: "⛶"; onClicked: root.toggleFullscreen() } // ⛶
+            }
+        }
+    }
+
+    // ---- trickplay / time hover bubble -----------------------------------
+    // Mirrors web's updateTrickplayBubbleHtml: clip one thumbnail out of the
+    // tiled sheet for the hovered time, plus the running-time (and chapter name).
+    Item {
+        id: trickBubble
+        readonly property var info: root.trickInfo
+        readonly property real frac: Math.max(0, Math.min(1,
+            (scrubHover.point.position.x - scrubber.leftPadding) / Math.max(1, scrubber.availableWidth)))
+        readonly property real hoverSec: frac * root.player.duration
+        readonly property int curTile: info ? Math.floor((hoverSec * 1000) / Math.max(1, info.Interval)) : 0
+        readonly property int tileSz: info ? Math.max(1, info.TileWidth * info.TileHeight) : 1
+        readonly property int tileIndex: Math.floor(curTile / tileSz)
+        readonly property int tileOff: curTile % tileSz
+        readonly property int offX: info ? (tileOff % info.TileWidth) : 0
+        readonly property int offY: info ? Math.floor(tileOff / info.TileWidth) : 0
+
+        // current chapter name for the hovered time (from mpv's chapter list)
+        function chapterName(sec) {
+            var name = ""
+            var ch = root.player.chapters
+            for (var i = 0; i < ch.length; ++i) {
+                if (sec < ch[i].time) break
+                name = ch[i].title || ""
+            }
+            return name
+        }
+
+        visible: scrubHover.hovered && root.player.duration > 0
+        z: 50
+        width: contentCol.implicitWidth + 12
+        height: contentCol.implicitHeight + 10
+        x: {
+            var p = scrubber.mapToItem(root, scrubHover.point.position.x, 0)
+            return Math.max(8, Math.min(root.width - width - 8, p.x - width / 2))
+        }
+        y: scrubber.mapToItem(root, 0, 0).y - height - 10
+
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.surface
+            radius: Theme.radius
+            border.color: Theme.divider
+            border.width: 1
+        }
+        Column {
+            id: contentCol
+            anchors.centerIn: parent
+            spacing: 4
+            Rectangle { // thumbnail frame (clipped sub-image of the tile sheet)
+                visible: thumb.status === Image.Ready && trickBubble.info !== null
+                width: trickBubble.info ? trickBubble.info.Width : 0
+                height: trickBubble.info ? trickBubble.info.Height : 0
+                color: "black"
+                radius: 2
+                clip: true
+                Image {
+                    id: thumb
+                    anchors.fill: parent
+                    asynchronous: true
+                    cache: true
+                    source: (root.client && trickBubble.info && root.trickItemId.length)
+                            ? root.client.trickplayUrl(root.trickItemId, trickBubble.info.Width, trickBubble.tileIndex)
+                            : ""
+                    sourceClipRect: trickBubble.info
+                        ? Qt.rect(trickBubble.offX * trickBubble.info.Width,
+                                  trickBubble.offY * trickBubble.info.Height,
+                                  trickBubble.info.Width, trickBubble.info.Height)
+                        : Qt.rect(0, 0, 0, 0)
+                }
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: text.length > 0
+                text: trickBubble.chapterName(trickBubble.hoverSec)
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: root.fmt(trickBubble.hoverSec)
+                color: Theme.textPrimary
+                font.pixelSize: Theme.fontSmall
+                font.bold: true
             }
         }
     }

@@ -53,7 +53,8 @@ public:
     // --- browse (each emits itemsReady with a requestTag to route the result) ---
     Q_INVOKABLE void fetchUserViews(const QString &requestTag = QStringLiteral("views"));
     Q_INVOKABLE void fetchResume(const QString &requestTag = QStringLiteral("resume"));
-    Q_INVOKABLE void fetchNextUp(const QString &requestTag = QStringLiteral("nextup"));
+    Q_INVOKABLE void fetchNextUp(const QString &requestTag = QStringLiteral("nextup"),
+                                 const QString &seriesId = QString());
     Q_INVOKABLE void fetchLatest(const QString &parentId,
                                  const QString &requestTag = QStringLiteral("latest"));
     Q_INVOKABLE void fetchItems(const QString &parentId,
@@ -66,7 +67,8 @@ public:
     Q_INVOKABLE void fetchSeasons(const QString &seriesId,
                                   const QString &requestTag = QStringLiteral("seasons"));
     Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId,
-                                   const QString &requestTag = QStringLiteral("episodes"));
+                                   const QString &requestTag = QStringLiteral("episodes"),
+                                   const QString &startItemId = QString());
     Q_INVOKABLE void fetchSimilar(const QString &itemId,
                                   const QString &requestTag = QStringLiteral("similar"));
     Q_INVOKABLE void fetchFavorites(const QString &requestTag = QStringLiteral("favorites"));
@@ -88,14 +90,22 @@ public:
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,
                               const QString &imageType = QStringLiteral("Primary"),
                               int maxHeight = 0,
-                              const QString &tag = QString()) const;
-    Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
+                              const QString &tag = QString(),
+                              int index = -1) const; // index >= 0 for Chapter images
+    Q_INVOKABLE QUrl streamUrl(const QString &itemId, const QString &sourceId = QString()) const;
+    // One trickplay tile sheet (a grid of thumbnails) at the given resolution width.
+    Q_INVOKABLE QUrl trickplayUrl(const QString &itemId, int width, int index) const;
+    // Media segments (intro/outro/recap/preview/commercial) for skip prompts.
+    // includeTypes = comma-separated MediaSegmentType names. Emits mediaSegmentsReady.
+    Q_INVOKABLE void fetchMediaSegments(const QString &itemId, const QString &includeTypes);
 
     // Resolve a playable URL via /Items/{id}/PlaybackInfo: direct-play when the
     // source fits (maxBitrate <= 0 = Auto), otherwise an HLS transcode URL.
     // Emits streamReady(requestTag, {url, isTranscode, playSessionId}).
     Q_INVOKABLE void requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
-                                   const QString &requestTag = QStringLiteral("stream"));
+                                   const QString &requestTag = QStringLiteral("stream"),
+                                   int audioStreamIndex = -1, int subtitleStreamIndex = -1,
+                                   const QString &mediaSourceId = QString());
 
     // --- playback progress reporting ---
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId);
@@ -132,6 +142,7 @@ public:
     Q_INVOKABLE void revokeApiKey(const QString &accessToken);
     Q_INVOKABLE void updateTaskTriggers(const QString &taskId, const QVariantList &triggers);
     Q_INVOKABLE void refreshItem(const QString &itemId);
+    Q_INVOKABLE void deleteItem(const QString &itemId); // DELETE /Items/{id}
     Q_INVOKABLE void setPluginEnabled(const QString &pluginId, const QString &version, bool enabled);
     Q_INVOKABLE void uninstallPlugin(const QString &pluginId, const QString &version);
     Q_INVOKABLE void installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl);
@@ -163,6 +174,7 @@ Q_SIGNALS:
     void authenticatedChanged();
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
+    void mediaSegmentsReady(const QString &itemId, const QVariantList &segments);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);
     void textReady(const QString &requestTag, const QString &content);

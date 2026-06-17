@@ -33,6 +33,7 @@ QtObject {
     readonly property color overlayStrong: "#cc000000" // play buttons / row arrows
     readonly property color overlayMedium: "#80000000" // progress track behind a bar
     readonly property color tickMark:      "#ccffffff" // chapter ticks on the scrubber
+    readonly property color bufferedBar:   "#59ffffff" // buffered range on the scrubber
     readonly property color statsBg:       "#e6202124" // playback-info overlay panel
     readonly property color error:         "#ff5252"   // login / form errors
     readonly property color transparent:   "#00000000"

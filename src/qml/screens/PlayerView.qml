@@ -13,7 +13,17 @@ Item {
     property alias playing: player.playing
     property bool osdVisible: true
     property var currentItem: ({})
+    property var playerItem: ({})  // full item (trickplay/chapters), fetched on play
     property bool favorite: false
+
+    // media segments (intro/outro/...) + the per-type skip action map
+    property var segments: []
+    property var segActions: ({})
+    property var currentSkipSegment: null  // the AskToSkip segment to prompt for, or null
+
+    // up-next overlay card (episodes, near the end, when there's a next item)
+    property bool upNextVisible: false
+    property bool upNextDismissed: false
 
     // play queue
     property var queue: []
@@ -23,21 +33,67 @@ Item {
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
+    property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
+    // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
+    property int _pendingAudioIndex: -999
+    property int _pendingSubIndex: -999
+    property string _pendingSourceId: ""
+    property bool _tracksApplied: false
 
     Component.onCompleted: if (config) {
         maxBitrate = config.value("playback/maxBitrate", 0)
         autoPlayNext = config.value("playback/autoPlayNext", true)
         skipBack = config.value("playback/skipBack", 10)
         skipForward = config.value("playback/skipForward", 30)
+        var rt = config.value("playback/remainingTime", false)
+        showRemaining = (rt === true || rt === "true" || rt === 1 || rt === "1")
     }
 
-    function playItem(item) { playQueue([item], 0) }
+    function playItem(item) {
+        playQueue([item], 0)
+        // Web parity: playing a single episode queues the rest of the series from
+        // here (startItemId), so auto-play-next / up-next / prev-next work from
+        // Next Up, Continue Watching, search and cards — not just a season's Play.
+        if (item && item.type === "Episode" && item.seriesId)
+            client.fetchEpisodes(item.seriesId, "", "player:autoqueue", item.id)
+    }
+
+    // Compose the OSD title the way jellyfin-web does (itemHelper.getDisplayName
+    // + setTitle): episodes as "Series - Sxx:Exx - Episode", movies with a year.
+    function composeTitle(it) {
+        if (!it || !it.name) return ""
+        if (it.type === "Episode") {
+            var num = ""
+            // specials (season 0) get no Sxx:Exx prefix, matching web
+            if (it.parentIndexNumber !== undefined && it.parentIndexNumber !== 0
+                    && it.indexNumber !== undefined)
+                num = "S" + it.parentIndexNumber + ":E" + it.indexNumber
+            var base = num ? (it.name ? num + " - " + it.name : num) : it.name
+            return it.seriesName ? (it.seriesName + " - " + base) : base
+        }
+        if (it.type === "Movie" && it.productionYear)
+            return it.name + " (" + it.productionYear + ")"
+        return it.name
+    }
 
     function playQueue(items, index) {
         root.queue = items
         root.queueIndex = index
         _startCurrent()
+    }
+
+    // card menu "Add to queue" / "Play next" — append/insert into the live queue;
+    // if nothing is playing yet, just start the item.
+    function enqueue(item) {
+        if (!player.playing) { playItem(item); return }
+        root.queue = root.queue.concat([item])
+    }
+    function playNextInsert(item) {
+        if (!player.playing) { playItem(item); return }
+        var q = root.queue.slice()
+        q.splice(root.queueIndex + 1, 0, item)
+        root.queue = q
     }
 
     function _startCurrent() {
@@ -48,12 +104,33 @@ Item {
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.currentId = item.id
         root.currentItem = item
+        root.playerItem = item   // queue item may lack trickplay; enriched by the fetch below
         root.favorite = (item.isFavorite === true)
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         showOsd()
+        // detail-page version / default-track selections (carried on the item)
+        root._pendingSourceId = item.mediaSourceId || ""
+        root._pendingAudioIndex = (item.audioStreamIndex === undefined || item.audioStreamIndex === null) ? -999 : item.audioStreamIndex
+        root._pendingSubIndex = (item.subtitleStreamIndex === undefined || item.subtitleStreamIndex === null) ? -999 : item.subtitleStreamIndex
+        root._tracksApplied = false
         // resolve direct-play vs transcode first; onStreamReady actually loads it
-        client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
+                             root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
+                             root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
+                             root._pendingSourceId)
+        // fetch the full item so the OSD has trickplay sheets (the resume/episode
+        // list items don't carry them); merged in onItemsReady below
+        client.fetchItem(item.id, "player:item")
+        // up-next card resets per item
+        root.upNextVisible = false
+        root.upNextDismissed = false
+        // media segments: load the per-type actions, reset, fetch enabled types
+        root.segActions = root._loadSegActions()
+        root.segments = []
+        root.currentSkipSegment = null
+        var segTypes = root._enabledSegTypes()
+        if (segTypes.length > 0) client.fetchMediaSegments(item.id, segTypes.join(","))
         console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", root._resumeSeconds)
     }
 
@@ -62,7 +139,30 @@ Item {
     function reloadAtPosition() {
         if (player.currentId.length === 0) return
         root._resumeSeconds = player.position
-        client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        root._tracksApplied = false
+        client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
+                             root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
+                             root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
+                             root._pendingSourceId)
+    }
+    // Apply detail-page audio/subtitle selection to the loaded file (direct play):
+    // match the chosen Jellyfin stream index to the mpv track via its ffmpeg index.
+    // On a transcode the indices won't match (server already baked them) → no-op.
+    function _applyPendingTracks() {
+        if (root._tracksApplied) return
+        if (root._pendingAudioIndex >= 0) {
+            var a = player.audioTracks
+            for (var i = 0; i < a.length; ++i)
+                if (a[i].ffIndex === root._pendingAudioIndex) { player.setAudioTrack(a[i].id); break }
+        }
+        if (root._pendingSubIndex >= 0) {
+            var s = player.subtitleTracks
+            for (var j = 0; j < s.length; ++j)
+                if (s[j].ffIndex === root._pendingSubIndex) { player.setSubtitleTrack(s[j].id); break }
+        } else if (root._pendingSubIndex === -1) {
+            player.setSubtitleTrack(-1) // explicit "off"
+        }
+        root._tracksApplied = true
     }
     function setQuality(bitrate) {
         if (root.maxBitrate === bitrate) return
@@ -79,6 +179,121 @@ Item {
             client.reportPlaybackStart(player.currentId)
             console.log("[jf] stream", info.isTranscode ? "transcode" : "direct")
         }
+        function onItemsReady(tag, items) {
+            if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)
+                root.playerItem = items[0]
+            else if (tag === "player:autoqueue" && items.length > 1 && root.queue.length === 1) {
+                // adopt the series queue only if we're still on the single item we launched
+                var idx = -1
+                for (var i = 0; i < items.length; ++i)
+                    if (items[i].id === player.currentId) { idx = i; break }
+                if (idx >= 0) { root.queue = items; root.queueIndex = idx }
+            }
+        }
+        function onMediaSegmentsReady(itemId, segs) {
+            if (itemId === player.currentId) root.segments = segs
+        }
+    }
+
+    // Pick the trickplay resolution the way jellyfin-web does: the highest width
+    // that is still <= 20% of the screen width. Returns the info object
+    // {Width,Height,TileWidth,TileHeight,Interval,...} or null when unavailable.
+    function selectTrickplay(it) {
+        if (!it || !it.trickplay) return null
+        var byMs = it.trickplay[it.id]
+        if (!byMs) { for (var k in it.trickplay) { byMs = it.trickplay[k]; break } }
+        if (!byMs) return null
+        var maxW = Screen.width * Screen.devicePixelRatio * 0.2
+        var best = null
+        for (var w in byMs) {
+            var info = byMs[w]
+            if (!best
+                    || (info.Width < best.Width && best.Width > maxW)
+                    || (info.Width > best.Width && info.Width <= maxW))
+                best = info
+        }
+        return best
+    }
+
+    // ---- media-segment skip (intro/outro/recap/preview/commercial) --------
+    // The per-type action (None/AskToSkip/Skip) is a client-local pref. Defaults
+    // mirror jellyfin-web: Intro + Outro = AskToSkip, the rest None.
+    function _loadSegActions() {
+        if (!config) return ({})
+        function a(key, def) { return "" + config.value(key, def) }
+        return {
+            "Intro":      a("playback/segIntro", "AskToSkip"),
+            "Recap":      a("playback/segRecap", "None"),
+            "Preview":    a("playback/segPreview", "None"),
+            "Outro":      a("playback/segOutro", "AskToSkip"),
+            "Commercial": a("playback/segCommercial", "None")
+        }
+    }
+    function _enabledSegTypes() {
+        var types = []
+        for (var t in root.segActions)
+            if (root.segActions[t] && root.segActions[t] !== "None") types.push(t)
+        return types
+    }
+    // Called on a short timer during playback: find the segment we're inside and
+    // apply its action (auto-skip, or arm the "Skip …" prompt). Mirrors web's
+    // MediaSegmentManager.onPlayerTimeUpdate.
+    function _checkSegments() {
+        if (!player.playing || root.segments.length === 0) return
+        var time = player.position * 10000000 // ticks
+        var seg = null
+        for (var i = 0; i < root.segments.length; ++i) {
+            var s = root.segments[i]
+            if (s.startTicks <= time && (s.endTicks <= 0 || time < s.endTicks)) { seg = s; break }
+        }
+        if (!seg) { if (root.currentSkipSegment) root.currentSkipSegment = null; return }
+        var act = root.segActions[seg.type] || "None"
+        if (act === "Skip") {
+            if (root.currentSkipSegment) root.currentSkipSegment = null
+            // skip once: seek to the end if it's a real (>1s) segment ahead of us
+            if (seg.endTicks > seg.startTicks && (seg.endTicks - seg.startTicks) >= 10000000
+                    && time < seg.endTicks - 5000000)
+                player.seek(seg.endTicks / 10000000)
+        } else if (act === "AskToSkip") {
+            if (root.currentSkipSegment !== seg) root.currentSkipSegment = seg // identity-stable
+        } else if (root.currentSkipSegment) {
+            root.currentSkipSegment = null
+        }
+    }
+    function skipCurrentSegment() {
+        var seg = root.currentSkipSegment
+        if (!seg) return
+        root.currentSkipSegment = null
+        if (seg.endTicks > 0) player.seek(seg.endTicks / 10000000)
+        else playNext()
+    }
+    function skipLabel(type) {
+        var names = { "Intro": qsTr("Intro"), "Outro": qsTr("Outro"), "Recap": qsTr("Recap"),
+                      "Preview": qsTr("Preview"), "Commercial": qsTr("Commercial") }
+        return qsTr("Skip %1").arg(names[type] || type)
+    }
+
+    // ---- up-next overlay card ---------------------------------------------
+    function _nextItem() { return (queueIndex + 1 < queue.length) ? queue[queueIndex + 1] : null }
+    function _nextOverlayEnabled() {
+        if (!config) return true
+        var v = config.value("playback/nextVideoOverlay", true)
+        return (v === true || v === "true" || v === 1 || v === "1")
+    }
+    // Mirror web's showComingUpNextIfNeeded thresholds: only for episodes with a
+    // next item, runtime >= 10 min, >= 20s left, within the last 30/35/40s.
+    function _checkUpNext() {
+        if (root.upNextDismissed || root.upNextVisible) return
+        if (!_nextOverlayEnabled()) return
+        var it = root.currentItem
+        if (!it || it.type !== "Episode" || !_nextItem()) return
+        var runtime = player.duration
+        var pos = player.position
+        if (runtime < 600) return
+        var showAtSecondsLeft = runtime >= 3000 ? 40 : (runtime >= 2400 ? 35 : 30)
+        var remaining = runtime - pos
+        if (pos >= (runtime - showAtSecondsLeft) && remaining >= 20)
+            root.upNextVisible = true
     }
 
     function playNext() {
@@ -103,6 +318,8 @@ Item {
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
+        root.segments = []
+        root.currentSkipSegment = null
         player.command(["stop"])
     }
 
@@ -156,7 +373,13 @@ Item {
             else if (reason !== "2")
                 root.stop()              // error etc.; (transcode fallback lands later)
         }
-        onTracksChanged: console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
+        onTracksChanged: {
+            console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
+            // apply any detail-page default audio/subtitle once the tracks are known
+            if (audioTracks.length > 0 && !root._tracksApplied
+                    && (root._pendingAudioIndex >= 0 || root._pendingSubIndex >= -1))
+                root._applyPendingTracks()
+        }
     }
 
     // Keep the screen + both monitors awake while a file is actively playing
@@ -178,18 +401,27 @@ Item {
     }
 
     PlayerControls {
+        id: controls
         anchors.fill: parent
         player: player
-        title: root.currentItem.name || ""
+        client: root.client
+        title: root.composeTitle(root.currentItem)
         favorite: root.favorite
         repeatMode: root.repeatMode
         maxBitrate: root.maxBitrate
         skipBack: root.skipBack
         skipForward: root.skipForward
+        showRemaining: root.showRemaining
+        trickInfo: root.selectTrickplay(root.playerItem)
+        trickItemId: root.playerItem.id || ""
         opacity: root.osdVisible ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 200 } }
         onBack: root.stop()
+        onToggleRemaining: {
+            root.showRemaining = !root.showRemaining
+            if (root.config) root.config.setValue("playback/remainingTime", root.showRemaining)
+        }
         onPrevious: root.playPrev()
         onNext: root.playNext()
         onCycleRepeat: root.repeatMode = (root.repeatMode + 1) % 3
@@ -205,10 +437,115 @@ Item {
         }
     }
 
+    // Transient "Skip Intro / Outro / …" button during an AskToSkip segment.
+    // Shown independent of the OSD auto-hide, matching jellyfin-web's skip button.
+    Button {
+        id: skipBtn
+        visible: root.currentSkipSegment !== null
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 48; bottomMargin: 96 }
+        z: 60
+        hoverEnabled: true
+        padding: 12
+        onClicked: root.skipCurrentSegment()
+        background: Rectangle {
+            radius: Theme.radius
+            color: skipBtn.hovered ? Theme.surfaceHover : Theme.surface
+            border.color: Theme.accent
+            border.width: 1
+            opacity: 0.97
+        }
+        contentItem: Text {
+            text: (root.currentSkipSegment ? root.skipLabel(root.currentSkipSegment.type) : "") + "   ⏭"
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontMedium
+            font.bold: true
+        }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+    }
+
+    // Up-next overlay card: next-episode thumbnail + countdown + Start Now / Hide.
+    // Independent of the OSD auto-hide, like web's upnextdialog.
+    Rectangle {
+        id: upNextCard
+        visible: root.upNextVisible && root._nextItem() !== null
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 40; bottomMargin: 96 }
+        z: 60
+        width: 440
+        height: 116
+        radius: Theme.radius
+        color: Theme.surface
+        border.color: Theme.divider
+        border.width: 1
+        opacity: 0.97
+
+        readonly property var nx: root._nextItem() || ({})
+        readonly property int secondsLeft: Math.max(0, Math.ceil(player.duration - player.position))
+
+        Row {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
+            Image {
+                width: 160; height: 90
+                fillMode: Image.PreserveAspectCrop
+                clip: true
+                asynchronous: true
+                cache: true
+                source: (root.client && upNextCard.nx.id)
+                        ? root.client.imageUrl(upNextCard.nx.id, "Primary", 180, upNextCard.nx.imageTag || "")
+                        : ""
+            }
+            Column {
+                width: parent.width - 160 - 12
+                spacing: 5
+                Text {
+                    width: parent.width
+                    text: qsTr("Next Episode Playing in %1").arg(qsTr("%1 Seconds").arg(upNextCard.secondsLeft))
+                    color: Theme.accent; font.pixelSize: Theme.fontSmall; font.bold: true
+                    elide: Text.ElideRight
+                }
+                Text {
+                    width: parent.width
+                    text: root.composeTitle(upNextCard.nx)
+                    color: Theme.textPrimary; font.pixelSize: Theme.fontNormal
+                    wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                }
+                Row {
+                    spacing: 8
+                    Button {
+                        id: startNowBtn
+                        hoverEnabled: true
+                        padding: 7
+                        onClicked: root.playNext()
+                        background: Rectangle { radius: Theme.radius; color: startNowBtn.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent }
+                        contentItem: Text { text: qsTr("Start Now"); color: Theme.accentText; font.pixelSize: Theme.fontSmall; font.bold: true }
+                    }
+                    Button {
+                        id: hideUpNextBtn
+                        hoverEnabled: true
+                        padding: 7
+                        onClicked: { root.upNextDismissed = true; root.upNextVisible = false }
+                        background: Rectangle { radius: Theme.radius; color: hideUpNextBtn.hovered ? Theme.surfaceHover : "transparent"; border.color: Theme.divider; border.width: 1 }
+                        contentItem: Text { text: qsTr("Hide"); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                    }
+                }
+            }
+        }
+    }
+
+    // Poll position during playback: arm/auto-apply segment skips + up-next card.
+    Timer {
+        interval: 400
+        repeat: true
+        running: player.playing
+        onTriggered: { root._checkSegments(); root._checkUpNext() }
+    }
+
     Timer {
         id: osdTimer
         interval: 3000
-        onTriggered: root.osdVisible = false
+        // keep the OSD up while the user is hovering the scrubber (trickplay preview)
+        onTriggered: controls.scrubberHovered ? osdTimer.restart() : (root.osdVisible = false)
     }
 
     // Report real playback position so continue-watching / resume work.
