@@ -83,6 +83,19 @@ Item {
         _startCurrent()
     }
 
+    // card menu "Add to queue" / "Play next" — append/insert into the live queue;
+    // if nothing is playing yet, just start the item.
+    function enqueue(item) {
+        if (!player.playing) { playItem(item); return }
+        root.queue = root.queue.concat([item])
+    }
+    function playNextInsert(item) {
+        if (!player.playing) { playItem(item); return }
+        var q = root.queue.slice()
+        q.splice(root.queueIndex + 1, 0, item)
+        root.queue = q
+    }
+
     function _startCurrent() {
         if (queueIndex < 0 || queueIndex >= queue.length)
             return

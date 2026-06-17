@@ -14,6 +14,7 @@ Item {
     signal itemOpenDetail(var item)
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
+    signal cardAction(string verb, var item)
 
     property var results: []
 
@@ -107,6 +108,7 @@ Item {
                     onOpenDetail: (it) => screen.itemOpenDetail(it)
                     onAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                     onAddToCollection: (it) => screen.itemAddToCollection(it)
+                    onCardAction: (verb, it) => screen.cardAction(verb, it)
                 }
             }
         }

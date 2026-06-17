@@ -29,6 +29,7 @@ Item {
     signal openDetail(var item)
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
+    signal cardAction(string verb, var item)  // from cards in the detail rows → Main
     signal deleted()  // item was deleted → router pops this page
 
     // simple confirm dialog for destructive/server actions (refresh, delete)
@@ -754,6 +755,7 @@ Item {
                         onItemOpenDetail: (it) => screen.openDetail(it)
                         onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                         onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                        onCardAction: (verb, it) => screen.cardAction(verb, it)
                     }
                 }
             }
@@ -902,6 +904,7 @@ Item {
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
             }
 
             // --- series: season selector + episodes ---
@@ -993,6 +996,7 @@ Item {
                 onItemOpenDetail: (it) => screen.play(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
             }
 
             // --- filmography (person pages) ---
@@ -1005,6 +1009,7 @@ Item {
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
             }
 
             // --- more from this season (episode pages) ---
@@ -1019,6 +1024,7 @@ Item {
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
             }
 
             // --- more like this ---
@@ -1031,6 +1037,7 @@ Item {
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
             }
 
             Item { Layout.preferredHeight: Theme.spacingLarge }

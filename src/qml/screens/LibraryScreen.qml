@@ -23,6 +23,7 @@ Item {
     signal openFiltered(var props)
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
+    signal cardAction(string verb, var item)
 
     // data per tab
     property var items: []
@@ -138,6 +139,7 @@ Item {
         signal openDetail(var it)
         signal addPlaylist(var it)
         signal addCollection(var it)
+        signal cardAct(string verb, var it)
         leftMargin: Theme.pagePad; rightMargin: Theme.pagePad; topMargin: Theme.spacingSmall; bottomMargin: Theme.spacingLarge
         cellWidth: (gshape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth) + Theme.spacing
         cellHeight: (gshape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight) + 50
@@ -157,6 +159,7 @@ Item {
                 onOpenDetail: (it) => icell.grid.openDetail(it)
                 onAddToPlaylist: (it) => icell.grid.addPlaylist(it)
                 onAddToCollection: (it) => icell.grid.addCollection(it)
+                onCardAction: (verb, it) => icell.grid.cardAct(verb, it)
             }
         }
     }
@@ -290,6 +293,7 @@ Item {
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
                 onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onAddCollection: (it) => screen.itemAddToCollection(it)
+                onCardAct: (verb, it) => screen.cardAction(verb, it)
             }
             // 1 suggestions (rows)
             Flickable {
@@ -314,6 +318,7 @@ Item {
                             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
                             onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                             onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                            onCardAction: (verb, it) => screen.cardAction(verb, it)
                         }
                     }
                 }
@@ -326,6 +331,7 @@ Item {
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
                 onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onAddCollection: (it) => screen.itemAddToCollection(it)
+                onCardAct: (verb, it) => screen.cardAction(verb, it)
             }
             // 3 upcoming
             ItemGrid {
@@ -335,6 +341,7 @@ Item {
                 onOpenDetail: (it) => screen.itemOpenDetail(it)
                 onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onAddCollection: (it) => screen.itemAddToCollection(it)
+                onCardAct: (verb, it) => screen.cardAction(verb, it)
             }
             // 4 genres
             ChipGrid {

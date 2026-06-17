@@ -18,6 +18,7 @@ Item {
     signal openLibrary(var lib)
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
+    signal cardAction(string verb, var item)
 
     property var resumeModel: []
     property var nextUpModel: []
@@ -96,6 +97,7 @@ Item {
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
             onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
             onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+            onCardAction: (verb, it) => screen.cardAction(verb, it)
         }
     }
     Component {
@@ -107,6 +109,7 @@ Item {
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
             onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
             onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+            onCardAction: (verb, it) => screen.cardAction(verb, it)
         }
     }
     Component {
@@ -135,6 +138,7 @@ Item {
                     onItemOpenDetail: (it) => screen.itemOpenDetail(it)
                     onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                     onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                    onCardAction: (verb, it) => screen.cardAction(verb, it)
                 }
             }
         }
