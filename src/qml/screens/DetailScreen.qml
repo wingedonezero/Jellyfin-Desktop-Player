@@ -177,6 +177,14 @@ Item {
         return gb >= 1 ? (gb.toFixed(2) + " GB") : ((bytes / 1048576).toFixed(0) + " MB")
     }
     readonly property bool hasMediaInfo: !!(detail && detail.mediaStreams && detail.mediaStreams.length > 0)
+    readonly property bool hasChapterImages: !!(detail && detail.chapters && detail.chapters.length > 0
+                                                && detail.chapters[0].imageTag && detail.chapters[0].imageTag.length > 0)
+    function fmtChapterTime(ticks) {
+        var s = Math.floor((ticks || 0) / 10000000)
+        var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+        var p = (n) => (n < 10 ? "0" + n : "" + n)
+        return (h > 0 ? h + ":" + p(m) : "" + m) + ":" + p(sec)
+    }
     readonly property bool hasLinks: !!(detail && detail.externalUrls && detail.externalUrls.length > 0)
 
     Connections {
@@ -640,6 +648,48 @@ Item {
                         Layout.fillWidth: true
                         Text { text: modelData.k; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 110 }
                         Text { text: modelData.v; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                    }
+                }
+            }
+
+            // --- chapters / scenes ---
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.pagePad
+                Layout.rightMargin: Theme.pagePad
+                spacing: Theme.spacingSmall
+                visible: screen.hasChapterImages
+                Text { text: qsTr("Scenes"); color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Repeater {
+                        model: screen.detail ? (screen.detail.chapters || []) : []
+                        ColumnLayout {
+                            required property var modelData
+                            spacing: 2
+                            Rectangle {
+                                width: 160; height: 90; radius: Theme.radius; color: Theme.surface; clip: true
+                                Image {
+                                    anchors.fill: parent; fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true; cache: true
+                                    source: (screen.client && modelData.imageTag)
+                                            ? screen.client.imageUrl(screen.detail.id, "Chapter", 180, modelData.imageTag, modelData.index) : ""
+                                }
+                                HoverHandler { id: chHover }
+                                Rectangle {
+                                    anchors.fill: parent; color: Theme.overlayStrong
+                                    opacity: chHover.hovered ? 0.35 : 0
+                                    Behavior on opacity { NumberAnimation { duration: Theme.animFast } }
+                                }
+                                TapHandler {
+                                    onTapped: { var it = Object.assign({}, screen.detail); it.playbackTicks = modelData.startTicks; screen.play(it) }
+                                }
+                            }
+                            Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                                   elide: Text.ElideRight; Layout.preferredWidth: 160 }
+                            Text { text: screen.fmtChapterTime(modelData.startTicks); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                        }
                     }
                 }
             }

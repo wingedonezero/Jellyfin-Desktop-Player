@@ -90,7 +90,8 @@ public:
     Q_INVOKABLE QUrl imageUrl(const QString &itemId,
                               const QString &imageType = QStringLiteral("Primary"),
                               int maxHeight = 0,
-                              const QString &tag = QString()) const;
+                              const QString &tag = QString(),
+                              int index = -1) const; // index >= 0 for Chapter images
     Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
     // One trickplay tile sheet (a grid of thumbnails) at the given resolution width.
     Q_INVOKABLE QUrl trickplayUrl(const QString &itemId, int width, int index) const;

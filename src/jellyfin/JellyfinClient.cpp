@@ -769,6 +769,21 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     if (o.contains(QStringLiteral("Trickplay")))
         m[QStringLiteral("trickplay")] = o.value(QStringLiteral("Trickplay")).toObject().toVariantMap();
 
+    // chapters (Scenes section): name + start + image tag (index = position)
+    const QJsonArray chapArr = o.value(QStringLiteral("Chapters")).toArray();
+    if (!chapArr.isEmpty()) {
+        QVariantList chapters;
+        for (int i = 0; i < chapArr.size(); ++i) {
+            const QJsonObject c = chapArr.at(i).toObject();
+            chapters.append(QVariantMap{
+                {QStringLiteral("name"), c.value(QStringLiteral("Name")).toString()},
+                {QStringLiteral("startTicks"), c.value(QStringLiteral("StartPositionTicks")).toDouble()},
+                {QStringLiteral("imageTag"), c.value(QStringLiteral("ImageTag")).toString()},
+                {QStringLiteral("index"), i}});
+        }
+        m[QStringLiteral("chapters")] = chapters;
+    }
+
     // people (cast & crew) for detail pages
     QVariantList people;
     const QJsonArray peopleArr = o.value(QStringLiteral("People")).toArray();
@@ -797,9 +812,12 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
 // --- url helpers ------------------------------------------------------------
 
 QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, int maxHeight,
-                             const QString &tag) const
+                             const QString &tag, int index) const
 {
-    QUrl url{m_serverUrl + QStringLiteral("/Items/%1/Images/%2").arg(itemId, imageType)};
+    QString path = QStringLiteral("/Items/%1/Images/%2").arg(itemId, imageType);
+    if (index >= 0)
+        path += QStringLiteral("/%1").arg(index); // Chapter/{index}
+    QUrl url{m_serverUrl + path};
     QUrlQuery q;
     if (maxHeight > 0) {
         q.addQueryItem(QStringLiteral("maxHeight"), QString::number(maxHeight));
