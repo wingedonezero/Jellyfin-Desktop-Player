@@ -26,7 +26,7 @@ const QString kImageTypes = QStringLiteral("EnableImageTypes=Primary,Thumb,Backd
 
 // Fuller field set for a single detail page (cast, studios, tagline, etc.).
 const QString kDetailFields = QStringLiteral(
-    "Fields=Overview,Genres,People,Studios,Taglines,RunTimeTicks,ProductionYear,"
+    "Fields=Overview,Genres,People,Studios,Taglines,RunTimeTicks,ProductionYear,OriginalTitle,"
     "CommunityRating,CriticRating,OfficialRating,SeriesName,MediaSources,ExternalUrls,"
     "Tags,ProductionLocations,PremiereDate");
 
@@ -633,6 +633,7 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
                                       {QStringLiteral("name"), go.value(QStringLiteral("Name")).toString()}});
     }
     m[QStringLiteral("genreItems")] = genreItems;
+    m[QStringLiteral("originalTitle")] = o.value(QStringLiteral("OriginalTitle")).toString();
 
     // tags (detail)
     QVariantList tagList;

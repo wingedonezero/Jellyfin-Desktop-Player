@@ -569,6 +569,13 @@ Item {
                             color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true
                             elide: Text.ElideRight; Layout.fillWidth: true
                         }
+                        // original title (e.g. Japanese), shown when it differs from the name
+                        Text {
+                            visible: !!(screen.detail && screen.detail.originalTitle && screen.detail.originalTitle !== screen.detail.name)
+                            text: screen.detail ? (screen.detail.originalTitle || "") : ""
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
+                            elide: Text.ElideRight; Layout.fillWidth: true
+                        }
                         RowLayout {
                             spacing: Theme.spacing
                             Text { text: screen.metaLine(); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
@@ -631,12 +638,23 @@ Item {
                                     { label: qsTr("Writer"),   people: screen.peopleByType("Writer") }]
                                    .filter(r => r.people.length > 0)
                             RowLayout {
+                                id: dwRow
                                 required property var modelData
                                 Layout.fillWidth: true
                                 spacing: Theme.spacingSmall
-                                Text { text: modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
-                                Text { text: modelData.people.map(p => p.name).join(", "); color: Theme.textPrimary
-                                       font.pixelSize: Theme.fontSmall; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: dwRow.modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: dwRow.modelData.people
+                                        Row {
+                                            required property var modelData
+                                            required property int index
+                                            LinkText { text: modelData.name; onClicked: screen.openDetail(modelData) }
+                                            Text { visible: index < (dwRow.modelData.people.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                        }
+                                    }
+                                }
                             }
                         }
                         // person: born / died / birthplace
