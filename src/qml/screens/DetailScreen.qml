@@ -30,12 +30,6 @@ Item {
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
     signal cardAction(string verb, var item)  // from cards in the detail rows → Main
-    signal deleted()  // item was deleted → router pops this page
-
-    // simple confirm dialog for destructive/server actions (refresh, delete)
-    property string _confirmMsg: ""
-    property var _confirmAction: null
-    function confirm(msg, action) { _confirmMsg = msg; _confirmAction = action; confirmPopup.open() }
 
     property bool favorite: false
     property bool played: false
@@ -282,35 +276,6 @@ Item {
                 screen.filmography = items
             } else if (tag === "d:extras:" + screen.itemId) {
                 screen.extras = items
-            }
-        }
-    }
-
-    // confirm dialog for destructive / server actions (refresh, delete)
-    Popup {
-        id: confirmPopup
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        width: 380
-        padding: 16
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-        contentItem: ColumnLayout {
-            spacing: 14
-            Text {
-                Layout.fillWidth: true
-                text: screen._confirmMsg
-                color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; wrapMode: Text.Wrap
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 8
-                ActionButton { text: qsTr("Cancel"); onClicked: confirmPopup.close() }
-                ActionButton {
-                    primary: true; text: qsTr("Confirm")
-                    onClicked: { if (screen._confirmAction) screen._confirmAction(); confirmPopup.close() }
-                }
             }
         }
     }
@@ -672,17 +637,6 @@ Item {
                                     DarkMenuItem { text: qsTr("Copy stream URL"); visible: screen.isPlayableLeaf; onTriggered: screen.client.copyStreamUrl(screen.detail.id) }
                                     DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
                                     DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
-                                    DarkMenuItem {
-                                        text: qsTr("Refresh metadata")
-                                        onTriggered: screen.confirm(qsTr("Refresh metadata for \"%1\"?").arg(screen.detail.name || ""),
-                                                                    function() { screen.client.refreshItem(screen.detail.id) })
-                                    }
-                                    DarkMenuItem {
-                                        text: qsTr("Delete")
-                                        visible: screen.detail && screen.detail.canDelete === true
-                                        onTriggered: screen.confirm(qsTr("Delete \"%1\" from the server? This cannot be undone.").arg(screen.detail.name || ""),
-                                                                    function() { screen.client.deleteItem(screen.detail.id); screen.deleted() })
-                                    }
                                 }
                             }
                         }

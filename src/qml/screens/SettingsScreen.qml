@@ -7,7 +7,7 @@ import JellyfinDesktop
 // the web client. Wired: Profile (password), Home (row visibility), Playback
 // (default quality, auto-play-next, skip intervals), Subtitles (size/position),
 // Player (live mpv.conf editor). Stubbed (present, disabled): Display extras,
-// Quick Connect, Administration, language/passthrough/etc.
+// Quick Connect, language/passthrough/etc.
 Item {
     id: screen
     property var client

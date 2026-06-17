@@ -19,7 +19,7 @@ ColumnLayout {
     signal itemOpenDetail(var item)  // open detail
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
-    signal cardAction(string verb, var item)  // queue/playNext/refresh/delete
+    signal cardAction(string verb, var item)  // queue/playNext
 
     Layout.fillWidth: true
     visible: model && model.length > 0

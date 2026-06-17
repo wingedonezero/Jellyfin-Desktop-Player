@@ -17,7 +17,7 @@ Item {
     signal openDetail(var item)       // open detail page
     signal addToPlaylist(var item)    // → app-level picker (Main)
     signal addToCollection(var item)  // → app-level picker (Main)
-    signal cardAction(string verb, var item)  // queue/playNext/refresh/delete → Main
+    signal cardAction(string verb, var item)  // queue/playNext → Main
 
     readonly property int artHeight: shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight
     implicitWidth: shape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth
@@ -215,8 +215,6 @@ Item {
         DarkMenuItem { text: qsTr("Add to playlist"); visible: card.canAddTo; enabled: Features.playlists; onTriggered: card.addToPlaylist(card.item) }
         DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
         DarkMenuItem { text: qsTr("Copy stream URL"); visible: card.playable; onTriggered: if (card.client) card.client.copyStreamUrl(card.item.id) }
-        DarkMenuItem { text: qsTr("Refresh metadata"); onTriggered: card.cardAction("refresh", card.item) }
-        DarkMenuItem { text: qsTr("Delete media"); visible: card.item && card.item.canDelete === true; onTriggered: card.cardAction("delete", card.item) }
         DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
         DarkMenuItem { text: qsTr("Edit images"); enabled: Features.metadataEdit }
         DarkMenuItem { text: qsTr("Edit subtitles"); enabled: Features.metadataEdit }

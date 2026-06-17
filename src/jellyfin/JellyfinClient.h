@@ -28,7 +28,6 @@ class JellyfinClient : public QObject
     Q_PROPERTY(QString serverUrl READ serverUrl WRITE setServerUrl NOTIFY serverUrlChanged)
     Q_PROPERTY(bool authenticated READ isAuthenticated NOTIFY authenticatedChanged)
     Q_PROPERTY(QString userName READ userName NOTIFY authenticatedChanged)
-    Q_PROPERTY(bool isAdmin READ isAdmin NOTIFY authenticatedChanged)
     Q_PROPERTY(QVariantMap userConfig READ userConfig NOTIFY userConfigChanged)
 
 public:
@@ -39,7 +38,6 @@ public:
 
     bool isAuthenticated() const { return !m_token.isEmpty(); }
     QString userName() const { return m_userName; }
-    bool isAdmin() const { return m_isAdmin; }
     QVariantMap userConfig() const { return m_userConfig; }
 
     // Raw GET for admin/dashboard endpoints — emits jsonReady(tag, <array|object>).
@@ -125,41 +123,6 @@ public:
     // Quick Connect: authorize a code shown on another device (this user must be signed in).
     Q_INVOKABLE void authorizeQuickConnect(const QString &code);
 
-    // Server actions (admin) — destructive; the UI confirms before calling these.
-    Q_INVOKABLE void scanAllLibraries();
-    Q_INVOKABLE void restartServer();
-    Q_INVOKABLE void shutdownServer();
-    Q_INVOKABLE void runScheduledTask(const QString &taskId);
-    Q_INVOKABLE void stopScheduledTask(const QString &taskId);
-    Q_INVOKABLE void setUserPolicy(const QString &userId, const QVariantMap &policy);
-    Q_INVOKABLE void deleteUser(const QString &userId);
-    Q_INVOKABLE void createUser(const QString &name, const QString &password); // POST /Users/New
-    Q_INVOKABLE void setUserPassword(const QString &userId, const QString &newPw, bool reset); // admin set/reset another user's password
-    // Devices / API keys / plugins / tasks / library refresh (fire-and-forget; UI confirms first)
-    Q_INVOKABLE void renameDevice(const QString &deviceId, const QString &customName);
-    Q_INVOKABLE void deleteDevice(const QString &deviceId);
-    Q_INVOKABLE void createApiKey(const QString &app);
-    Q_INVOKABLE void revokeApiKey(const QString &accessToken);
-    Q_INVOKABLE void updateTaskTriggers(const QString &taskId, const QVariantList &triggers);
-    Q_INVOKABLE void refreshItem(const QString &itemId);
-    Q_INVOKABLE void deleteItem(const QString &itemId); // DELETE /Items/{id}
-    Q_INVOKABLE void setPluginEnabled(const QString &pluginId, const QString &version, bool enabled);
-    Q_INVOKABLE void uninstallPlugin(const QString &pluginId, const QString &version);
-    Q_INVOKABLE void installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl);
-    Q_INVOKABLE void setRepositories(const QVariantList &repos);
-    // Raw-text GET (e.g. a log file) → textReady(tag, content)
-    Q_INVOKABLE void getText(const QString &path, const QString &requestTag);
-    // Generic JSON POST — server-config editors POST the WHOLE config object back.
-    Q_INVOKABLE void postJson(const QString &path, const QVariantMap &body);
-
-    // Libraries (virtual folders) — admin; the UI confirms before calling these.
-    Q_INVOKABLE void addVirtualFolder(const QString &name, const QString &collectionType, const QString &path);
-    Q_INVOKABLE void removeVirtualFolder(const QString &name);
-    Q_INVOKABLE void renameVirtualFolder(const QString &name, const QString &newName);
-    Q_INVOKABLE void addMediaPath(const QString &name, const QString &path);
-    Q_INVOKABLE void removeMediaPath(const QString &name, const QString &path);
-    Q_INVOKABLE void updateLibraryOptions(const QString &id, const QVariantMap &options);
-
     // --- detail extras + collection/playlist actions ---
     Q_INVOKABLE void fetchSpecialFeatures(const QString &itemId,
                                           const QString &requestTag = QStringLiteral("extras"));
@@ -177,7 +140,6 @@ Q_SIGNALS:
     void mediaSegmentsReady(const QString &itemId, const QVariantList &segments);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);
-    void textReady(const QString &requestTag, const QString &content);
     void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
     void userConfigChanged();
@@ -203,7 +165,6 @@ private:
     QString m_userName;
     QString m_deviceId;
     QString m_deviceName;
-    bool m_isAdmin = false;
     QVariantMap m_userConfig;
 
     // current playback session (for progress reports + transcode teardown)

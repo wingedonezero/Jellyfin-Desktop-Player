@@ -122,8 +122,6 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         const QJsonObject user = obj.value(QStringLiteral("User")).toObject();
         m_userId = user.value(QStringLiteral("Id")).toString();
         m_userName = user.value(QStringLiteral("Name")).toString();
-        m_isAdmin = user.value(QStringLiteral("Policy")).toObject()
-                        .value(QStringLiteral("IsAdministrator")).toBool();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
@@ -141,7 +139,6 @@ void JellyfinClient::logout()
     m_token.clear();
     m_userId.clear();
     m_userName.clear();
-    m_isAdmin = false;
     QSettings().remove(QStringLiteral("session"));
     Q_EMIT authenticatedChanged();
 }
@@ -235,130 +232,6 @@ void JellyfinClient::authorizeQuickConnect(const QString &code)
     });
 }
 
-// --- admin server actions (fire-and-forget; the UI confirms first) ----------
-static void fireAndForget(QNetworkReply *r)
-{
-    QObject::connect(r, &QNetworkReply::finished, r, &QNetworkReply::deleteLater);
-}
-static QString enc(const QString &s) { return QString::fromUtf8(QUrl::toPercentEncoding(s)); }
-void JellyfinClient::scanAllLibraries() { fireAndForget(post(QStringLiteral("/Library/Refresh"), QByteArray())); }
-void JellyfinClient::restartServer()    { fireAndForget(post(QStringLiteral("/System/Restart"), QByteArray())); }
-void JellyfinClient::shutdownServer()   { fireAndForget(post(QStringLiteral("/System/Shutdown"), QByteArray())); }
-void JellyfinClient::runScheduledTask(const QString &taskId)  { fireAndForget(post(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId), QByteArray())); }
-void JellyfinClient::stopScheduledTask(const QString &taskId) { fireAndForget(del(QStringLiteral("/ScheduledTasks/Running/%1").arg(taskId))); }
-void JellyfinClient::setUserPolicy(const QString &userId, const QVariantMap &policy)
-{
-    fireAndForget(post(QStringLiteral("/Users/%1/Policy").arg(userId),
-                       QJsonDocument(QJsonObject::fromVariantMap(policy)).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::deleteUser(const QString &userId) { fireAndForget(del(QStringLiteral("/Users/%1").arg(userId))); }
-void JellyfinClient::createUser(const QString &name, const QString &password)
-{
-    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Password"), password}};
-    fireAndForget(post(QStringLiteral("/Users/New"), QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::setUserPassword(const QString &userId, const QString &newPw, bool reset)
-{
-    QJsonObject body;
-    if (reset) {
-        body[QStringLiteral("ResetPassword")] = true;
-    } else {
-        body[QStringLiteral("CurrentPw")] = QString(); // admins can set without the current password
-        body[QStringLiteral("NewPw")] = newPw;
-    }
-    fireAndForget(post(QStringLiteral("/Users/%1/Password").arg(userId), QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::renameDevice(const QString &deviceId, const QString &customName)
-{
-    const QJsonObject body{{QStringLiteral("CustomName"), customName}};
-    fireAndForget(post(QStringLiteral("/Devices/Options?id=%1").arg(enc(deviceId)), QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::deleteDevice(const QString &deviceId) { fireAndForget(del(QStringLiteral("/Devices?id=%1").arg(enc(deviceId)))); }
-void JellyfinClient::createApiKey(const QString &app) { fireAndForget(post(QStringLiteral("/Auth/Keys?app=%1").arg(enc(app)), QByteArray())); }
-void JellyfinClient::revokeApiKey(const QString &accessToken) { fireAndForget(del(QStringLiteral("/Auth/Keys/%1").arg(enc(accessToken)))); }
-void JellyfinClient::updateTaskTriggers(const QString &taskId, const QVariantList &triggers)
-{
-    fireAndForget(post(QStringLiteral("/ScheduledTasks/%1/Triggers").arg(taskId),
-                       QJsonDocument(QJsonArray::fromVariantList(triggers)).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::refreshItem(const QString &itemId)
-{
-    fireAndForget(post(QStringLiteral("/Items/%1/Refresh?metadataRefreshMode=Default&imageRefreshMode=Default").arg(itemId), QByteArray()));
-}
-void JellyfinClient::deleteItem(const QString &itemId)
-{
-    fireAndForget(del(QStringLiteral("/Items/%1").arg(itemId)));
-}
-void JellyfinClient::setPluginEnabled(const QString &pluginId, const QString &version, bool enabled)
-{
-    fireAndForget(post(QStringLiteral("/Plugins/%1/%2/%3").arg(pluginId, version, enabled ? QStringLiteral("Enable") : QStringLiteral("Disable")), QByteArray()));
-}
-void JellyfinClient::uninstallPlugin(const QString &pluginId, const QString &version)
-{
-    fireAndForget(del(QStringLiteral("/Plugins/%1/%2").arg(pluginId, version)));
-}
-void JellyfinClient::installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl)
-{
-    QString q = QStringLiteral("/Packages/Installed/%1?assemblyGuid=%2").arg(enc(name), enc(guid));
-    if (!version.isEmpty()) q += QStringLiteral("&version=%1").arg(enc(version));
-    if (!repoUrl.isEmpty()) q += QStringLiteral("&repositoryUrl=%1").arg(enc(repoUrl));
-    fireAndForget(post(q, QByteArray()));
-}
-void JellyfinClient::setRepositories(const QVariantList &repos)
-{
-    fireAndForget(post(QStringLiteral("/Repositories"),
-                       QJsonDocument(QJsonArray::fromVariantList(repos)).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::getText(const QString &path, const QString &requestTag)
-{
-    QNetworkReply *reply = get(path);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) { Q_EMIT errorOccurred(reply->errorString()); return; }
-        Q_EMIT textReady(requestTag, QString::fromUtf8(reply->readAll()));
-    });
-}
-void JellyfinClient::postJson(const QString &path, const QVariantMap &body)
-{
-    fireAndForget(post(path, QJsonDocument(QJsonObject::fromVariantMap(body)).toJson(QJsonDocument::Compact)));
-}
-
-// --- libraries (virtual folders) — fire-and-forget; the UI confirms first ----
-void JellyfinClient::addVirtualFolder(const QString &name, const QString &collectionType, const QString &path)
-{
-    QString q = QStringLiteral("/Library/VirtualFolders?refreshLibrary=true&name=%1").arg(enc(name));
-    if (!collectionType.isEmpty()) q += QStringLiteral("&collectionType=%1").arg(collectionType);
-    if (!path.isEmpty()) q += QStringLiteral("&paths=%1").arg(enc(path));
-    const QJsonObject body{{QStringLiteral("LibraryOptions"), QJsonObject{}}}; // server applies defaults
-    fireAndForget(post(q, QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::removeVirtualFolder(const QString &name)
-{
-    fireAndForget(del(QStringLiteral("/Library/VirtualFolders?name=%1").arg(enc(name))));
-}
-void JellyfinClient::renameVirtualFolder(const QString &name, const QString &newName)
-{
-    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Name?name=%1&newName=%2").arg(enc(name), enc(newName)),
-                       QByteArray()));
-}
-void JellyfinClient::addMediaPath(const QString &name, const QString &path)
-{
-    const QJsonObject body{{QStringLiteral("Name"), name}, {QStringLiteral("Path"), path}};
-    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/Paths?refreshLibrary=true"),
-                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-void JellyfinClient::removeMediaPath(const QString &name, const QString &path)
-{
-    fireAndForget(del(QStringLiteral("/Library/VirtualFolders/Paths?name=%1&path=%2").arg(enc(name), enc(path))));
-}
-void JellyfinClient::updateLibraryOptions(const QString &id, const QVariantMap &options)
-{
-    const QJsonObject body{{QStringLiteral("Id"), id},
-                           {QStringLiteral("LibraryOptions"), QJsonObject::fromVariantMap(options)}};
-    fireAndForget(post(QStringLiteral("/Library/VirtualFolders/LibraryOptions"),
-                       QJsonDocument(body).toJson(QJsonDocument::Compact)));
-}
-
 void JellyfinClient::saveSession() const
 {
     QSettings s;
@@ -367,7 +240,6 @@ void JellyfinClient::saveSession() const
     s.setValue(QStringLiteral("token"), m_token);
     s.setValue(QStringLiteral("userId"), m_userId);
     s.setValue(QStringLiteral("userName"), m_userName);
-    s.setValue(QStringLiteral("isAdmin"), m_isAdmin);
     s.endGroup();
 }
 
@@ -379,7 +251,6 @@ bool JellyfinClient::restoreSession()
     const QString token = s.value(QStringLiteral("token")).toString();
     const QString userId = s.value(QStringLiteral("userId")).toString();
     const QString userName = s.value(QStringLiteral("userName")).toString();
-    const bool isAdmin = s.value(QStringLiteral("isAdmin")).toBool();
     s.endGroup();
 
     if (server.isEmpty() || token.isEmpty() || userId.isEmpty())
@@ -389,7 +260,6 @@ bool JellyfinClient::restoreSession()
     m_token = token;
     m_userId = userId;
     m_userName = userName;
-    m_isAdmin = isAdmin;
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
     return true;

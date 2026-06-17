@@ -16,7 +16,6 @@ Rectangle {
     signal homeClicked()
     signal searchClicked()
     signal settingsClicked()
-    signal adminClicked()
     signal logoutClicked()
 
     implicitHeight: Theme.appBarHeight
@@ -52,7 +51,6 @@ Rectangle {
                 id: userMenu
                 DarkMenuItem { text: bar.client ? bar.client.userName : ""; enabled: false }
                 DarkMenuItem { text: qsTr("Settings"); onTriggered: bar.settingsClicked() }
-                DarkMenuItem { text: qsTr("Administration"); visible: bar.client && bar.client.isAdmin; onTriggered: bar.adminClicked() }
                 DarkMenuItem { text: qsTr("Log out"); onTriggered: bar.logoutClicked() }
             }
         }
