@@ -388,15 +388,22 @@ Item {
         }
     }
 
-    component EpisodeRow: ItemDelegate {
+    // An episode list row. Like the cards, the BODY opens the episode's info
+    // page and only the ▶ (on the thumbnail) plays — so episode data is reachable.
+    component EpisodeRow: Rectangle {
         id: ep
         required property var modelData
-        hoverEnabled: true
         Layout.fillWidth: true
         implicitHeight: 110
-        background: Rectangle { radius: Theme.radius; color: ep.hovered ? Theme.surfaceHover : "transparent" }
-        onClicked: screen.playEpisode(ep.modelData)
-        contentItem: RowLayout {
+        radius: Theme.radius
+        color: epHover.hovered ? Theme.surfaceHover : "transparent"
+
+        HoverHandler { id: epHover }
+        TapHandler { onTapped: screen.openDetail(ep.modelData) } // body → episode detail
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 6
             spacing: Theme.spacing
             Rectangle {
                 Layout.preferredWidth: 160; Layout.preferredHeight: 90
@@ -407,12 +414,23 @@ Item {
                     source: ep.modelData.imageTag ? screen.client.imageUrl(ep.modelData.id, "Primary", 180, ep.modelData.imageTag) : ""
                     visible: status === Image.Ready
                 }
-                Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 24; visible: ep.hovered }
                 Rectangle {
                     visible: ep.modelData.played === true
                     anchors { top: parent.top; right: parent.right; margins: 4 }
                     width: 18; height: 18; radius: 9; color: Theme.watched
                     Text { anchors.centerIn: parent; text: "✓"; color: Theme.accentText; font.pixelSize: 11; font.bold: true }
+                }
+                // hover dim (visual only — taps fall through to openDetail)
+                Rectangle { anchors.fill: parent; color: Theme.overlay; visible: epHover.hovered }
+                // play button — consumes the tap so the ▶ plays instead of opening detail
+                Rectangle {
+                    anchors.centerIn: parent
+                    visible: epHover.hovered
+                    width: 40; height: 40; radius: 20
+                    color: Theme.overlayStrong
+                    border.color: Theme.textPrimary; border.width: 1
+                    Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
+                    TapHandler { onTapped: screen.playEpisode(ep.modelData) }
                 }
             }
             ColumnLayout {
@@ -678,7 +696,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
                     spacing: Theme.spacingSmall
-                    visible: screen.detail && screen.detail.tags && screen.detail.tags.length > 0
+                    visible: !!(screen.detail && screen.detail.tags && screen.detail.tags.length > 0)
                     Repeater {
                         model: screen.detail ? (screen.detail.tags || []) : []
                         Rectangle {
