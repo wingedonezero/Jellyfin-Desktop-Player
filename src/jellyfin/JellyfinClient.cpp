@@ -333,6 +333,27 @@ void JellyfinClient::fetchItems(const QString &parentId, const QString &requestT
                  requestTag);
 }
 
+void JellyfinClient::fetchItemsPaged(const QString &parentId, const QString &requestTag,
+                                     const QString &sortBy, const QString &sortOrder,
+                                     const QString &extraQuery, int startIndex, int limit)
+{
+    QString q = QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6&StartIndex=%7&EnableTotalRecordCount=true%8")
+                    .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
+                    .arg(kItemFields).arg(kImageTypes).arg(startIndex).arg(extraQuery);
+    if (limit > 0)
+        q += QStringLiteral("&Limit=%1").arg(limit);
+    QNetworkReply *reply = get(q);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, startIndex]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) { Q_EMIT errorOccurred(reply->errorString()); return; }
+        const QByteArray body = reply->readAll();
+        const QVariantList items = parseItems(body);
+        const int total = QJsonDocument::fromJson(body).object()
+                              .value(QStringLiteral("TotalRecordCount")).toInt(int(items.size()));
+        Q_EMIT itemsPageReady(requestTag, items, total, startIndex);
+    });
+}
+
 void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a

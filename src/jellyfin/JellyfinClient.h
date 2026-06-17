@@ -60,6 +60,11 @@ public:
                                 const QString &sortBy = QStringLiteral("SortName"),
                                 const QString &sortOrder = QStringLiteral("Ascending"),
                                 const QString &extraQuery = QString()); // &Filters=/&GenreIds=/&Recursive=true/...
+    // Paged variant — adds StartIndex/Limit + EnableTotalRecordCount and emits
+    // itemsPageReady(tag, items, totalRecordCount, startIndex). limit<=0 = no paging.
+    Q_INVOKABLE void fetchItemsPaged(const QString &parentId, const QString &requestTag,
+                                     const QString &sortBy, const QString &sortOrder,
+                                     const QString &extraQuery, int startIndex, int limit);
     Q_INVOKABLE void fetchItem(const QString &itemId,
                                const QString &requestTag = QStringLiteral("item"));
     Q_INVOKABLE void fetchSeasons(const QString &seriesId,
@@ -137,6 +142,7 @@ Q_SIGNALS:
     void authenticatedChanged();
     void authenticationFailed(const QString &reason);
     void itemsReady(const QString &requestTag, const QVariantList &items);
+    void itemsPageReady(const QString &requestTag, const QVariantList &items, int totalRecordCount, int startIndex);
     void mediaSegmentsReady(const QString &itemId, const QVariantList &segments);
     void streamReady(const QString &requestTag, const QVariantMap &info);
     void jsonReady(const QString &requestTag, const QVariant &data);

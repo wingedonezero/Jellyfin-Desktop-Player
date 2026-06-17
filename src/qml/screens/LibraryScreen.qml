@@ -44,6 +44,9 @@ Item {
     property bool favFilter: false
     property string nameStartsWith: ""  // alphabet picker (NameStartsWith)
     readonly property var alphabet: ["✕","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
+    property int startIndex: 0
+    property int totalCount: 0
+    property int pageSize: 100   // display/libraryPageSize (0 = no pagination)
 
     readonly property bool filteredView: favorites || genreId !== "" || studioId !== ""
     readonly property var tabs: {
@@ -73,7 +76,11 @@ Item {
     }
 
     Component.onCompleted: {
-        if (config) viewMode = config.value("library/view/" + parentId, "poster")
+        if (config) {
+            viewMode = config.value("library/view/" + parentId, "poster")
+            pageSize = Number(config.value("display/libraryPageSize", 100))
+            if (isNaN(pageSize) || pageSize < 0) pageSize = 100
+        }
         reloadItems()
     }
     function setViewMode(m) { viewMode = m; if (config) config.setValue("library/view/" + parentId, m) }
@@ -93,9 +100,9 @@ Item {
     function reloadItems() {
         if (!client) return
         if (favorites) { client.fetchFavorites(itemsTag); return }
-        if (genreId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart() + namePart()); return }
-        if (studioId !== "") { client.fetchItems(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart() + namePart()); return }
-        if (parentId !== "") client.fetchItems(parentId, itemsTag, sortBy, sortOrder, filterPart() + namePart())
+        if (genreId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
+        if (studioId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
+        if (parentId !== "") client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, filterPart() + namePart(), startIndex, pageSize)
     }
     function loadKind(kind) {
         if (!client) return
@@ -109,10 +116,19 @@ Item {
             client.fetchLatest(parentId, "lib:sugLatest:" + parentId)
         }
     }
-    function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; reloadItems() }
-    function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); reloadItems() }
+    function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; startIndex = 0; reloadItems() }
+    function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); startIndex = 0; reloadItems() }
     function alphaSel(l) { return l === "✕" ? (nameStartsWith === "") : (nameStartsWith === l) }
     function namePart() { return nameStartsWith !== "" ? ("&NameStartsWith=" + encodeURIComponent(nameStartsWith)) : "" }
+    function pagePrev() { startIndex = Math.max(0, startIndex - pageSize); reloadItems() }
+    function pageNext() { startIndex = startIndex + pageSize; reloadItems() }
+    function pageLabel() {
+        if (pageSize > 0 && totalCount > 0) {
+            var end = Math.min(startIndex + pageSize, totalCount)
+            return (startIndex + 1) + "-" + end + " " + qsTr("of") + " " + totalCount
+        }
+        return qsTr("%n item(s)", "", items.length)
+    }
 
     Connections {
         target: screen.client
@@ -124,6 +140,9 @@ Item {
             else if (tag === "lib:upcoming:" + screen.parentId) screen.upcoming = its
             else if (tag === "lib:sugLatest:" + screen.parentId) screen.sugLatest = its
             else if (tag === "lib:sugNext:" + screen.parentId) screen.sugNext = its
+        }
+        function onItemsPageReady(tag, its, total, start) {
+            if (tag === screen.itemsTag) { screen.items = its; screen.totalCount = total }
         }
         function onCategoriesReady(tag, cats) { if (tag === "lib:sugRecs:" + screen.parentId) screen.sugRecs = cats }
     }
@@ -256,11 +275,20 @@ Item {
             Layout.leftMargin: Theme.pagePad
             Layout.rightMargin: Theme.pagePad
             Layout.topMargin: screen.filteredView ? Theme.spacing : 0
-            Text {
-                text: qsTr("%n item(s)", "", screen.items.length)
-                color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
-                Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter
+            JIconButton {
+                text: "‹"; visible: screen.pageSize > 0 && screen.startIndex > 0
+                onClicked: screen.pagePrev()
             }
+            Text {
+                text: screen.pageLabel()
+                color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
+                verticalAlignment: Text.AlignVCenter
+            }
+            JIconButton {
+                text: "›"; visible: screen.pageSize > 0 && (screen.startIndex + screen.pageSize) < screen.totalCount
+                onClicked: screen.pageNext()
+            }
+            Item { Layout.fillWidth: true }
             JIconButton {
                 text: "▦"
                 onClicked: viewMenu.popup()
@@ -290,7 +318,7 @@ Item {
             }
             JIconButton {
                 text: screen.sortOrder === "Ascending" ? "↑" : "↓"
-                onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.reloadItems() }
+                onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.startIndex = 0; screen.reloadItems() }
             }
             JIconButton {
                 id: filterBtn
@@ -313,7 +341,7 @@ Item {
                             ItemDelegate {
                                 required property var modelData
                                 Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                                onClicked: { screen.playedFilter = modelData.k; screen.reloadItems() }
+                                onClicked: { screen.playedFilter = modelData.k; screen.startIndex = 0; screen.reloadItems() }
                                 contentItem: RowLayout {
                                     Text { text: modelData.l; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 6 }
                                     Text { text: screen.playedFilter === modelData.k ? "✓" : ""; color: Theme.accent; Layout.rightMargin: 6 }
@@ -324,7 +352,7 @@ Item {
                         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
                         ItemDelegate {
                             Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                            onClicked: { screen.favFilter = !screen.favFilter; screen.reloadItems() }
+                            onClicked: { screen.favFilter = !screen.favFilter; screen.startIndex = 0; screen.reloadItems() }
                             contentItem: RowLayout {
                                 Text { text: qsTr("Favorites only"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 6 }
                                 Text { text: screen.favFilter ? "✓" : ""; color: Theme.accent; Layout.rightMargin: 6 }
