@@ -49,11 +49,14 @@ Item {
     readonly property bool isPerson: detail && detail.type === "Person"
     readonly property bool isBoxSet: detail && detail.type === "BoxSet"
     readonly property bool isSeason: detail && detail.type === "Season"
+    readonly property bool isEpisode: detail && detail.type === "Episode"
     readonly property bool isPlayableLeaf: detail && (detail.type === "Movie" || detail.type === "Episode"
                                                      || detail.type === "Video" || detail.type === "MusicVideo")
     property var filmography: []
     property var extras: []
     property var collectionItems: []   // BoxSet (collection) members
+    property var seriesNextUp: []      // series detail: Next Up row
+    property var moreFrom: []          // episode detail: other episodes this season
 
     // collection members grouped by type, in a sensible display order
     readonly property var collectionGroups: {
@@ -189,12 +192,15 @@ Item {
                 } else {
                     screen.client.fetchSimilar(screen.itemId, "d:similar:" + screen.itemId)
                     screen.client.fetchSpecialFeatures(screen.itemId, "d:extras:" + screen.itemId)
-                    if (screen.isSeries)
+                    if (screen.isSeries) {
                         screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
-                    else if (screen.isBoxSet)
+                        screen.client.fetchNextUp("d:nextup:" + screen.detail.id, screen.detail.id)
+                    } else if (screen.isBoxSet)
                         screen.client.fetchItems(screen.detail.id, "d:children:" + screen.itemId, "SortName", "Ascending")
                     else if (screen.isSeason)
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
+                    else if (screen.isEpisode && screen.detail.seriesId)
+                        screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.seasonId, "d:morefrom:" + screen.detail.id)
                 }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
@@ -208,6 +214,10 @@ Item {
                 screen.episodes = items
             } else if (tag === "d:children:" + screen.itemId) {
                 screen.collectionItems = items
+            } else if (screen.detail && tag === "d:nextup:" + screen.detail.id) {
+                screen.seriesNextUp = items
+            } else if (screen.detail && tag === "d:morefrom:" + screen.detail.id) {
+                screen.moreFrom = items.filter(e => e.id !== screen.detail.id) // exclude the current episode
             } else if (tag === "d:similar:" + screen.itemId) {
                 screen.similar = items
             } else if (tag === "d:filmography:" + screen.itemId) {
@@ -424,6 +434,28 @@ Item {
                         Layout.alignment: Qt.AlignBottom
                         spacing: Theme.spacingSmall
 
+                        // episode breadcrumb: clickable series name + SxxExx
+                        RowLayout {
+                            visible: screen.isEpisode && screen.detail && screen.detail.seriesName
+                            spacing: 8
+                            Text {
+                                text: screen.detail ? (screen.detail.seriesName || "") : ""
+                                color: seriesLinkHover.hovered ? Theme.accentHover : Theme.accent
+                                font.pixelSize: Theme.fontNormal; font.bold: true
+                                HoverHandler { id: seriesLinkHover }
+                                TapHandler {
+                                    onTapped: screen.openDetail({ id: screen.detail.seriesId,
+                                                                  name: screen.detail.seriesName, type: "Series" })
+                                }
+                            }
+                            Text {
+                                visible: screen.detail && screen.detail.parentIndexNumber !== undefined
+                                         && screen.detail.indexNumber !== undefined
+                                text: "·  S" + (screen.detail ? screen.detail.parentIndexNumber : "")
+                                      + ":E" + (screen.detail ? screen.detail.indexNumber : "")
+                                color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
+                            }
+                        }
                         Text {
                             text: screen.detail ? (screen.detail.name || "") : ""
                             color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true
@@ -464,7 +496,7 @@ Item {
                                 onClicked: screen.playFromStart(screen.detail)
                             }
                             JIconButton {
-                                text: "⇄"  // shuffle (series / season / collection)
+                                text: "⇄"  // shuffle (series / season / collection) — 🔀 emoji is tofu on this font
                                 visible: screen.isSeries || screen.isSeason || screen.isBoxSet
                                 enabled: screen.isSeries ? screen.seasons.length > 0
                                          : screen.isSeason ? screen.episodes.length > 0
@@ -612,6 +644,18 @@ Item {
                 }
             }
 
+            // --- series: Next Up ---
+            MediaRow {
+                title: qsTr("Next Up")
+                model: screen.seriesNextUp
+                client: screen.client
+                shape: "thumb"
+                onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+            }
+
             // --- series: season selector + episodes ---
             ColumnLayout {
                 Layout.fillWidth: true
@@ -709,6 +753,20 @@ Item {
                 model: screen.filmography
                 client: screen.client
                 shape: "poster"
+                onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+            }
+
+            // --- more from this season (episode pages) ---
+            MediaRow {
+                title: (screen.detail && screen.detail.parentIndexNumber !== undefined)
+                       ? qsTr("More From Season %1").arg(screen.detail.parentIndexNumber)
+                       : qsTr("More From This Series")
+                model: screen.moreFrom
+                client: screen.client
+                shape: "thumb"
                 onItemActivated: (it) => screen.play(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
