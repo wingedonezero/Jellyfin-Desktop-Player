@@ -42,9 +42,32 @@ Item {
     property string viewMode: "poster"  // poster | thumb | banner | list (per-library)
     property string sortBy: "SortName"
     property string sortOrder: "Ascending"
-    property string playedFilter: "all" // all | unplayed | played | resumable
-    property bool favFilter: false
     property string nameStartsWith: ""  // alphabet picker (NameStartsWith)
+    // filter-dialog state — mirrors jellyfin-web filterdialog.js query fields
+    property var fltFilters: []          // IsPlayed / IsUnplayed / IsResumable / IsFavorite
+    property var fltSeriesStatus: []     // Continuing / Ended / Unreleased
+    property var fltVideoTypes: []       // Bluray / Dvd
+    property var fltGenres: []
+    property var fltOfficialRatings: []
+    property var fltTags: []
+    property var fltYears: []
+    property bool fltHasSubtitles: false
+    property bool fltHasTrailer: false
+    property bool fltHasSpecialFeature: false
+    property bool fltHasThemeSong: false
+    property bool fltHasThemeVideo: false
+    property bool fltIs4K: false
+    property bool fltIs3D: false
+    property string fltHD: ""            // "" | "hd" | "sd"
+    property var filterData: ({})        // {Genres,OfficialRatings,Tags,Years} from /Items/Filters
+    property bool expFilters: true
+    property bool expStatus: false
+    property bool expFeatures: false
+    property bool expVideo: false
+    property bool expGenres: false
+    property bool expRatings: false
+    property bool expTags: false
+    property bool expYears: false
     readonly property var alphabet: ["✕","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
     property int startIndex: 0
     property int totalCount: 0
@@ -86,6 +109,7 @@ Item {
         }
         reloadItems()
         loadKind(curKind)  // load the initial tab's content if it isn't the items grid
+        if (parentId !== "" && client) client.fetchItemFilters(parentId, includeType(), "lib:filters:" + parentId)
     }
     function setViewMode(m) { viewMode = m; if (config) config.setValue("library/view/" + parentId, m) }
     // Compute the kind FRESH from the current tab — the curKind binding is still
@@ -93,13 +117,45 @@ Item {
     // re-evaluated yet), which would load the wrong tab's content.
     onTabChanged: loadKind(filteredView ? "items" : (tabs[tab] ? tabs[tab].kind : "items"))
 
+    function includeType() { return collectionType === "movies" ? "Movie" : collectionType === "tvshows" ? "Series" : "" }
+    function toggleVal(arr, v) { var a = arr.slice(); var i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); return a }
+    function inArr(arr, v) { return arr.indexOf(v) >= 0 }
+    function applyFilters() { startIndex = 0; reloadItems() }
+    function fActive() {
+        return fltFilters.length || fltSeriesStatus.length || fltVideoTypes.length || fltGenres.length
+            || fltOfficialRatings.length || fltTags.length || fltYears.length
+            || fltHasSubtitles || fltHasTrailer || fltHasSpecialFeature || fltHasThemeSong || fltHasThemeVideo
+            || fltIs4K || fltIs3D || fltHD !== ""
+    }
+    function resetFilters() {
+        fltFilters = []; fltSeriesStatus = []; fltVideoTypes = []; fltGenres = []
+        fltOfficialRatings = []; fltTags = []; fltYears = []
+        fltHasSubtitles = false; fltHasTrailer = false; fltHasSpecialFeature = false
+        fltHasThemeSong = false; fltHasThemeVideo = false; fltIs4K = false; fltIs3D = false; fltHD = ""
+        applyFilters()
+    }
     function filterPart() {
-        var f = []
-        if (playedFilter === "unplayed") f.push("IsUnplayed")
-        else if (playedFilter === "played") f.push("IsPlayed")
-        else if (playedFilter === "resumable") f.push("IsResumable")
-        if (favFilter) f.push("IsFavorite")
-        return f.length ? ("&Filters=" + f.join(",") + "&Recursive=true") : ""
+        var p = []
+        if (fltFilters.length) p.push("Filters=" + fltFilters.join(","))
+        if (fltSeriesStatus.length) p.push("SeriesStatus=" + fltSeriesStatus.join(","))
+        if (fltVideoTypes.length) p.push("VideoTypes=" + fltVideoTypes.join(","))
+        if (fltGenres.length) p.push("Genres=" + fltGenres.map(g => encodeURIComponent(g)).join("|"))
+        if (fltOfficialRatings.length) p.push("OfficialRatings=" + fltOfficialRatings.map(g => encodeURIComponent(g)).join("|"))
+        if (fltTags.length) p.push("Tags=" + fltTags.map(g => encodeURIComponent(g)).join("|"))
+        if (fltYears.length) p.push("Years=" + fltYears.join(","))
+        if (fltHasSubtitles) p.push("HasSubtitles=true")
+        if (fltHasTrailer) p.push("HasTrailer=true")
+        if (fltHasSpecialFeature) p.push("HasSpecialFeature=true")
+        if (fltHasThemeSong) p.push("HasThemeSong=true")
+        if (fltHasThemeVideo) p.push("HasThemeVideo=true")
+        if (fltIs4K) p.push("Is4K=true")
+        if (fltIs3D) p.push("Is3D=true")
+        if (fltHD === "hd") p.push("IsHD=true")
+        else if (fltHD === "sd") p.push("IsHD=false")
+        if (p.length === 0) return ""
+        var q = "&Recursive=true"
+        if (includeType() !== "") q += "&IncludeItemTypes=" + includeType()
+        return q + "&" + p.join("&")
     }
     function reloadItems() {
         if (!client) return
@@ -154,6 +210,7 @@ Item {
         function onItemsPageReady(tag, its, total, start) {
             if (tag === screen.itemsTag) { screen.items = its; screen.totalCount = total }
         }
+        function onJsonReady(tag, data) { if (tag === "lib:filters:" + screen.parentId && data) screen.filterData = data }
         function onCategoriesReady(tag, cats) { if (tag === "lib:sugRecs:" + screen.parentId) screen.sugRecs = cats }
     }
 
@@ -255,6 +312,34 @@ Item {
             }
         }
     }
+    // ---- filter-dialog building blocks ----
+    component FGroupHdr: ItemDelegate {
+        id: gh
+        property bool collapsed: true
+        hoverEnabled: true; Layout.fillWidth: true; implicitHeight: 38
+        background: Rectangle { color: gh.hovered ? Theme.surfaceHover : "transparent" }
+        contentItem: RowLayout {
+            Text { text: gh.collapsed ? "▸" : "▾"; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.leftMargin: 12 }
+            Text { text: gh.text; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true; Layout.fillWidth: true; Layout.leftMargin: 4 }
+        }
+    }
+    component FChk: ItemDelegate {
+        id: fchk
+        property bool checkedState: false
+        hoverEnabled: true; Layout.fillWidth: true; implicitHeight: 32
+        background: Rectangle { radius: Theme.radius; color: fchk.hovered ? Theme.surfaceHover : "transparent" }
+        contentItem: RowLayout {
+            spacing: 8
+            Rectangle {
+                Layout.leftMargin: 24
+                width: 16; height: 16; radius: 3
+                border.color: fchk.checkedState ? Theme.accent : Theme.divider; border.width: 1
+                color: fchk.checkedState ? Theme.accent : "transparent"
+                Text { anchors.centerIn: parent; text: fchk.checkedState ? "✓" : ""; color: Theme.accentText; font.pixelSize: 11; font.bold: true }
+            }
+            Text { text: fchk.text; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.rightMargin: 12; elide: Text.ElideRight }
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -331,46 +416,9 @@ Item {
                 onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.startIndex = 0; screen.reloadItems() }
             }
             JIconButton {
-                id: filterBtn
                 text: "▤"
-                fg: (screen.playedFilter !== "all" || screen.favFilter) ? Theme.accent : Theme.textPrimary
-                onClicked: filterPopup.open()
-                Popup {
-                    id: filterPopup
-                    width: 240
-                    x: filterBtn.width - width
-                    y: filterBtn.height + 4
-                    padding: 8
-                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-                    background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-                    contentItem: ColumnLayout {
-                        spacing: 2
-                        Text { text: qsTr("Status"); color: Theme.textDisabled; font.pixelSize: Theme.fontTiny; font.bold: true; Layout.leftMargin: 6 }
-                        Repeater {
-                            model: [{ k: "all", l: qsTr("All") }, { k: "unplayed", l: qsTr("Unplayed") }, { k: "played", l: qsTr("Played") }, { k: "resumable", l: qsTr("Resumable") }]
-                            ItemDelegate {
-                                required property var modelData
-                                Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                                onClicked: { screen.playedFilter = modelData.k; screen.startIndex = 0; screen.reloadItems() }
-                                contentItem: RowLayout {
-                                    Text { text: modelData.l; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 6 }
-                                    Text { text: screen.playedFilter === modelData.k ? "✓" : ""; color: Theme.accent; Layout.rightMargin: 6 }
-                                }
-                                background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-                            }
-                        }
-                        Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider; Layout.topMargin: 4; Layout.bottomMargin: 4 }
-                        ItemDelegate {
-                            Layout.fillWidth: true; implicitHeight: 36; hoverEnabled: true
-                            onClicked: { screen.favFilter = !screen.favFilter; screen.startIndex = 0; screen.reloadItems() }
-                            contentItem: RowLayout {
-                                Text { text: qsTr("Favorites only"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; Layout.fillWidth: true; Layout.leftMargin: 6 }
-                                Text { text: screen.favFilter ? "✓" : ""; color: Theme.accent; Layout.rightMargin: 6 }
-                            }
-                            background: Rectangle { radius: Theme.radius; color: parent.hovered ? Theme.surfaceHover : "transparent" }
-                        }
-                    }
-                }
+                fg: screen.fActive() ? Theme.accent : Theme.textPrimary
+                onClicked: filterDialog.open()
             }
         }
 
@@ -507,6 +555,111 @@ Item {
                 onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onAddCollection: (it) => screen.itemAddToCollection(it)
                 onCardAct: (verb, it) => screen.cardAction(verb, it)
+            }
+        }
+    }
+
+    // ---- filter dialog (mirrors jellyfin-web filterdialog.js) ----
+    Popup {
+        id: filterDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 440
+        height: Math.min(parent ? parent.height - 80 : 600, 760)
+        padding: 0
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
+        readonly property bool av: screen.collectionType === "movies" || screen.collectionType === "tvshows"
+        contentItem: ColumnLayout {
+            spacing: 0
+            RowLayout {
+                Layout.fillWidth: true; Layout.margins: 12
+                Text { text: qsTr("Filters"); color: Theme.textPrimary; font.bold: true; font.pixelSize: Theme.fontLarge; Layout.fillWidth: true }
+                Button {
+                    id: resetBtn; hoverEnabled: true; padding: 6; enabled: screen.fActive()
+                    onClicked: screen.resetFilters()
+                    background: Rectangle { radius: Theme.radius; color: resetBtn.hovered && resetBtn.enabled ? Theme.surfaceHover : "transparent"; border.color: Theme.divider; border.width: 1 }
+                    contentItem: Text { text: qsTr("Reset"); color: resetBtn.enabled ? Theme.textPrimary : Theme.textDisabled; font.pixelSize: Theme.fontSmall }
+                }
+                JIconButton { text: "✕"; implicitWidth: 30; implicitHeight: 30; onClicked: filterDialog.close() }
+            }
+            Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.divider }
+            Flickable {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                contentWidth: width; contentHeight: groups.implicitHeight
+                clip: true
+                ScrollBar.vertical: ScrollBar {}
+                ColumnLayout {
+                    id: groups
+                    width: parent.width
+                    spacing: 0
+
+                    // Filters
+                    FGroupHdr { text: qsTr("Filters"); collapsed: !screen.expFilters; onClicked: screen.expFilters = !screen.expFilters }
+                    Repeater {
+                        model: [{v:"IsPlayed",l:qsTr("Played")},{v:"IsUnplayed",l:qsTr("Unplayed")},{v:"IsResumable",l:qsTr("Resumable")},{v:"IsFavorite",l:qsTr("Favorites")}]
+                        FChk {
+                            required property var modelData
+                            visible: screen.expFilters
+                            text: modelData.l
+                            checkedState: screen.inArr(screen.fltFilters, modelData.v)
+                            onClicked: { screen.fltFilters = screen.toggleVal(screen.fltFilters, modelData.v); screen.applyFilters() }
+                        }
+                    }
+                    // Series status (tvshows)
+                    FGroupHdr { visible: screen.collectionType === "tvshows"; text: qsTr("Status"); collapsed: !screen.expStatus; onClicked: screen.expStatus = !screen.expStatus }
+                    Repeater {
+                        model: screen.collectionType === "tvshows" ? [{v:"Continuing",l:qsTr("Continuing")},{v:"Ended",l:qsTr("Ended")},{v:"Unreleased",l:qsTr("Unreleased")}] : []
+                        FChk {
+                            required property var modelData
+                            visible: screen.expStatus
+                            text: modelData.l
+                            checkedState: screen.inArr(screen.fltSeriesStatus, modelData.v)
+                            onClicked: { screen.fltSeriesStatus = screen.toggleVal(screen.fltSeriesStatus, modelData.v); screen.applyFilters() }
+                        }
+                    }
+                    // Features (movies/tvshows)
+                    FGroupHdr { visible: filterDialog.av; text: qsTr("Features"); collapsed: !screen.expFeatures; onClicked: screen.expFeatures = !screen.expFeatures }
+                    FChk { visible: screen.expFeatures && filterDialog.av; text: qsTr("Subtitles"); checkedState: screen.fltHasSubtitles; onClicked: { screen.fltHasSubtitles = !screen.fltHasSubtitles; screen.applyFilters() } }
+                    FChk { visible: screen.expFeatures && filterDialog.av; text: qsTr("Trailers"); checkedState: screen.fltHasTrailer; onClicked: { screen.fltHasTrailer = !screen.fltHasTrailer; screen.applyFilters() } }
+                    FChk { visible: screen.expFeatures && filterDialog.av; text: qsTr("Special features"); checkedState: screen.fltHasSpecialFeature; onClicked: { screen.fltHasSpecialFeature = !screen.fltHasSpecialFeature; screen.applyFilters() } }
+                    FChk { visible: screen.expFeatures && filterDialog.av; text: qsTr("Theme song"); checkedState: screen.fltHasThemeSong; onClicked: { screen.fltHasThemeSong = !screen.fltHasThemeSong; screen.applyFilters() } }
+                    FChk { visible: screen.expFeatures && filterDialog.av; text: qsTr("Theme video"); checkedState: screen.fltHasThemeVideo; onClicked: { screen.fltHasThemeVideo = !screen.fltHasThemeVideo; screen.applyFilters() } }
+                    // Video types (movies/tvshows)
+                    FGroupHdr { visible: filterDialog.av; text: qsTr("Video types"); collapsed: !screen.expVideo; onClicked: screen.expVideo = !screen.expVideo }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("Blu-ray"); checkedState: screen.inArr(screen.fltVideoTypes,"Bluray"); onClicked: { screen.fltVideoTypes = screen.toggleVal(screen.fltVideoTypes,"Bluray"); screen.applyFilters() } }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("DVD"); checkedState: screen.inArr(screen.fltVideoTypes,"Dvd"); onClicked: { screen.fltVideoTypes = screen.toggleVal(screen.fltVideoTypes,"Dvd"); screen.applyFilters() } }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("HD"); checkedState: screen.fltHD === "hd"; onClicked: { screen.fltHD = (screen.fltHD === "hd" ? "" : "hd"); screen.applyFilters() } }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("4K"); checkedState: screen.fltIs4K; onClicked: { screen.fltIs4K = !screen.fltIs4K; screen.applyFilters() } }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("SD"); checkedState: screen.fltHD === "sd"; onClicked: { screen.fltHD = (screen.fltHD === "sd" ? "" : "sd"); screen.applyFilters() } }
+                    FChk { visible: screen.expVideo && filterDialog.av; text: qsTr("3D"); checkedState: screen.fltIs3D; onClicked: { screen.fltIs3D = !screen.fltIs3D; screen.applyFilters() } }
+                    // Genres (dynamic)
+                    FGroupHdr { visible: (screen.filterData.Genres || []).length > 0; text: qsTr("Genres"); collapsed: !screen.expGenres; onClicked: screen.expGenres = !screen.expGenres }
+                    Repeater {
+                        model: screen.filterData.Genres || []
+                        FChk { required property var modelData; visible: screen.expGenres; text: modelData; checkedState: screen.inArr(screen.fltGenres, modelData); onClicked: { screen.fltGenres = screen.toggleVal(screen.fltGenres, modelData); screen.applyFilters() } }
+                    }
+                    // Parental ratings (dynamic)
+                    FGroupHdr { visible: (screen.filterData.OfficialRatings || []).length > 0; text: qsTr("Parental ratings"); collapsed: !screen.expRatings; onClicked: screen.expRatings = !screen.expRatings }
+                    Repeater {
+                        model: screen.filterData.OfficialRatings || []
+                        FChk { required property var modelData; visible: screen.expRatings; text: modelData; checkedState: screen.inArr(screen.fltOfficialRatings, modelData); onClicked: { screen.fltOfficialRatings = screen.toggleVal(screen.fltOfficialRatings, modelData); screen.applyFilters() } }
+                    }
+                    // Tags (dynamic)
+                    FGroupHdr { visible: (screen.filterData.Tags || []).length > 0; text: qsTr("Tags"); collapsed: !screen.expTags; onClicked: screen.expTags = !screen.expTags }
+                    Repeater {
+                        model: screen.filterData.Tags || []
+                        FChk { required property var modelData; visible: screen.expTags; text: modelData; checkedState: screen.inArr(screen.fltTags, modelData); onClicked: { screen.fltTags = screen.toggleVal(screen.fltTags, modelData); screen.applyFilters() } }
+                    }
+                    // Years (dynamic)
+                    FGroupHdr { visible: (screen.filterData.Years || []).length > 0; text: qsTr("Years"); collapsed: !screen.expYears; onClicked: screen.expYears = !screen.expYears }
+                    Repeater {
+                        model: screen.filterData.Years || []
+                        FChk { required property var modelData; visible: screen.expYears; text: "" + modelData; checkedState: screen.inArr(screen.fltYears, "" + modelData); onClicked: { screen.fltYears = screen.toggleVal(screen.fltYears, "" + modelData); screen.applyFilters() } }
+                    }
+                    Item { Layout.fillWidth: true; Layout.preferredHeight: 12 }
+                }
             }
         }
     }

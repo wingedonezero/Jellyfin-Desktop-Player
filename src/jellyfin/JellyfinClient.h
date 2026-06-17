@@ -65,6 +65,9 @@ public:
     Q_INVOKABLE void fetchItemsPaged(const QString &parentId, const QString &requestTag,
                                      const QString &sortBy, const QString &sortOrder,
                                      const QString &extraQuery, int startIndex, int limit);
+    // Available filter values for a library → jsonReady(tag, {Genres,OfficialRatings,Tags,Years}).
+    Q_INVOKABLE void fetchItemFilters(const QString &parentId, const QString &includeItemTypes,
+                                      const QString &requestTag);
     Q_INVOKABLE void fetchItem(const QString &itemId,
                                const QString &requestTag = QStringLiteral("item"));
     Q_INVOKABLE void fetchSeasons(const QString &seriesId,

@@ -354,6 +354,15 @@ void JellyfinClient::fetchItemsPaged(const QString &parentId, const QString &req
     });
 }
 
+void JellyfinClient::fetchItemFilters(const QString &parentId, const QString &includeItemTypes,
+                                      const QString &requestTag)
+{
+    QString path = QStringLiteral("/Items/Filters?UserId=%1").arg(m_userId);
+    if (!parentId.isEmpty())        path += QStringLiteral("&ParentId=%1").arg(parentId);
+    if (!includeItemTypes.isEmpty()) path += QStringLiteral("&IncludeItemTypes=%1").arg(includeItemTypes);
+    getJsonAttempt(path, requestTag, 1); // → jsonReady(tag, object)
+}
+
 void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
