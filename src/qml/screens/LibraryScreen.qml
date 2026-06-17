@@ -11,6 +11,7 @@ import JellyfinDesktop
 Item {
     id: screen
     property var client
+    property var config
     property string parentId: ""
     property string collectionType: ""
     property string genreId: ""   // genre-filtered grid (no tabs)
@@ -36,6 +37,7 @@ Item {
     property var sugNext: []
 
     property int tab: 0
+    property string viewMode: "poster"  // poster | thumb | banner | list (per-library)
     property string sortBy: "SortName"
     property string sortOrder: "Ascending"
     property string playedFilter: "all" // all | unplayed | played | resumable
@@ -68,7 +70,11 @@ Item {
         return out
     }
 
-    Component.onCompleted: reloadItems()
+    Component.onCompleted: {
+        if (config) viewMode = config.value("library/view/" + parentId, "poster")
+        reloadItems()
+    }
+    function setViewMode(m) { viewMode = m; if (config) config.setValue("library/view/" + parentId, m) }
     // Compute the kind FRESH from the current tab — the curKind binding is still
     // the previous tab's value inside this (tab) change handler (it hasn't
     // re-evaluated yet), which would load the wrong tab's content.
@@ -163,6 +169,32 @@ Item {
             }
         }
     }
+    component WideList: ListView {
+        property var litems: []
+        property string lmode: "list"   // list | banner
+        signal activate(var it)
+        signal openDetail(var it)
+        signal addPlaylist(var it)
+        signal addCollection(var it)
+        signal cardAct(string verb, var it)
+        clip: true
+        topMargin: Theme.spacingSmall; bottomMargin: Theme.spacingLarge
+        spacing: Theme.spacingSmall
+        model: litems
+        ScrollBar.vertical: ScrollBar {}
+        delegate: MediaWideRow {
+            required property var modelData
+            readonly property var view: ListView.view
+            x: Theme.pagePad
+            width: view.width - Theme.pagePad * 2
+            item: modelData; client: screen.client; shape: view.lmode
+            onActivated: (it) => view.activate(it)
+            onOpenDetail: (it) => view.openDetail(it)
+            onAddToPlaylist: (it) => view.addPlaylist(it)
+            onAddToCollection: (it) => view.addCollection(it)
+            onCardAction: (verb, it) => view.cardAct(verb, it)
+        }
+    }
     component ChipGrid: GridView {
         property var chips: []
         signal chosen(var chip)
@@ -225,6 +257,17 @@ Item {
                 Layout.fillWidth: true; verticalAlignment: Text.AlignVCenter
             }
             JIconButton {
+                text: "▦"
+                onClicked: viewMenu.popup()
+                DarkMenu {
+                    id: viewMenu
+                    DarkMenuItem { text: qsTr("Poster"); onTriggered: screen.setViewMode("poster") }
+                    DarkMenuItem { text: qsTr("Thumbnail"); onTriggered: screen.setViewMode("thumb") }
+                    DarkMenuItem { text: qsTr("Banner"); onTriggered: screen.setViewMode("banner") }
+                    DarkMenuItem { text: qsTr("List"); onTriggered: screen.setViewMode("list") }
+                }
+            }
+            JIconButton {
                 text: "⇅"
                 onClicked: sortMenu.popup()
                 DarkMenu {
@@ -285,15 +328,32 @@ Item {
             Layout.fillHeight: true
             currentIndex: screen.kindIndex[screen.curKind]
 
-            // 0 items
-            ItemGrid {
-                gitems: screen.items
-                gshape: "poster"
-                onActivate: (it) => screen.itemActivated(it)
-                onOpenDetail: (it) => screen.itemOpenDetail(it)
-                onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
-                onAddCollection: (it) => screen.itemAddToCollection(it)
-                onCardAct: (verb, it) => screen.cardAction(verb, it)
+            // 0 items — poster/thumb grid or list/banner rows by view mode
+            Item {
+                id: itemsPane
+                readonly property bool wide: screen.viewMode === "list" || screen.viewMode === "banner"
+                ItemGrid {
+                    anchors.fill: parent
+                    visible: !itemsPane.wide
+                    gitems: itemsPane.wide ? [] : screen.items
+                    gshape: screen.viewMode === "thumb" ? "thumb" : "poster"
+                    onActivate: (it) => screen.itemActivated(it)
+                    onOpenDetail: (it) => screen.itemOpenDetail(it)
+                    onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                    onAddCollection: (it) => screen.itemAddToCollection(it)
+                    onCardAct: (verb, it) => screen.cardAction(verb, it)
+                }
+                WideList {
+                    anchors.fill: parent
+                    visible: itemsPane.wide
+                    litems: itemsPane.wide ? screen.items : []
+                    lmode: screen.viewMode === "banner" ? "banner" : "list"
+                    onActivate: (it) => screen.itemActivated(it)
+                    onOpenDetail: (it) => screen.itemOpenDetail(it)
+                    onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
+                    onAddCollection: (it) => screen.itemAddToCollection(it)
+                    onCardAct: (verb, it) => screen.cardAction(verb, it)
+                }
             }
             // 1 suggestions (rows)
             Flickable {

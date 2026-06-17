@@ -38,6 +38,8 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/components/DarkMenu.qml
         src/qml/components/DarkMenuItem.qml
         src/qml/components/MediaCard.qml
+        src/qml/components/MediaWideRow.qml
+        src/qml/components/ItemContextMenu.qml
         src/qml/components/MediaRow.qml
         src/qml/components/AppBar.qml
         src/qml/components/NavDrawer.qml

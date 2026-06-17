@@ -127,6 +127,7 @@ ApplicationWindow {
         id: libraryComp
         LibraryScreen {
             client: jellyfin
+            config: appConfig
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
             onOpenFiltered: (props) => stack.push(libraryComp, props)
