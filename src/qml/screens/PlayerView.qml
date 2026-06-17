@@ -35,6 +35,11 @@ Item {
     property int skipForward: 30
     property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
+    // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
+    property int _pendingAudioIndex: -999
+    property int _pendingSubIndex: -999
+    property string _pendingSourceId: ""
+    property bool _tracksApplied: false
 
     Component.onCompleted: if (config) {
         maxBitrate = config.value("playback/maxBitrate", 0)
@@ -91,8 +96,16 @@ Item {
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         showOsd()
+        // detail-page version / default-track selections (carried on the item)
+        root._pendingSourceId = item.mediaSourceId || ""
+        root._pendingAudioIndex = (item.audioStreamIndex === undefined || item.audioStreamIndex === null) ? -999 : item.audioStreamIndex
+        root._pendingSubIndex = (item.subtitleStreamIndex === undefined || item.subtitleStreamIndex === null) ? -999 : item.subtitleStreamIndex
+        root._tracksApplied = false
         // resolve direct-play vs transcode first; onStreamReady actually loads it
-        client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
+                             root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
+                             root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
+                             root._pendingSourceId)
         // fetch the full item so the OSD has trickplay sheets (the resume/episode
         // list items don't carry them); merged in onItemsReady below
         client.fetchItem(item.id, "player:item")
@@ -113,7 +126,30 @@ Item {
     function reloadAtPosition() {
         if (player.currentId.length === 0) return
         root._resumeSeconds = player.position
-        client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play")
+        root._tracksApplied = false
+        client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
+                             root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
+                             root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
+                             root._pendingSourceId)
+    }
+    // Apply detail-page audio/subtitle selection to the loaded file (direct play):
+    // match the chosen Jellyfin stream index to the mpv track via its ffmpeg index.
+    // On a transcode the indices won't match (server already baked them) → no-op.
+    function _applyPendingTracks() {
+        if (root._tracksApplied) return
+        if (root._pendingAudioIndex >= 0) {
+            var a = player.audioTracks
+            for (var i = 0; i < a.length; ++i)
+                if (a[i].ffIndex === root._pendingAudioIndex) { player.setAudioTrack(a[i].id); break }
+        }
+        if (root._pendingSubIndex >= 0) {
+            var s = player.subtitleTracks
+            for (var j = 0; j < s.length; ++j)
+                if (s[j].ffIndex === root._pendingSubIndex) { player.setSubtitleTrack(s[j].id); break }
+        } else if (root._pendingSubIndex === -1) {
+            player.setSubtitleTrack(-1) // explicit "off"
+        }
+        root._tracksApplied = true
     }
     function setQuality(bitrate) {
         if (root.maxBitrate === bitrate) return
@@ -324,7 +360,13 @@ Item {
             else if (reason !== "2")
                 root.stop()              // error etc.; (transcode fallback lands later)
         }
-        onTracksChanged: console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
+        onTracksChanged: {
+            console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
+            // apply any detail-page default audio/subtitle once the tracks are known
+            if (audioTracks.length > 0 && !root._tracksApplied
+                    && (root._pendingAudioIndex >= 0 || root._pendingSubIndex >= -1))
+                root._applyPendingTracks()
+        }
     }
 
     // Keep the screen + both monitors awake while a file is actively playing

@@ -760,12 +760,12 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     }
     m[QStringLiteral("externalUrls")] = externalUrls;
 
-    // media info (container/size + video/audio/subtitle streams) from first source
+    // media sources (versions) — full array for the detail version/track selectors;
+    // each stream keeps its server Index so the player can pre-select a track.
     const QJsonArray sources = o.value(QStringLiteral("MediaSources")).toArray();
-    if (!sources.isEmpty()) {
-        const QJsonObject src = sources.first().toObject();
-        m[QStringLiteral("container")] = src.value(QStringLiteral("Container")).toString();
-        m[QStringLiteral("sizeBytes")] = src.value(QStringLiteral("Size")).toDouble();
+    QVariantList sourceList;
+    for (const QJsonValue &srcV : sources) {
+        const QJsonObject src = srcV.toObject();
         QVariantList streams;
         const QJsonArray streamArr = src.value(QStringLiteral("MediaStreams")).toArray();
         for (const QJsonValue &sv : streamArr) {
@@ -777,9 +777,27 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
                 {QStringLiteral("language"), s.value(QStringLiteral("Language")).toString()},
                 {QStringLiteral("width"), s.value(QStringLiteral("Width")).toInt()},
                 {QStringLiteral("height"), s.value(QStringLiteral("Height")).toInt()},
-                {QStringLiteral("channels"), s.value(QStringLiteral("Channels")).toInt()}});
+                {QStringLiteral("channels"), s.value(QStringLiteral("Channels")).toInt()},
+                {QStringLiteral("index"), s.value(QStringLiteral("Index")).toInt()}});
         }
-        m[QStringLiteral("mediaStreams")] = streams;
+        sourceList.append(QVariantMap{
+            {QStringLiteral("id"), src.value(QStringLiteral("Id")).toString()},
+            {QStringLiteral("name"), src.value(QStringLiteral("Name")).toString()},
+            {QStringLiteral("container"), src.value(QStringLiteral("Container")).toString()},
+            {QStringLiteral("sizeBytes"), src.value(QStringLiteral("Size")).toDouble()},
+            {QStringLiteral("defaultAudioIndex"), src.contains(QStringLiteral("DefaultAudioStreamIndex"))
+                                                  ? src.value(QStringLiteral("DefaultAudioStreamIndex")).toInt() : -1},
+            {QStringLiteral("defaultSubtitleIndex"), src.contains(QStringLiteral("DefaultSubtitleStreamIndex"))
+                                                     ? src.value(QStringLiteral("DefaultSubtitleStreamIndex")).toInt() : -1},
+            {QStringLiteral("streams"), streams}});
+    }
+    m[QStringLiteral("mediaSources")] = sourceList;
+    // top-level (first source) for the existing Media Info display + back-compat
+    if (!sourceList.isEmpty()) {
+        const QVariantMap s0 = sourceList.first().toMap();
+        m[QStringLiteral("container")] = s0.value(QStringLiteral("container"));
+        m[QStringLiteral("sizeBytes")] = s0.value(QStringLiteral("sizeBytes"));
+        m[QStringLiteral("mediaStreams")] = s0.value(QStringLiteral("streams"));
     }
 
     // trickplay sheets (scrubber hover previews): { mediaSourceId: { width: info } }
@@ -846,14 +864,14 @@ QUrl JellyfinClient::imageUrl(const QString &itemId, const QString &imageType, i
     return url;
 }
 
-QUrl JellyfinClient::streamUrl(const QString &itemId) const
+QUrl JellyfinClient::streamUrl(const QString &itemId, const QString &sourceId) const
 {
     // Direct play: mpv handles essentially every codec/container, so we ask the
     // server for the original file (static=true) rather than a transcode.
     QUrl url{m_serverUrl + QStringLiteral("/Videos/%1/stream").arg(itemId)};
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("static"), QStringLiteral("true"));
-    q.addQueryItem(QStringLiteral("mediaSourceId"), itemId);
+    q.addQueryItem(QStringLiteral("mediaSourceId"), sourceId.isEmpty() ? itemId : sourceId);
     q.addQueryItem(QStringLiteral("deviceId"), m_deviceId);
     q.addQueryItem(QStringLiteral("api_key"), m_token);
     url.setQuery(q);
@@ -937,17 +955,20 @@ QJsonObject JellyfinClient::deviceProfile() const
 }
 
 void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
-                                   const QString &requestTag)
+                                   const QString &requestTag, int audioStreamIndex,
+                                   int subtitleStreamIndex, const QString &mediaSourceId)
 {
+    const QString srcId = mediaSourceId.isEmpty() ? itemId : mediaSourceId; // chosen version
     if (maxBitrate <= 0) {
         // Auto: mpv direct-plays the original file — no server transcode, no
         // PlaybackInfo round-trip. (The server reports direct-play unsupported
         // for our generic profile, but mpv handles every codec, so we trust it.)
+        // Audio/subtitle selection is applied by the player on the loaded file.
         m_playSessionId.clear();
-        m_mediaSourceId = itemId;
+        m_mediaSourceId = srcId;
         m_transcoding = false;
         QVariantMap info;
-        info[QStringLiteral("url")] = streamUrl(itemId).toString();
+        info[QStringLiteral("url")] = streamUrl(itemId, srcId).toString();
         info[QStringLiteral("isTranscode")] = false;
         Q_EMIT streamReady(requestTag, info);
         return;
@@ -964,18 +985,24 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
     body[QStringLiteral("EnableTranscoding")] = true;
     body[QStringLiteral("AllowVideoStreamCopy")] = true;
     body[QStringLiteral("AllowAudioStreamCopy")] = true;
+    if (!mediaSourceId.isEmpty())
+        body[QStringLiteral("MediaSourceId")] = mediaSourceId;
+    if (audioStreamIndex >= 0)
+        body[QStringLiteral("AudioStreamIndex")] = audioStreamIndex;
+    if (subtitleStreamIndex >= 0)
+        body[QStringLiteral("SubtitleStreamIndex")] = subtitleStreamIndex;
 
     const QString path = QStringLiteral("/Items/%1/PlaybackInfo?userId=%2").arg(itemId, m_userId);
     QNetworkReply *reply = post(path, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, maxBitrate]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, maxBitrate]() {
         reply->deleteLater();
         QVariantMap info;
         if (reply->error() != QNetworkReply::NoError) {
             // PlaybackInfo failed → fall back to direct play.
             m_playSessionId.clear();
-            m_mediaSourceId = itemId;
+            m_mediaSourceId = srcId;
             m_transcoding = false;
-            info[QStringLiteral("url")] = streamUrl(itemId).toString();
+            info[QStringLiteral("url")] = streamUrl(itemId, srcId).toString();
             info[QStringLiteral("isTranscode")] = false;
             Q_EMIT streamReady(requestTag, info);
             return;
@@ -995,12 +1022,12 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         QString url;
         bool isTranscode = false;
         if (maxBitrate <= 0 && supportsDirect) {
-            url = streamUrl(itemId).toString();              // Auto + fits → direct
+            url = streamUrl(itemId, srcId).toString();       // Auto + fits → direct
         } else if (!transcodingUrl.isEmpty()) {
             url = m_serverUrl + transcodingUrl;              // server-provided HLS transcode
             isTranscode = true;
         } else {
-            url = streamUrl(itemId).toString();              // last-resort direct
+            url = streamUrl(itemId, srcId).toString();       // last-resort direct
         }
         m_transcoding = isTranscode;
         info[QStringLiteral("url")] = url;

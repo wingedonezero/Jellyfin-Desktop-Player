@@ -58,6 +58,42 @@ Item {
     property var seriesNextUp: []      // series detail: Next Up row
     property var moreFrom: []          // episode detail: other episodes this season
 
+    // version / default-track selection (leaf items with media sources)
+    property int selectedSourceIndex: 0
+    property int selectedAudioIndex: -1
+    property int selectedSubtitleIndex: -1
+    readonly property var selectedSource: (detail && detail.mediaSources && detail.mediaSources.length > selectedSourceIndex)
+                                          ? detail.mediaSources[selectedSourceIndex] : null
+    function streamsOfType(t) {
+        var src = selectedSource
+        var streams = src ? src.streams : ((detail && detail.mediaStreams) ? detail.mediaStreams : [])
+        return streams.filter(s => s.type === t)
+    }
+    function audioOptions() {
+        var a = streamsOfType("Audio")
+        return a.length > 1 ? a.map(s => ({ text: s.title || s.language || qsTr("Audio"), value: s.index })) : []
+    }
+    function subtitleOptions() {
+        var s = streamsOfType("Subtitle")
+        if (s.length === 0) return []
+        return [{ text: qsTr("Off"), value: -1 }]
+               .concat(s.map(x => ({ text: x.title || x.language || qsTr("Subtitle"), value: x.index })))
+    }
+    function selectSource(i) {
+        selectedSourceIndex = i
+        var src = selectedSource
+        selectedAudioIndex = (src && src.defaultAudioIndex !== undefined) ? src.defaultAudioIndex : -1
+        selectedSubtitleIndex = (src && src.defaultSubtitleIndex !== undefined) ? src.defaultSubtitleIndex : -1
+    }
+    // attach the chosen version + default audio/subtitle to a play request
+    function _withSelections(item) {
+        var it = Object.assign({}, item)
+        if (selectedSource) it.mediaSourceId = selectedSource.id
+        if (selectedAudioIndex >= 0) it.audioStreamIndex = selectedAudioIndex
+        it.subtitleStreamIndex = selectedSubtitleIndex // -1 = off, >=0 = a stream
+        return it
+    }
+
     // collection members grouped by type, in a sensible display order
     readonly property var collectionGroups: {
         if (!isBoxSet) return []
@@ -119,7 +155,7 @@ Item {
         } else if (isBoxSet) {
             if (playableChildren.length > 0) screen.playQueue(playableChildren, 0)
         } else {
-            screen.play(detail)
+            screen.play(_withSelections(detail))
         }
     }
     function shuffle() {
@@ -139,7 +175,7 @@ Item {
     }
     // play an item ignoring its saved resume position (web's "Play from beginning")
     function playFromStart(item) {
-        var it = Object.assign({}, item)
+        var it = _withSelections(item)
         it.playbackTicks = 0
         screen.play(it)
     }
@@ -207,6 +243,7 @@ Item {
                 screen.played = screen.detail.played === true
                 screen.cast = screen.detail.people || []
                 screen.overviewExpanded = false
+                screen.selectSource(0) // reset version + default tracks for the new item
                 if (screen.isPerson) {
                     screen.client.fetchByPerson(screen.detail.id, "d:filmography:" + screen.itemId)
                 } else {
@@ -272,6 +309,46 @@ Item {
                 ActionButton {
                     primary: true; text: qsTr("Confirm")
                     onClicked: { if (screen._confirmAction) screen._confirmAction(); confirmPopup.close() }
+                }
+            }
+        }
+    }
+
+    // reusable: a labeled dropdown for version / audio / subtitle selection
+    component TrackSelect: RowLayout {
+        id: ts
+        property string label: ""
+        property var options: []
+        property var current: null
+        signal picked(var value)
+        Layout.fillWidth: true
+        spacing: Theme.spacingSmall
+        Text { text: ts.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+        Button {
+            id: tsBtn
+            Layout.preferredWidth: 340
+            hoverEnabled: true
+            leftPadding: 12; rightPadding: 12; implicitHeight: Theme.controlHeight
+            background: Rectangle { radius: Theme.radius; color: tsBtn.hovered ? Theme.surfaceHover : Theme.surface
+                                    border.color: Theme.divider; border.width: 1 }
+            contentItem: Text {
+                text: { var o = ts.options.filter(x => x.value === ts.current); return (o.length ? o[0].text : "") + "   ▾" }
+                color: Theme.textPrimary; font.pixelSize: Theme.fontSmall
+                elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter
+            }
+            onClicked: tsMenu.popup()
+            DarkMenu {
+                id: tsMenu
+                implicitWidth: 340
+                Instantiator {
+                    model: ts.options
+                    delegate: DarkMenuItem {
+                        required property var modelData
+                        text: modelData.text
+                        onTriggered: ts.picked(modelData.value)
+                    }
+                    onObjectAdded: (index, object) => tsMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => tsMenu.removeItem(object)
                 }
             }
         }
@@ -698,6 +775,37 @@ Item {
                 }
             }
 
+            // --- version / audio / subtitle selectors (leaf items, like web) ---
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.pagePad
+                Layout.rightMargin: Theme.pagePad
+                spacing: Theme.spacingSmall
+                visible: screen.isPlayableLeaf && screen.selectedSource
+                TrackSelect {
+                    label: qsTr("Version")
+                    visible: (screen.detail && screen.detail.mediaSources ? screen.detail.mediaSources.length : 0) > 1
+                    options: (screen.detail && screen.detail.mediaSources ? screen.detail.mediaSources : [])
+                             .map((s, i) => ({ text: s.name || (qsTr("Version") + " " + (i + 1)), value: i }))
+                    current: screen.selectedSourceIndex
+                    onPicked: (v) => screen.selectSource(v)
+                }
+                TrackSelect {
+                    label: qsTr("Audio")
+                    visible: screen.audioOptions().length > 0
+                    options: screen.audioOptions()
+                    current: screen.selectedAudioIndex
+                    onPicked: (v) => screen.selectedAudioIndex = v
+                }
+                TrackSelect {
+                    label: qsTr("Subtitles")
+                    visible: screen.subtitleOptions().length > 0
+                    options: screen.subtitleOptions()
+                    current: screen.selectedSubtitleIndex
+                    onPicked: (v) => screen.selectedSubtitleIndex = v
+                }
+            }
+
             // --- external links + media info ---
             ColumnLayout {
                 Layout.fillWidth: true
@@ -773,7 +881,7 @@ Item {
                                     Behavior on opacity { NumberAnimation { duration: Theme.animFast } }
                                 }
                                 TapHandler {
-                                    onTapped: { var it = Object.assign({}, screen.detail); it.playbackTicks = modelData.startTicks; screen.play(it) }
+                                    onTapped: { var it = screen._withSelections(screen.detail); it.playbackTicks = modelData.startTicks; screen.play(it) }
                                 }
                             }
                             Text { text: modelData.name; color: Theme.textPrimary; font.pixelSize: Theme.fontSmall

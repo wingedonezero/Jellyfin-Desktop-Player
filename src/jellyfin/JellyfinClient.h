@@ -92,7 +92,7 @@ public:
                               int maxHeight = 0,
                               const QString &tag = QString(),
                               int index = -1) const; // index >= 0 for Chapter images
-    Q_INVOKABLE QUrl streamUrl(const QString &itemId) const;
+    Q_INVOKABLE QUrl streamUrl(const QString &itemId, const QString &sourceId = QString()) const;
     // One trickplay tile sheet (a grid of thumbnails) at the given resolution width.
     Q_INVOKABLE QUrl trickplayUrl(const QString &itemId, int width, int index) const;
     // Media segments (intro/outro/recap/preview/commercial) for skip prompts.
@@ -103,7 +103,9 @@ public:
     // source fits (maxBitrate <= 0 = Auto), otherwise an HLS transcode URL.
     // Emits streamReady(requestTag, {url, isTranscode, playSessionId}).
     Q_INVOKABLE void requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
-                                   const QString &requestTag = QStringLiteral("stream"));
+                                   const QString &requestTag = QStringLiteral("stream"),
+                                   int audioStreamIndex = -1, int subtitleStreamIndex = -1,
+                                   const QString &mediaSourceId = QString());
 
     // --- playback progress reporting ---
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId);

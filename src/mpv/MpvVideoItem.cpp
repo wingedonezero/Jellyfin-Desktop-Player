@@ -479,6 +479,9 @@ void MpvVideoItem::updateTracks(const QVariantList &trackList)
         track[QStringLiteral("id")] = id;
         track[QStringLiteral("label")] = label;
         track[QStringLiteral("selected")] = t.value(QStringLiteral("selected")).toBool();
+        // ffmpeg stream index — equals the Jellyfin MediaStream Index for the same
+        // file, so the detail page can pre-select a track on direct play.
+        track[QStringLiteral("ffIndex")] = t.value(QStringLiteral("ff-index"), -1).toInt();
         (isAudio ? m_audioTracks : m_subtitleTracks).append(track);
     }
     Q_EMIT tracksChanged();
