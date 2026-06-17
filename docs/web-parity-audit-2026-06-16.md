@@ -281,5 +281,28 @@ Web-parity OSD work, committed per area and screenshot-verified live (Re:Monster
 - ⏸ **Keyboard shortcuts (§1.2) — DEFERRED by the user** ("come back to it later"; matching the web look came first). All ~22 keys still map to existing invokables (zero engine work) when picked up.
 **User-verify-owed (agent has no pointer/key input):** the remaining/ends-at toggle click, trickplay hover-follow, chapter prev/next/jump clicks, real media-segment skip+auto-skip (this server has no segment data — verified with an injected segment), up-next Start Now/Hide. Build green, tree clean.
 
-**Phase B — browse/detail depth (Tiers 4-5)** — library view-modes/filters/paging/sort, grouped search,
-detail version selector/chapters/next-up/trailer/etc.
+**Phase B — DETAIL/PLAY depth — ✅ DONE (2026-06-17); browse depth still pending.**
+Triggered by a user-reported bug (episodes from Next Up didn't auto-advance) → a full 1:1 sweep of the
+detail page + play/queue + card menu, committed per area and screenshot-verified live via window-id capture
+(`xwininfo -name` → `import -window <id>`, which grabs our app regardless of focus):
+- ✅ `a9d4b31` **Play-queue fix** — playing a single episode (Next Up / Continue Watching / search / card)
+  now queues the series from that episode (`fetchEpisodes` gains `startItemId`), so auto-advance / up-next /
+  prev-next work across seasons, not just from a season's Play. Verified 1/1 → 2/10.
+- ✅ `a06d7d3` Series Play → global Next Up (crosses seasons) · Play-from-beginning (↺) · Shuffle (⇄,
+  series/season/boxset). (`🔀` emoji is tofu on this box — only that glyph; player emoji render fine.)
+- ✅ `1a13c29` Detail Refresh metadata + Delete (new `deleteItem`, `CanDelete`-gated, confirm dialog).
+- ✅ `2db46cd` Series "Next Up" row · episode breadcrumb (clickable series + SxxExx) + "More From Season N".
+- ✅ `e767965` Chapters/Scenes section (parseItem Chapters + `imageUrl` Chapter index; click → play from start).
+- ✅ `1feaf1f` Logo image · tags chips · Director/Writer rows · critic rating · person Born/Died/Birthplace ·
+  expandable overview.
+- ✅ `8be7a4e` Version/source selector + default audio/subtitle (full MediaSources; `requestStream`/`streamUrl`
+  gain optional source/audio/sub — direct-play maps the Jellyfin Index→mpv ff-index, transcode passes to
+  PlaybackInfo; **all optional so the 90% direct-play path is unchanged**). ff-index↔Index match verified.
+- ✅ `b5d19bc` Card context menu completed — Add to queue / Play next (live `enqueue`/`playNextInsert`) +
+  Refresh/Delete via a shared Main confirm; one `cardAction(verb,item)` signal plumbed through all screens.
+**Editors deferred by the user:** Edit metadata / images / subtitles / Identify + Download (large dialogs;
+stay greyed). **User-verify-owed (no pointer/key input):** every click path (the menus/selectors render +
+the backing primitives are verified; mutations confirm-gated and never fired).
+**STILL PENDING in B — browse depth (Tier 4):** library view-modes/alpha/paging/sort-direction + the 7
+missing filter-dialog groups, grouped search (+ extra item types), Home extra section types,
+`display/libraryPageSize`, detail Trailer button. These were not part of this detail/play sweep.
