@@ -1,5 +1,13 @@
 # Comprehensive Parity Audit vs jellyfin-web — 2026-06-16
 
+> **SCOPE UPDATE (2026-06-17): admin is OUT OF SCOPE.** The entire
+> server-administration surface was scrapped — this is now a pure consumer
+> client (player + browse + user settings). **Ignore Tiers 2–3 and every
+> "Admin ·" scorecard row below** (kept only as historical record). The live
+> roadmap is the consumer work in **Tier 4 (browse depth)** + **Tier 5 (detail
+> depth)**, plus player keyboard shortcuts (§1.2). The per-item Refresh/Delete
+> more-menu actions (Tier 5) were also dropped.
+
 **Method.** 9 parallel read-only audits, each diffing our QML/C++ against the exact
 jellyfin-web source (`../jellyfin-reference/jellyfin-web`), with Fladder
 (`../jellyfin-reference/Fladder`) and haruna/mpc-qt as native-reachability proofs.
