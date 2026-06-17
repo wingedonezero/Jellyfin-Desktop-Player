@@ -284,6 +284,10 @@ void JellyfinClient::refreshItem(const QString &itemId)
 {
     fireAndForget(post(QStringLiteral("/Items/%1/Refresh?metadataRefreshMode=Default&imageRefreshMode=Default").arg(itemId), QByteArray()));
 }
+void JellyfinClient::deleteItem(const QString &itemId)
+{
+    fireAndForget(del(QStringLiteral("/Items/%1").arg(itemId)));
+}
 void JellyfinClient::setPluginEnabled(const QString &pluginId, const QString &version, bool enabled)
 {
     fireAndForget(post(QStringLiteral("/Plugins/%1/%2/%3").arg(pluginId, version, enabled ? QStringLiteral("Enable") : QStringLiteral("Disable")), QByteArray()));
@@ -690,6 +694,7 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     m[QStringLiteral("type")] = o.value(QStringLiteral("Type")).toString();
     m[QStringLiteral("isFolder")] = o.value(QStringLiteral("IsFolder")).toBool();
     m[QStringLiteral("collectionType")] = o.value(QStringLiteral("CollectionType")).toString();
+    m[QStringLiteral("canDelete")] = o.value(QStringLiteral("CanDelete")).toBool();
     m[QStringLiteral("overview")] = o.value(QStringLiteral("Overview")).toString();
     m[QStringLiteral("productionYear")] = o.value(QStringLiteral("ProductionYear")).toInt();
     m[QStringLiteral("runTimeTicks")] = o.value(QStringLiteral("RunTimeTicks")).toDouble();

@@ -138,6 +138,7 @@ ApplicationWindow {
             onOpenDetail: (it) => win.openDetail(it)
             onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
             onItemAddToCollection: (it) => win.openAddTo(it, "collection")
+            onDeleted: stack.pop()
         }
     }
     Component {

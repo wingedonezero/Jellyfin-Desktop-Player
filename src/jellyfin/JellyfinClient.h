@@ -139,6 +139,7 @@ public:
     Q_INVOKABLE void revokeApiKey(const QString &accessToken);
     Q_INVOKABLE void updateTaskTriggers(const QString &taskId, const QVariantList &triggers);
     Q_INVOKABLE void refreshItem(const QString &itemId);
+    Q_INVOKABLE void deleteItem(const QString &itemId); // DELETE /Items/{id}
     Q_INVOKABLE void setPluginEnabled(const QString &pluginId, const QString &version, bool enabled);
     Q_INVOKABLE void uninstallPlugin(const QString &pluginId, const QString &version);
     Q_INVOKABLE void installPackage(const QString &name, const QString &guid, const QString &version, const QString &repoUrl);
