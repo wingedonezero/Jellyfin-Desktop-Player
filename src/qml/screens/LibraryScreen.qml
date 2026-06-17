@@ -39,6 +39,7 @@ Item {
     property var favItems: []
     property var episodeItems: []
     property var genrePreview: ({})   // genreId → preview items (genres-tab rows)
+    property var studioPreview: ({})  // studioId → preview items (networks-tab rows)
 
     property int tab: 0
     property string viewMode: "poster"  // poster | thumb | banner | list (per-library)
@@ -191,6 +192,13 @@ Item {
             client.fetchItems(parentId, "lib:gpre:" + list[i].id, "Random", "Ascending",
                               "&GenreIds=" + list[i].id + "&Recursive=true" + inc + "&Limit=12")
     }
+    function loadStudioPreviews(list) {
+        if (!client) return
+        var inc = includeType() !== "" ? ("&IncludeItemTypes=" + includeType()) : ""
+        for (var i = 0; i < list.length; i++)
+            client.fetchItems(parentId, "lib:spre:" + list[i].id, "Random", "Ascending",
+                              "&StudioIds=" + list[i].id + "&Recursive=true" + inc + "&Limit=12")
+    }
     function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; startIndex = 0; reloadItems() }
     function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); startIndex = 0; reloadItems() }
     function alphaSel(l) { return l === "✕" ? (nameStartsWith === "") : (nameStartsWith === l) }
@@ -214,7 +222,11 @@ Item {
                 var gid = tag.substring(9)
                 var m = Object.assign({}, screen.genrePreview); m[gid] = its; screen.genrePreview = m
             }
-            else if (tag === "lib:studios:" + screen.parentId) screen.studios = its
+            else if (tag === "lib:studios:" + screen.parentId) { screen.studios = its; screen.loadStudioPreviews(its) }
+            else if (tag.indexOf("lib:spre:") === 0) {
+                var sid = tag.substring(9)
+                var sm = Object.assign({}, screen.studioPreview); sm[sid] = its; screen.studioPreview = sm
+            }
             else if (tag === "lib:collections:" + screen.parentId) screen.collections = its
             else if (tag === "lib:upcoming:" + screen.parentId) screen.upcoming = its
             else if (tag === "lib:sugLatest:" + screen.parentId) screen.sugLatest = its
@@ -571,10 +583,35 @@ Item {
                     }
                 }
             }
-            // 5 networks (studios)
-            ChipGrid {
-                chips: screen.studios
-                onChosen: (s) => screen.openFiltered({ parentId: screen.parentId, collectionType: screen.collectionType, studioId: s.id, pageTitle: s.name })
+            // 5 networks (studios) — a preview row per network (jellyfin-web)
+            Flickable {
+                contentWidth: width
+                contentHeight: studioCol.implicitHeight + Theme.spacingLarge
+                clip: true
+                ScrollBar.vertical: ScrollBar {}
+                ColumnLayout {
+                    id: studioCol
+                    width: parent.width
+                    y: Theme.spacing
+                    spacing: Theme.spacingLarge
+                    Repeater {
+                        model: screen.studios
+                        MediaRow {
+                            required property var modelData
+                            title: modelData.name
+                            titleLink: true
+                            model: screen.studioPreview[modelData.id] || []
+                            client: screen.client
+                            shape: "poster"
+                            onItemActivated: (it) => screen.itemActivated(it)
+                            onItemOpenDetail: (it) => screen.itemOpenDetail(it)
+                            onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                            onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                            onCardAction: (verb, it) => screen.cardAction(verb, it)
+                            onTitleClicked: screen.openFiltered({ parentId: screen.parentId, collectionType: screen.collectionType, studioId: modelData.id, pageTitle: modelData.name })
+                        }
+                    }
+                }
             }
             // 6 favorites (movies)
             ItemGrid {
