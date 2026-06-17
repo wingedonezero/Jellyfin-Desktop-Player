@@ -620,13 +620,19 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
     m[QStringLiteral("logoTag")] = tags.value(QStringLiteral("Logo")).toString();
     m[QStringLiteral("hasBackdrop")] = !o.value(QStringLiteral("BackdropImageTags")).toArray().isEmpty();
 
-    // genres
-    QVariantList genres;
+    // genres (names) + genreItems ({id,name} for clickable links)
+    QVariantList genres, genreItems;
     const QJsonArray genreArr = o.value(QStringLiteral("Genres")).toArray();
-    for (const QJsonValue &g : genreArr) {
+    for (const QJsonValue &g : genreArr)
         genres.append(g.toString());
-    }
     m[QStringLiteral("genres")] = genres;
+    const QJsonArray genreItemArr = o.value(QStringLiteral("GenreItems")).toArray();
+    for (const QJsonValue &g : genreItemArr) {
+        const QJsonObject go = g.toObject();
+        genreItems.append(QVariantMap{{QStringLiteral("id"), go.value(QStringLiteral("Id")).toString()},
+                                      {QStringLiteral("name"), go.value(QStringLiteral("Name")).toString()}});
+    }
+    m[QStringLiteral("genreItems")] = genreItems;
 
     // tags (detail)
     QVariantList tagList;
@@ -635,13 +641,17 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
         tagList.append(t.toString());
     m[QStringLiteral("tags")] = tagList;
 
-    // studios + tagline (detail)
-    QVariantList studios;
+    // studios — names + studioItems ({id,name} for clickable links)
+    QVariantList studios, studioItems;
     const QJsonArray studioArr = o.value(QStringLiteral("Studios")).toArray();
     for (const QJsonValue &s : studioArr) {
-        studios.append(s.toObject().value(QStringLiteral("Name")).toString());
+        const QJsonObject so = s.toObject();
+        studios.append(so.value(QStringLiteral("Name")).toString());
+        studioItems.append(QVariantMap{{QStringLiteral("id"), so.value(QStringLiteral("Id")).toString()},
+                                       {QStringLiteral("name"), so.value(QStringLiteral("Name")).toString()}});
     }
     m[QStringLiteral("studios")] = studios;
+    m[QStringLiteral("studioItems")] = studioItems;
     QVariantList prodLocs;
     const QJsonArray plArr = o.value(QStringLiteral("ProductionLocations")).toArray();
     for (const QJsonValue &p : plArr)

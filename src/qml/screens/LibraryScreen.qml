@@ -16,6 +16,7 @@ Item {
     property string collectionType: ""
     property string genreId: ""   // genre-filtered grid (no tabs)
     property string studioId: ""  // studio/network-filtered grid (no tabs)
+    property string tagName: ""   // tag-filtered grid (no tabs)
     property bool favorites: false
     property string pageTitle: ""
 
@@ -74,7 +75,7 @@ Item {
     property int totalCount: 0
     property int pageSize: 100   // display/libraryPageSize (0 = no pagination)
 
-    readonly property bool filteredView: favorites || genreId !== "" || studioId !== ""
+    readonly property bool filteredView: favorites || genreId !== "" || studioId !== "" || tagName !== ""
     readonly property var tabs: {
         if (filteredView) return []
         if (collectionType === "movies")
@@ -90,7 +91,7 @@ Item {
     readonly property string curKind: filteredView ? "items" : (tabs[tab] ? tabs[tab].kind : "items")
     readonly property var kindIndex: ({ items: 0, suggestions: 1, collections: 2, upcoming: 3, genres: 4, networks: 5, favorites: 6, episodes: 7 })
 
-    readonly property string itemsTag: "lib:items:" + parentId + ":" + genreId + ":" + studioId + ":" + (favorites ? "f" : "")
+    readonly property string itemsTag: "lib:items:" + parentId + ":" + genreId + ":" + studioId + ":" + tagName + ":" + (favorites ? "f" : "")
     readonly property var suggestions: {
         var out = []
         if (collectionType === "tvshows") {
@@ -163,6 +164,7 @@ Item {
         if (favorites) { client.fetchFavorites(itemsTag); return }
         if (genreId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
         if (studioId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
+        if (tagName !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&Tags=" + encodeURIComponent(tagName) + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
         if (parentId !== "") client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, filterPart() + namePart(), startIndex, pageSize)
     }
     function loadKind(kind) {

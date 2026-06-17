@@ -30,6 +30,10 @@ Item {
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
     signal cardAction(string verb, var item)  // from cards in the detail rows → Main
+    signal openFiltered(var props)            // genre / studio / tag link → Main → LibraryScreen
+    function openGenre(g) { openFiltered({ genreId: g.id, pageTitle: g.name }) }
+    function openStudio(s) { openFiltered({ studioId: s.id, pageTitle: s.name }) }
+    function openTag(t) { openFiltered({ tagName: t, pageTitle: t }) }
 
     property bool favorite: false
     property bool played: false
@@ -388,6 +392,16 @@ Item {
         }
     }
 
+    // a clickable accent link (genre / studio / tag), jellyfin-web style
+    component LinkText: Text {
+        id: lt
+        signal clicked()
+        color: lhover.hovered ? Theme.accentHover : Theme.accent
+        font.pixelSize: Theme.fontSmall
+        HoverHandler { id: lhover }
+        TapHandler { onTapped: lt.clicked() }
+    }
+
     // An episode list row. Like the cards, the BODY opens the episode's info
     // page and only the ▶ (on the thumbnail) plays — so episode data is reachable.
     component EpisodeRow: Rectangle {
@@ -573,11 +587,43 @@ Item {
                                 font.pixelSize: Theme.fontNormal
                             }
                         }
-                        Text {
-                            text: (screen.detail && screen.detail.genres) ? screen.detail.genres.join(", ") : ""
-                            visible: text.length > 0
-                            color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
-                            elide: Text.ElideRight; Layout.fillWidth: true
+                        // genres — clickable links (jellyfin-web)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacingSmall
+                            visible: !!(screen.detail && screen.detail.genreItems && screen.detail.genreItems.length > 0)
+                            Text { text: qsTr("Genres"); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                            Flow {
+                                Layout.fillWidth: true
+                                Repeater {
+                                    model: screen.detail ? (screen.detail.genreItems || []) : []
+                                    Row {
+                                        required property var modelData
+                                        required property int index
+                                        LinkText { text: modelData.name; onClicked: screen.openGenre(modelData) }
+                                        Text { visible: index < (screen.detail.genreItems.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                    }
+                                }
+                            }
+                        }
+                        // studio — clickable links
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacingSmall
+                            visible: !!(screen.detail && screen.detail.studioItems && screen.detail.studioItems.length > 0)
+                            Text { text: qsTr("Studio"); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                            Flow {
+                                Layout.fillWidth: true
+                                Repeater {
+                                    model: screen.detail ? (screen.detail.studioItems || []) : []
+                                    Row {
+                                        required property var modelData
+                                        required property int index
+                                        LinkText { text: modelData.name; onClicked: screen.openStudio(modelData) }
+                                        Text { visible: index < (screen.detail.studioItems.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                    }
+                                }
+                            }
                         }
                         // director / writer rows
                         Repeater {
@@ -702,9 +748,12 @@ Item {
                         Rectangle {
                             required property var modelData
                             implicitWidth: tgt.implicitWidth + 16; implicitHeight: 26; radius: 13
-                            color: Theme.surface; border.color: Theme.divider; border.width: 1
+                            color: tgHover.hovered ? Theme.surfaceHover : Theme.surface
+                            border.color: tgHover.hovered ? Theme.accent : Theme.divider; border.width: 1
                             Text { id: tgt; anchors.centerIn: parent; text: modelData
-                                   color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                   color: tgHover.hovered ? Theme.accent : Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                            HoverHandler { id: tgHover }
+                            TapHandler { onTapped: screen.openTag(modelData) }
                         }
                     }
                 }

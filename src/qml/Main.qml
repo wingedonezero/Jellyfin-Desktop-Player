@@ -147,6 +147,7 @@ ApplicationWindow {
             onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
             onItemAddToCollection: (it) => win.openAddTo(it, "collection")
             onCardAction: (verb, it) => win.cardAction(verb, it)
+            onOpenFiltered: (props) => stack.push(libraryComp, props)
         }
     }
     Component {
