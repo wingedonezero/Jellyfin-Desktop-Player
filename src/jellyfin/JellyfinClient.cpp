@@ -480,11 +480,17 @@ void JellyfinClient::fetchSeasons(const QString &seriesId, const QString &reques
 }
 
 void JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seasonId,
-                                   const QString &requestTag)
+                                   const QString &requestTag, const QString &startItemId)
 {
-    requestItems(QStringLiteral("/Shows/%1/Episodes?seasonId=%2&userId=%3&%4&%5")
-                     .arg(seriesId).arg(seasonId).arg(m_userId).arg(kItemFields).arg(kImageTypes),
-                 requestTag);
+    QString path = QStringLiteral("/Shows/%1/Episodes?userId=%2&%3&%4")
+                       .arg(seriesId, m_userId, kItemFields, kImageTypes);
+    if (!seasonId.isEmpty())
+        path += QStringLiteral("&seasonId=%1").arg(seasonId);
+    // startItemId returns the series' episodes from that one onward (across
+    // seasons) — used to auto-queue when a single episode is played, like web.
+    if (!startItemId.isEmpty())
+        path += QStringLiteral("&startItemId=%1&Limit=100").arg(startItemId);
+    requestItems(path, requestTag);
 }
 
 void JellyfinClient::fetchSimilar(const QString &itemId, const QString &requestTag)

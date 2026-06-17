@@ -45,7 +45,14 @@ Item {
         showRemaining = (rt === true || rt === "true" || rt === 1 || rt === "1")
     }
 
-    function playItem(item) { playQueue([item], 0) }
+    function playItem(item) {
+        playQueue([item], 0)
+        // Web parity: playing a single episode queues the rest of the series from
+        // here (startItemId), so auto-play-next / up-next / prev-next work from
+        // Next Up, Continue Watching, search and cards — not just a season's Play.
+        if (item && item.type === "Episode" && item.seriesId)
+            client.fetchEpisodes(item.seriesId, "", "player:autoqueue", item.id)
+    }
 
     // Compose the OSD title the way jellyfin-web does (itemHelper.getDisplayName
     // + setTitle): episodes as "Series - Sxx:Exx - Episode", movies with a year.
@@ -126,6 +133,13 @@ Item {
         function onItemsReady(tag, items) {
             if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)
                 root.playerItem = items[0]
+            else if (tag === "player:autoqueue" && items.length > 1 && root.queue.length === 1) {
+                // adopt the series queue only if we're still on the single item we launched
+                var idx = -1
+                for (var i = 0; i < items.length; ++i)
+                    if (items[i].id === player.currentId) { idx = i; break }
+                if (idx >= 0) { root.queue = items; root.queueIndex = idx }
+            }
         }
         function onMediaSegmentsReady(itemId, segs) {
             if (itemId === player.currentId) root.segments = segs

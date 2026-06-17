@@ -66,7 +66,8 @@ public:
     Q_INVOKABLE void fetchSeasons(const QString &seriesId,
                                   const QString &requestTag = QStringLiteral("seasons"));
     Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId,
-                                   const QString &requestTag = QStringLiteral("episodes"));
+                                   const QString &requestTag = QStringLiteral("episodes"),
+                                   const QString &startItemId = QString());
     Q_INVOKABLE void fetchSimilar(const QString &itemId,
                                   const QString &requestTag = QStringLiteral("similar"));
     Q_INVOKABLE void fetchFavorites(const QString &requestTag = QStringLiteral("favorites"));
