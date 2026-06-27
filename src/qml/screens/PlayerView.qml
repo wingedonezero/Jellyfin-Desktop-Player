@@ -359,6 +359,9 @@ Item {
 
         onFileLoaded: {
             console.log("[mpv] file loaded — streaming OK")
+            console.log("[mpv] vo:", player.queryProperty("current-vo"),
+                        "| gpu-api:", player.queryProperty("gpu-api"),
+                        "| hwdec:", player.queryProperty("hwdec-current"))
             if (pendingResume > 0) {
                 player.seek(pendingResume)
                 pendingResume = 0

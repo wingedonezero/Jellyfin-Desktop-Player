@@ -3,12 +3,10 @@
 #include "Paths.h"
 
 #include <QByteArray>
-#include <QOpenGLContext>
-#include <QOpenGLFramebufferObject>
-#include <QPointer>
 #include <QQuickWindow>
 #include <QVariant>
 #include <QVector>
+#include <QWidget>
 #include <QtGlobal>
 
 namespace {
@@ -47,118 +45,23 @@ QVariant nodeToVariant(const mpv_node *node)
 } // namespace
 
 // ----------------------------------------------------------------------------
-// MpvRenderer — lives on the Qt scene-graph render thread. Owns nothing but a
-// shared ref to the render resources; creates the mpv render context lazily
-// (the first time the FBO exists, with a current GL context) and frees it in
-// its destructor (still on the render thread). This is the canonical mpv +
-// OpenGL render-API sequence.
-// ----------------------------------------------------------------------------
-
-class MpvRenderer : public QQuickFramebufferObject::Renderer
-{
-public:
-    explicit MpvRenderer(std::shared_ptr<MpvRenderResources> res)
-        : m_res(std::move(res))
-    {
-    }
-
-    ~MpvRenderer() override
-    {
-        if (m_res) {
-            m_res->freeContext();
-        }
-    }
-
-    void synchronize(QQuickFramebufferObject *item) override
-    {
-        // Runs while the GUI thread is blocked — safe to cache the item.
-        m_item = static_cast<MpvVideoItem *>(item);
-    }
-
-    QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override
-    {
-        if (m_res && !m_res->renderCtx) {
-            createMpvRenderContext();
-        }
-        return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
-    }
-
-    void render() override
-    {
-        if (!m_res || !m_res->renderCtx) {
-            return;
-        }
-
-        QOpenGLFramebufferObject *fbo = framebufferObject();
-        mpv_opengl_fbo mpfbo{static_cast<int>(fbo->handle()), fbo->width(), fbo->height(), 0};
-        int flipY = 0;
-
-        mpv_render_param params[] = {
-            {MPV_RENDER_PARAM_OPENGL_FBO, &mpfbo},
-            {MPV_RENDER_PARAM_FLIP_Y, &flipY},
-            {MPV_RENDER_PARAM_INVALID, nullptr},
-        };
-        mpv_render_context_render(m_res->renderCtx, params);
-    }
-
-private:
-    static void *getProcAddress(void *ctx, const char *name)
-    {
-        Q_UNUSED(ctx)
-        QOpenGLContext *glctx = QOpenGLContext::currentContext();
-        if (!glctx) {
-            return nullptr;
-        }
-        return reinterpret_cast<void *>(glctx->getProcAddress(QByteArray(name)));
-    }
-
-    static void onMpvRedraw(void *ctx)
-    {
-        // Called from an mpv render thread: bounce a repaint onto the GUI thread.
-        auto *self = static_cast<MpvRenderer *>(ctx);
-        if (self->m_item) {
-            QMetaObject::invokeMethod(self->m_item.data(), "scheduleUpdate", Qt::QueuedConnection);
-        }
-    }
-
-    void createMpvRenderContext()
-    {
-        mpv_opengl_init_params glInit{getProcAddress, nullptr};
-        mpv_render_param params[] = {
-            {MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL)},
-            {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &glInit},
-            // TODO: pass MPV_RENDER_PARAM_WL_DISPLAY / X11_DISPLAY here when we
-            // wire up hardware decoding; not needed for basic GL rendering.
-            {MPV_RENDER_PARAM_INVALID, nullptr},
-        };
-
-        if (mpv_render_context_create(&m_res->renderCtx, m_res->mpv->handle, params) < 0) {
-            qWarning("MpvVideoItem: failed to create mpv render context");
-            m_res->renderCtx = nullptr;
-            return;
-        }
-        mpv_render_context_set_update_callback(m_res->renderCtx, onMpvRedraw, this);
-    }
-
-    std::shared_ptr<MpvRenderResources> m_res;
-    QPointer<MpvVideoItem> m_item;
-};
-
-// ----------------------------------------------------------------------------
 // MpvVideoItem
 // ----------------------------------------------------------------------------
 
 MpvVideoItem::MpvVideoItem(QQuickItem *parent)
-    : QQuickFramebufferObject(parent)
+    : QQuickItem(parent)
 {
-    if (QQuickWindow::graphicsApi() != QSGRendererInterface::OpenGL) {
-        qWarning("MpvVideoItem: Qt Quick scene graph is not OpenGL. Call "
-                 "QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL) "
-                 "before the first window, or mpv cannot render.");
-    }
+    // mpv renders into its own native window, so this QML item paints nothing —
+    // it exists to (a) expose the control/state API and (b) drive the geometry
+    // of the mpv window behind the transparent Qt window.
+    setFlag(ItemHasContents, false);
 
-    mpv_handle *handle = mpv_create();
-    if (!handle) {
+    // The mpv render window must exist before mpv_initialize so we can hand its
+    // id to mpv via `wid`.
+    ensureHostWindow();
+
+    m_mpv = mpv_create();
+    if (!m_mpv) {
         qFatal("MpvVideoItem: mpv_create() failed");
     }
 
@@ -167,53 +70,147 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     // on first run. libmpv does not load config by default, so opt in here.
     Paths::ensureDefaultMpvConfig();
     const QByteArray configDir = Paths::configDir().toUtf8();
-    mpv_set_option_string(handle, "config-dir", configDir.constData());
-    mpv_set_option_string(handle, "config", "yes");
-    mpv_set_option_string(handle, "terminal", "no");
+    mpv_set_option_string(m_mpv, "config-dir", configDir.constData());
+    mpv_set_option_string(m_mpv, "config", "yes");
+    mpv_set_option_string(m_mpv, "terminal", "no");
 
-    if (mpv_initialize(handle) < 0) {
-        mpv_terminate_destroy(handle);
-        qFatal("MpvVideoItem: mpv_initialize() failed");
+    // Embed: mpv creates its own render surface inside this native window. The
+    // video output (vo=gpu-next, gpu-api=vulkan, …) now comes from mpv.conf —
+    // we no longer force vo, so the user's full config takes effect.
+    if (m_host) {
+        int64_t wid = static_cast<int64_t>(m_host->winId());
+        mpv_set_option(m_mpv, "wid", MPV_FORMAT_INT64, &wid);
     }
 
-    // The render-API output MUST be "libmpv" regardless of mpv.conf, or video
-    // can't render into our FBO. Set it as a property after the config loads so
-    // a stray `vo=` in the user's mpv.conf can't break embedding.
-    mpv_set_property_string(handle, "vo", "libmpv");
-
     // Observe the playback state we expose as bindable properties.
-    mpv_observe_property(handle, 0, "time-pos", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "duration", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "pause", MPV_FORMAT_FLAG);
-    mpv_observe_property(handle, 0, "volume", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "mute", MPV_FORMAT_FLAG);
-    mpv_observe_property(handle, 0, "track-list", MPV_FORMAT_NODE);
-    mpv_observe_property(handle, 0, "speed", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "chapter", MPV_FORMAT_INT64);
-    mpv_observe_property(handle, 0, "chapter-list", MPV_FORMAT_NODE);
-    mpv_observe_property(handle, 0, "sub-delay", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "audio-delay", MPV_FORMAT_DOUBLE);
-    mpv_observe_property(handle, 0, "demuxer-cache-state", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 0, "time-pos", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "duration", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "pause", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "volume", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "track-list", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 0, "speed", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "chapter", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 0, "chapter-list", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 0, "sub-delay", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "audio-delay", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 0, "demuxer-cache-state", MPV_FORMAT_NODE);
 
-    mpv_set_wakeup_callback(handle, onMpvWakeup, this);
+    // Surface warnings/errors to the UI (bad config option, decode issues, …).
+    mpv_request_log_messages(m_mpv, "warn");
 
-    m_mpv = std::make_shared<MpvHandle>(handle);
-    m_resources = std::make_shared<MpvRenderResources>(m_mpv);
+    mpv_set_wakeup_callback(m_mpv, onMpvWakeup, this);
+
+    if (mpv_initialize(m_mpv) < 0) {
+        mpv_terminate_destroy(m_mpv);
+        m_mpv = nullptr;
+        qFatal("MpvVideoItem: mpv_initialize() failed");
+    }
 }
 
 MpvVideoItem::~MpvVideoItem()
 {
-    if (m_mpv && m_mpv->handle) {
-        mpv_set_wakeup_callback(m_mpv->handle, nullptr, nullptr);
+    if (m_mpv) {
+        mpv_set_wakeup_callback(m_mpv, nullptr, nullptr);
+        mpv_terminate_destroy(m_mpv);
+        m_mpv = nullptr;
     }
-    // The render context is freed by ~MpvRenderer on the render thread; the mpv
-    // handle outlives it because MpvRenderResources holds a ref to MpvHandle.
+    delete m_host;
+    m_host = nullptr;
 }
 
-QQuickFramebufferObject::Renderer *MpvVideoItem::createRenderer() const
+// ----------------------------------------------------------------------------
+// Embedded render window
+// ----------------------------------------------------------------------------
+
+void MpvVideoItem::ensureHostWindow()
 {
-    return new MpvRenderer(m_resources);
+    if (m_host)
+        return;
+    // A frameless, focus-less top-level native window. mpv owns its contents;
+    // Qt must not paint it. Kept stacked directly behind the transparent Qt
+    // window and matched to this item's on-screen rect.
+    m_host = new QWidget(nullptr, Qt::FramelessWindowHint);
+    m_host->setAttribute(Qt::WA_NativeWindow);
+    m_host->setAttribute(Qt::WA_DontCreateNativeAncestors);
+    m_host->setAttribute(Qt::WA_NoSystemBackground);
+    m_host->setAttribute(Qt::WA_OpaquePaintEvent);
+    m_host->setAttribute(Qt::WA_ShowWithoutActivating);
+    m_host->setFocusPolicy(Qt::NoFocus);
+    m_host->setStyleSheet(QStringLiteral("background:black;"));
+    m_host->resize(16, 16);
+    m_host->winId(); // realise the native (X11) window now, for `wid`
 }
+
+void MpvVideoItem::syncHostGeometry()
+{
+    if (!m_host || !window() || !isVisible())
+        return;
+    const QPointF topLeft = mapToGlobal(QPointF(0, 0));
+    const QRect r(topLeft.toPoint(), QSize(qRound(width()), qRound(height())));
+    if (r.isValid() && r != m_host->geometry())
+        m_host->setGeometry(r);
+}
+
+void MpvVideoItem::updateHostVisibility()
+{
+    if (!m_host)
+        return;
+    const bool shouldShow = window() && isVisible() && width() > 0 && height() > 0;
+    if (shouldShow) {
+        syncHostGeometry();
+        if (!m_host->isVisible()) {
+            m_host->show();
+            // Keep the mpv window directly behind the (transparent) Qt window:
+            // drop it to the bottom, then raise the Qt window above it.
+            m_host->lower();
+            if (m_window)
+                m_window->raise();
+        }
+    } else if (m_host->isVisible()) {
+        m_host->hide();
+    }
+}
+
+void MpvVideoItem::attachToWindow(QQuickWindow *w)
+{
+    if (m_window == w)
+        return;
+    if (m_window) {
+        disconnect(m_window, nullptr, this, nullptr);
+    }
+    m_window = w;
+    if (m_window) {
+        auto resync = [this] { syncHostGeometry(); };
+        connect(m_window, &QWindow::xChanged, this, resync);
+        connect(m_window, &QWindow::yChanged, this, resync);
+        connect(m_window, &QWindow::widthChanged, this, resync);
+        connect(m_window, &QWindow::heightChanged, this, resync);
+        connect(m_window, &QWindow::visibilityChanged, this,
+                [this] { updateHostVisibility(); });
+    }
+    updateHostVisibility();
+}
+
+void MpvVideoItem::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
+{
+    QQuickItem::geometryChange(newGeometry, oldGeometry);
+    syncHostGeometry();
+    updateHostVisibility();
+}
+
+void MpvVideoItem::itemChange(ItemChange change, const ItemChangeData &data)
+{
+    if (change == ItemSceneChange)
+        attachToWindow(data.window);
+    else if (change == ItemVisibleHasChanged)
+        updateHostVisibility();
+    QQuickItem::itemChange(change, data);
+}
+
+// ----------------------------------------------------------------------------
+// Playback control
+// ----------------------------------------------------------------------------
 
 void MpvVideoItem::play(const QString &url)
 {
@@ -227,9 +224,9 @@ void MpvVideoItem::seek(double seconds)
 
 void MpvVideoItem::setPaused(bool paused)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         int flag = paused ? 1 : 0;
-        mpv_set_property(m_mpv->handle, "pause", MPV_FORMAT_FLAG, &flag);
+        mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &flag);
     }
 }
 
@@ -240,17 +237,17 @@ void MpvVideoItem::skip(double seconds)
 
 void MpvVideoItem::setVolume(double volume)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         double v = volume;
-        mpv_set_property(m_mpv->handle, "volume", MPV_FORMAT_DOUBLE, &v);
+        mpv_set_property(m_mpv, "volume", MPV_FORMAT_DOUBLE, &v);
     }
 }
 
 void MpvVideoItem::setMuted(bool muted)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         int flag = muted ? 1 : 0;
-        mpv_set_property(m_mpv->handle, "mute", MPV_FORMAT_FLAG, &flag);
+        mpv_set_property(m_mpv, "mute", MPV_FORMAT_FLAG, &flag);
     }
 }
 
@@ -266,39 +263,48 @@ void MpvVideoItem::setSubtitleTrack(int id)
 
 void MpvVideoItem::setSpeed(double speed)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         double v = speed;
-        mpv_set_property(m_mpv->handle, "speed", MPV_FORMAT_DOUBLE, &v);
+        mpv_set_property(m_mpv, "speed", MPV_FORMAT_DOUBLE, &v);
     }
 }
 
 void MpvVideoItem::setChapter(int index)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         int64_t v = index;
-        mpv_set_property(m_mpv->handle, "chapter", MPV_FORMAT_INT64, &v);
+        mpv_set_property(m_mpv, "chapter", MPV_FORMAT_INT64, &v);
     }
 }
 
 void MpvVideoItem::setSubDelay(double seconds)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         double v = seconds;
-        mpv_set_property(m_mpv->handle, "sub-delay", MPV_FORMAT_DOUBLE, &v);
+        mpv_set_property(m_mpv, "sub-delay", MPV_FORMAT_DOUBLE, &v);
     }
 }
 
 void MpvVideoItem::setAudioDelay(double seconds)
 {
-    if (m_mpv && m_mpv->handle) {
+    if (m_mpv) {
         double v = seconds;
-        mpv_set_property(m_mpv->handle, "audio-delay", MPV_FORMAT_DOUBLE, &v);
+        mpv_set_property(m_mpv, "audio-delay", MPV_FORMAT_DOUBLE, &v);
     }
+}
+
+void MpvVideoItem::sendKey(const QString &mpvKeyName)
+{
+    if (mpvKeyName.isEmpty())
+        return;
+    // Feed mpv's input layer so its input.conf binding runs (and shows mpv's
+    // own OSD feedback, e.g. "Deinterlace: yes").
+    command({QStringLiteral("keypress"), mpvKeyName});
 }
 
 void MpvVideoItem::command(const QStringList &args)
 {
-    if (!m_mpv || !m_mpv->handle) {
+    if (!m_mpv) {
         return;
     }
 
@@ -315,22 +321,22 @@ void MpvVideoItem::command(const QStringList &args)
     }
     argv.append(nullptr);
 
-    mpv_command(m_mpv->handle, argv.data());
+    mpv_command(m_mpv, argv.data());
 }
 
 void MpvVideoItem::setOption(const QString &name, const QString &value)
 {
-    if (m_mpv && m_mpv->handle) {
-        mpv_set_property_string(m_mpv->handle, name.toUtf8().constData(), value.toUtf8().constData());
+    if (m_mpv) {
+        mpv_set_property_string(m_mpv, name.toUtf8().constData(), value.toUtf8().constData());
     }
 }
 
 QString MpvVideoItem::queryProperty(const QString &name) const
 {
-    if (!m_mpv || !m_mpv->handle) {
+    if (!m_mpv) {
         return {};
     }
-    char *value = mpv_get_property_string(m_mpv->handle, name.toUtf8().constData());
+    char *value = mpv_get_property_string(m_mpv, name.toUtf8().constData());
     if (!value) {
         return {};
     }
@@ -339,6 +345,10 @@ QString MpvVideoItem::queryProperty(const QString &name) const
     return result;
 }
 
+// ----------------------------------------------------------------------------
+// mpv event loop (GUI thread)
+// ----------------------------------------------------------------------------
+
 void MpvVideoItem::onMpvWakeup(void *ctx)
 {
     QMetaObject::invokeMethod(static_cast<MpvVideoItem *>(ctx), "pumpEvents", Qt::QueuedConnection);
@@ -346,11 +356,11 @@ void MpvVideoItem::onMpvWakeup(void *ctx)
 
 void MpvVideoItem::pumpEvents()
 {
-    if (!m_mpv || !m_mpv->handle) {
+    if (!m_mpv) {
         return;
     }
     while (true) {
-        mpv_event *event = mpv_wait_event(m_mpv->handle, 0);
+        mpv_event *event = mpv_wait_event(m_mpv, 0);
         if (event->event_id == MPV_EVENT_NONE) {
             break;
         }
@@ -366,15 +376,18 @@ void MpvVideoItem::pumpEvents()
         case MPV_EVENT_PROPERTY_CHANGE:
             handlePropertyChange(static_cast<mpv_event_property *>(event->data));
             break;
+        case MPV_EVENT_LOG_MESSAGE: {
+            auto *msg = static_cast<mpv_event_log_message *>(event->data);
+            if (msg)
+                Q_EMIT mpvLog(QString::fromUtf8(msg->level),
+                              QString::fromUtf8(msg->prefix),
+                              QString::fromUtf8(msg->text).trimmed());
+            break;
+        }
         default:
             break;
         }
     }
-}
-
-void MpvVideoItem::scheduleUpdate()
-{
-    update();
 }
 
 void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
