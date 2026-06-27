@@ -32,7 +32,6 @@ ApplicationWindow {
     function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
     function openSearch() { stack.push(searchComp) }
     function openSettings() { stack.push(settingsComp) }
-    function openAdmin() { if (jellyfin.isAdmin) stack.push(adminComp) }
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
@@ -42,22 +41,13 @@ ApplicationWindow {
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
 
-    // card context-menu actions (queue/playNext are live-queue ops; refresh/delete
-    // are confirm-gated server mutations) bubbled up from any card via cardAction.
+    // card context-menu actions (queue/playNext are live-queue ops) bubbled up
+    // from any card via cardAction.
     function cardAction(verb, item) {
         if (!item) return
         if (verb === "queue") playerView.enqueue(item)
         else if (verb === "playNext") playerView.playNextInsert(item)
-        else if (verb === "refresh")
-            confirmAction(qsTr("Refresh metadata for \"%1\"?").arg(item.name || ""),
-                          function() { jellyfin.refreshItem(item.id) })
-        else if (verb === "delete")
-            confirmAction(qsTr("Delete \"%1\" from the server? This cannot be undone.").arg(item.name || ""),
-                          function() { jellyfin.deleteItem(item.id) })
     }
-    property string _confirmMsg: ""
-    property var _confirmAction: null
-    function confirmAction(msg, action) { win._confirmMsg = msg; win._confirmAction = action; confirmDialog.open() }
 
     // shared "add to playlist/collection" picker, invoked from any card or detail
     property var addToItem: null
@@ -98,7 +88,6 @@ ApplicationWindow {
             onHomeClicked: win.goHome()
             onSearchClicked: win.openSearch()
             onSettingsClicked: win.openSettings()
-            onAdminClicked: win.openAdmin()
             onLogoutClicked: jellyfin.logout()
         }
 
@@ -117,7 +106,6 @@ ApplicationWindow {
         onNavFavorites: win.openFavorites()
         onNavLibrary: (lib) => win.openLibrary(lib)
         onNavSettings: win.openSettings()
-        onNavAdmin: win.openAdmin()
         onDoLogout: jellyfin.logout()
     }
 
@@ -139,6 +127,7 @@ ApplicationWindow {
         id: libraryComp
         LibraryScreen {
             client: jellyfin
+            config: appConfig
             onItemActivated: (it) => win.playItem(it)
             onItemOpenDetail: (it) => win.openDetail(it)
             onOpenFiltered: (props) => stack.push(libraryComp, props)
@@ -158,7 +147,7 @@ ApplicationWindow {
             onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
             onItemAddToCollection: (it) => win.openAddTo(it, "collection")
             onCardAction: (verb, it) => win.cardAction(verb, it)
-            onDeleted: stack.pop()
+            onOpenFiltered: (props) => stack.push(libraryComp, props)
         }
     }
     Component {
@@ -180,11 +169,6 @@ ApplicationWindow {
             onLogout: jellyfin.logout()
         }
     }
-    Component {
-        id: adminComp
-        AdminScreen { client: jellyfin }
-    }
-
     // ---- player overlay ---------------------------------------------------
     PlayerView {
         id: playerView
@@ -264,38 +248,6 @@ ApplicationWindow {
                             addToPicker.close()
                         }
                     }
-                }
-            }
-        }
-    }
-
-    // ---- shared confirm dialog (card refresh / delete) -------------------
-    Popup {
-        id: confirmDialog
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        width: 380
-        padding: 16
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-        contentItem: ColumnLayout {
-            spacing: 14
-            Text { Layout.fillWidth: true; text: win._confirmMsg; color: Theme.textPrimary
-                   font.pixelSize: Theme.fontNormal; wrapMode: Text.Wrap }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight; spacing: 8
-                Button {
-                    id: cdCancel; hoverEnabled: true; padding: 8; onClicked: confirmDialog.close()
-                    background: Rectangle { radius: Theme.radius; color: cdCancel.hovered ? Theme.surfaceHover : "transparent"
-                                            border.color: Theme.divider; border.width: 1 }
-                    contentItem: Text { text: qsTr("Cancel"); color: Theme.textPrimary; font.pixelSize: Theme.fontNormal }
-                }
-                Button {
-                    id: cdOk; hoverEnabled: true; padding: 8
-                    onClicked: { if (win._confirmAction) win._confirmAction(); confirmDialog.close() }
-                    background: Rectangle { radius: Theme.radius; color: cdOk.hovered ? Qt.lighter(Theme.accent, 1.1) : Theme.accent }
-                    contentItem: Text { text: qsTr("Confirm"); color: Theme.accentText; font.pixelSize: Theme.fontNormal; font.bold: true }
                 }
             }
         }

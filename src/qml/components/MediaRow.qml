@@ -14,23 +14,36 @@ ColumnLayout {
     property var client
     property string shape: "poster"
     property bool episodeImages: true   // forwarded to cards (Next Up/Resume pref)
+    property bool titleLink: false      // clickable header (→ titleClicked) with a › chevron
 
     signal itemActivated(var item)   // play
     signal itemOpenDetail(var item)  // open detail
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
-    signal cardAction(string verb, var item)  // queue/playNext/refresh/delete
+    signal cardAction(string verb, var item)  // queue/playNext
+    signal titleClicked()            // "see all" header click (when titleLink)
 
     Layout.fillWidth: true
     visible: model && model.length > 0
     spacing: Theme.spacingSmall
 
-    Text {
-        text: row.title
-        color: Theme.textPrimary
-        font.pixelSize: Theme.fontMedium
-        font.bold: true
+    RowLayout {
         Layout.leftMargin: Theme.pagePad
+        spacing: 4
+        Text {
+            text: row.title
+            color: (row.titleLink && hdrHover.hovered) ? Theme.accent : Theme.textPrimary
+            font.pixelSize: Theme.fontMedium
+            font.bold: true
+        }
+        Text {
+            visible: row.titleLink
+            text: "›"
+            color: (row.titleLink && hdrHover.hovered) ? Theme.accent : Theme.textSecondary
+            font.pixelSize: Theme.fontMedium
+        }
+        HoverHandler { id: hdrHover; enabled: row.titleLink }
+        TapHandler { enabled: row.titleLink; onTapped: row.titleClicked() }
     }
 
     Item {

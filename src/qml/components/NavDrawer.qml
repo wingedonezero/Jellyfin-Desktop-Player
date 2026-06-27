@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import JellyfinDesktop
 
 // The left navigation drawer (jellyfin-web side menu): Home, Favorites, the
-// user's libraries, then Settings / Admin / Log out. Libraries are passed in;
+// user's libraries, then Settings / Log out. Libraries are passed in;
 // everything emits a signal the shell routes.
 Drawer {
     id: drawer
@@ -15,7 +15,6 @@ Drawer {
     signal navFavorites()
     signal navLibrary(var lib)
     signal navSettings()
-    signal navAdmin()
     signal doLogout()
 
     width: Theme.drawerWidth
@@ -112,7 +111,6 @@ Drawer {
 
             NavDivider {}
             NavItem { text: qsTr("Settings"); glyph: "⚙"; onClicked: { drawer.close(); drawer.navSettings() } }
-            NavItem { text: qsTr("Administration"); glyph: "\u{1F6E0}"; visible: drawer.client && drawer.client.isAdmin; onClicked: { drawer.close(); drawer.navAdmin() } } // 🛠 admins only
             NavItem { text: qsTr("Log out"); glyph: "\u{23FB}"; onClicked: { drawer.close(); drawer.doLogout() } } // ⏻
         }
     }

@@ -30,12 +30,10 @@ Item {
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
     signal cardAction(string verb, var item)  // from cards in the detail rows → Main
-    signal deleted()  // item was deleted → router pops this page
-
-    // simple confirm dialog for destructive/server actions (refresh, delete)
-    property string _confirmMsg: ""
-    property var _confirmAction: null
-    function confirm(msg, action) { _confirmMsg = msg; _confirmAction = action; confirmPopup.open() }
+    signal openFiltered(var props)            // genre / studio / tag link → Main → LibraryScreen
+    function openGenre(g) { openFiltered({ genreId: g.id, pageTitle: g.name }) }
+    function openStudio(s) { openFiltered({ studioId: s.id, pageTitle: s.name }) }
+    function openTag(t) { openFiltered({ tagName: t, pageTitle: t }) }
 
     property bool favorite: false
     property bool played: false
@@ -286,35 +284,6 @@ Item {
         }
     }
 
-    // confirm dialog for destructive / server actions (refresh, delete)
-    Popup {
-        id: confirmPopup
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        modal: true
-        width: 380
-        padding: 16
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-        background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.divider; border.width: 1 }
-        contentItem: ColumnLayout {
-            spacing: 14
-            Text {
-                Layout.fillWidth: true
-                text: screen._confirmMsg
-                color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; wrapMode: Text.Wrap
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 8
-                ActionButton { text: qsTr("Cancel"); onClicked: confirmPopup.close() }
-                ActionButton {
-                    primary: true; text: qsTr("Confirm")
-                    onClicked: { if (screen._confirmAction) screen._confirmAction(); confirmPopup.close() }
-                }
-            }
-        }
-    }
-
     // reusable: a labeled dropdown for version / audio / subtitle selection
     component TrackSelect: RowLayout {
         id: ts
@@ -423,15 +392,32 @@ Item {
         }
     }
 
-    component EpisodeRow: ItemDelegate {
+    // a clickable accent link (genre / studio / tag), jellyfin-web style
+    component LinkText: Text {
+        id: lt
+        signal clicked()
+        color: lhover.hovered ? Theme.accentHover : Theme.accent
+        font.pixelSize: Theme.fontSmall
+        HoverHandler { id: lhover }
+        TapHandler { onTapped: lt.clicked() }
+    }
+
+    // An episode list row. Like the cards, the BODY opens the episode's info
+    // page and only the ▶ (on the thumbnail) plays — so episode data is reachable.
+    component EpisodeRow: Rectangle {
         id: ep
         required property var modelData
-        hoverEnabled: true
         Layout.fillWidth: true
         implicitHeight: 110
-        background: Rectangle { radius: Theme.radius; color: ep.hovered ? Theme.surfaceHover : "transparent" }
-        onClicked: screen.playEpisode(ep.modelData)
-        contentItem: RowLayout {
+        radius: Theme.radius
+        color: epHover.hovered ? Theme.surfaceHover : "transparent"
+
+        HoverHandler { id: epHover }
+        TapHandler { onTapped: screen.openDetail(ep.modelData) } // body → episode detail
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 6
             spacing: Theme.spacing
             Rectangle {
                 Layout.preferredWidth: 160; Layout.preferredHeight: 90
@@ -442,12 +428,23 @@ Item {
                     source: ep.modelData.imageTag ? screen.client.imageUrl(ep.modelData.id, "Primary", 180, ep.modelData.imageTag) : ""
                     visible: status === Image.Ready
                 }
-                Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 24; visible: ep.hovered }
                 Rectangle {
                     visible: ep.modelData.played === true
                     anchors { top: parent.top; right: parent.right; margins: 4 }
                     width: 18; height: 18; radius: 9; color: Theme.watched
                     Text { anchors.centerIn: parent; text: "✓"; color: Theme.accentText; font.pixelSize: 11; font.bold: true }
+                }
+                // hover dim (visual only — taps fall through to openDetail)
+                Rectangle { anchors.fill: parent; color: Theme.overlay; visible: epHover.hovered }
+                // play button — consumes the tap so the ▶ plays instead of opening detail
+                Rectangle {
+                    anchors.centerIn: parent
+                    visible: epHover.hovered
+                    width: 40; height: 40; radius: 20
+                    color: Theme.overlayStrong
+                    border.color: Theme.textPrimary; border.width: 1
+                    Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
+                    TapHandler { onTapped: screen.playEpisode(ep.modelData) }
                 }
             }
             ColumnLayout {
@@ -572,6 +569,13 @@ Item {
                             color: Theme.textPrimary; font.pixelSize: Theme.fontTitle; font.bold: true
                             elide: Text.ElideRight; Layout.fillWidth: true
                         }
+                        // original title (e.g. Japanese), shown when it differs from the name
+                        Text {
+                            visible: !!(screen.detail && screen.detail.originalTitle && screen.detail.originalTitle !== screen.detail.name)
+                            text: screen.detail ? (screen.detail.originalTitle || "") : ""
+                            color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
+                            elide: Text.ElideRight; Layout.fillWidth: true
+                        }
                         RowLayout {
                             spacing: Theme.spacing
                             Text { text: screen.metaLine(); color: Theme.textSecondary; font.pixelSize: Theme.fontNormal }
@@ -590,11 +594,43 @@ Item {
                                 font.pixelSize: Theme.fontNormal
                             }
                         }
-                        Text {
-                            text: (screen.detail && screen.detail.genres) ? screen.detail.genres.join(", ") : ""
-                            visible: text.length > 0
-                            color: Theme.textSecondary; font.pixelSize: Theme.fontSmall
-                            elide: Text.ElideRight; Layout.fillWidth: true
+                        // genres — clickable links (jellyfin-web)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacingSmall
+                            visible: !!(screen.detail && screen.detail.genreItems && screen.detail.genreItems.length > 0)
+                            Text { text: qsTr("Genres"); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                            Flow {
+                                Layout.fillWidth: true
+                                Repeater {
+                                    model: screen.detail ? (screen.detail.genreItems || []) : []
+                                    Row {
+                                        required property var modelData
+                                        required property int index
+                                        LinkText { text: modelData.name; onClicked: screen.openGenre(modelData) }
+                                        Text { visible: index < (screen.detail.genreItems.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                    }
+                                }
+                            }
+                        }
+                        // studio — clickable links
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacingSmall
+                            visible: !!(screen.detail && screen.detail.studioItems && screen.detail.studioItems.length > 0)
+                            Text { text: qsTr("Studio"); color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                            Flow {
+                                Layout.fillWidth: true
+                                Repeater {
+                                    model: screen.detail ? (screen.detail.studioItems || []) : []
+                                    Row {
+                                        required property var modelData
+                                        required property int index
+                                        LinkText { text: modelData.name; onClicked: screen.openStudio(modelData) }
+                                        Text { visible: index < (screen.detail.studioItems.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                    }
+                                }
+                            }
                         }
                         // director / writer rows
                         Repeater {
@@ -602,12 +638,23 @@ Item {
                                     { label: qsTr("Writer"),   people: screen.peopleByType("Writer") }]
                                    .filter(r => r.people.length > 0)
                             RowLayout {
+                                id: dwRow
                                 required property var modelData
                                 Layout.fillWidth: true
                                 spacing: Theme.spacingSmall
-                                Text { text: modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
-                                Text { text: modelData.people.map(p => p.name).join(", "); color: Theme.textPrimary
-                                       font.pixelSize: Theme.fontSmall; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Text { text: dwRow.modelData.label; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall; Layout.preferredWidth: 70 }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: dwRow.modelData.people
+                                        Row {
+                                            required property var modelData
+                                            required property int index
+                                            LinkText { text: modelData.name; onClicked: screen.openDetail(modelData) }
+                                            Text { visible: index < (dwRow.modelData.people.length - 1); text: ", "; color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                        }
+                                    }
+                                }
                             }
                         }
                         // person: born / died / birthplace
@@ -672,17 +719,6 @@ Item {
                                     DarkMenuItem { text: qsTr("Copy stream URL"); visible: screen.isPlayableLeaf; onTriggered: screen.client.copyStreamUrl(screen.detail.id) }
                                     DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
                                     DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
-                                    DarkMenuItem {
-                                        text: qsTr("Refresh metadata")
-                                        onTriggered: screen.confirm(qsTr("Refresh metadata for \"%1\"?").arg(screen.detail.name || ""),
-                                                                    function() { screen.client.refreshItem(screen.detail.id) })
-                                    }
-                                    DarkMenuItem {
-                                        text: qsTr("Delete")
-                                        visible: screen.detail && screen.detail.canDelete === true
-                                        onTriggered: screen.confirm(qsTr("Delete \"%1\" from the server? This cannot be undone.").arg(screen.detail.name || ""),
-                                                                    function() { screen.client.deleteItem(screen.detail.id); screen.deleted() })
-                                    }
                                 }
                             }
                         }
@@ -724,15 +760,18 @@ Item {
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacingSmall
                     spacing: Theme.spacingSmall
-                    visible: screen.detail && screen.detail.tags && screen.detail.tags.length > 0
+                    visible: !!(screen.detail && screen.detail.tags && screen.detail.tags.length > 0)
                     Repeater {
                         model: screen.detail ? (screen.detail.tags || []) : []
                         Rectangle {
                             required property var modelData
                             implicitWidth: tgt.implicitWidth + 16; implicitHeight: 26; radius: 13
-                            color: Theme.surface; border.color: Theme.divider; border.width: 1
+                            color: tgHover.hovered ? Theme.surfaceHover : Theme.surface
+                            border.color: tgHover.hovered ? Theme.accent : Theme.divider; border.width: 1
                             Text { id: tgt; anchors.centerIn: parent; text: modelData
-                                   color: Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                                   color: tgHover.hovered ? Theme.accent : Theme.textSecondary; font.pixelSize: Theme.fontSmall }
+                            HoverHandler { id: tgHover }
+                            TapHandler { onTapped: screen.openTag(modelData) }
                         }
                     }
                 }

@@ -17,7 +17,7 @@ Item {
     signal openDetail(var item)       // open detail page
     signal addToPlaylist(var item)    // → app-level picker (Main)
     signal addToCollection(var item)  // → app-level picker (Main)
-    signal cardAction(string verb, var item)  // queue/playNext/refresh/delete → Main
+    signal cardAction(string verb, var item)  // queue/playNext → Main
 
     readonly property int artHeight: shape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight
     implicitWidth: shape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth
@@ -191,35 +191,16 @@ Item {
     // click anywhere on the card (except the play button) → open detail
     TapHandler { onTapped: card.openDetail(card.item) }
 
-    // right-click → context menu (jellyfin-web item menu)
+    // right-click → context menu (jellyfin-web item menu) — shared component
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: ctxMenu.popup() }
-    DarkMenu {
+    ItemContextMenu {
         id: ctxMenu
-        DarkMenuItem { text: qsTr("Play"); visible: card.playable; onTriggered: card.activated(card.item) }
-        DarkMenuItem {
-            text: qsTr("Play from beginning")
-            visible: card.playable && card.item && (card.item.playbackTicks > 0)
-            onTriggered: { var it = Object.assign({}, card.item); it.playbackTicks = 0; card.activated(it) }
-        }
-        DarkMenuItem { text: qsTr("Add to queue"); visible: card.playable; onTriggered: card.cardAction("queue", card.item) }
-        DarkMenuItem { text: qsTr("Play next"); visible: card.playable; onTriggered: card.cardAction("playNext", card.item) }
-        DarkMenuItem {
-            text: (card.item && card.item.isFavorite) ? qsTr("Remove from favorites") : qsTr("Add to favorites")
-            onTriggered: if (card.client) card.client.setFavorite(card.item.id, !(card.item.isFavorite === true))
-        }
-        DarkMenuItem {
-            text: (card.item && card.item.played) ? qsTr("Mark as unplayed") : qsTr("Mark as played")
-            onTriggered: if (card.client) card.client.setWatched(card.item.id, !(card.item.played === true))
-        }
-        DarkMenuItem { text: qsTr("Add to collection"); visible: card.canAddTo; enabled: Features.collections; onTriggered: card.addToCollection(card.item) }
-        DarkMenuItem { text: qsTr("Add to playlist"); visible: card.canAddTo; enabled: Features.playlists; onTriggered: card.addToPlaylist(card.item) }
-        DarkMenuItem { text: qsTr("Download"); enabled: Features.downloads }
-        DarkMenuItem { text: qsTr("Copy stream URL"); visible: card.playable; onTriggered: if (card.client) card.client.copyStreamUrl(card.item.id) }
-        DarkMenuItem { text: qsTr("Refresh metadata"); onTriggered: card.cardAction("refresh", card.item) }
-        DarkMenuItem { text: qsTr("Delete media"); visible: card.item && card.item.canDelete === true; onTriggered: card.cardAction("delete", card.item) }
-        DarkMenuItem { text: qsTr("Edit metadata"); enabled: Features.metadataEdit }
-        DarkMenuItem { text: qsTr("Edit images"); enabled: Features.metadataEdit }
-        DarkMenuItem { text: qsTr("Edit subtitles"); enabled: Features.metadataEdit }
-        DarkMenuItem { text: qsTr("Identify"); enabled: Features.metadataEdit }
+        item: card.item; client: card.client
+        playable: card.playable; canAddTo: card.canAddTo
+        onPlay: (it) => card.activated(it)
+        onQueue: (it) => card.cardAction("queue", it)
+        onPlayNext: (it) => card.cardAction("playNext", it)
+        onAddToCollection: (it) => card.addToCollection(it)
+        onAddToPlaylist: (it) => card.addToPlaylist(it)
     }
 }

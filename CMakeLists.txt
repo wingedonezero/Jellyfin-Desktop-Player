@@ -38,10 +38,11 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/components/DarkMenu.qml
         src/qml/components/DarkMenuItem.qml
         src/qml/components/MediaCard.qml
+        src/qml/components/MediaWideRow.qml
+        src/qml/components/ItemContextMenu.qml
         src/qml/components/MediaRow.qml
         src/qml/components/AppBar.qml
         src/qml/components/NavDrawer.qml
-        src/qml/components/DirectoryPicker.qml
         # screens
         src/qml/Main.qml
         src/qml/screens/LoginView.qml
@@ -50,7 +51,6 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/screens/DetailScreen.qml
         src/qml/screens/SearchScreen.qml
         src/qml/screens/SettingsScreen.qml
-        src/qml/screens/AdminScreen.qml
         src/qml/screens/PlayerView.qml
         src/qml/screens/PlayerControls.qml
     SOURCES
