@@ -1,0 +1,376 @@
+diff --git a/options/options.c b/options/options.c
+index 716c3e6..f7820bf 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -171,6 +171,12 @@ static const m_option_t mp_vo_opt_list[] = {
+         {"no", 0}, {"yes", 1}, {"downscale-big", 2})},
+     {"video-recenter", OPT_BOOL(recenter)},
+     {"wid", OPT_INT64(WinID), .flags = UPDATE_VO},
++    {"wl-display-ptr", OPT_INT64(wl_display_ptr)},
++    {"wl-parent-surface", OPT_INT64(wl_parent_surface)},
++    {"wl-subsurface-x", OPT_INT(wl_subsurface_x)},
++    {"wl-subsurface-y", OPT_INT(wl_subsurface_y)},
++    {"wl-subsurface-w", OPT_INT(wl_subsurface_w)},
++    {"wl-subsurface-h", OPT_INT(wl_subsurface_h)},
+     {"screen", OPT_CHOICE(screen_id, {"default", -1}), M_RANGE(0, 32)},
+     {"screen-name", OPT_STRING(screen_name)},
+     {"fs-screen", OPT_CHOICE(fsscreen_id, {"all", -2}, {"current", -1}),
+diff --git a/options/options.h b/options/options.h
+index 12dafea..b72170e 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -69,6 +69,14 @@ typedef struct mp_vo_opts {
+     bool show_in_taskbar;
+ 
+     int64_t WinID;
++    // Embed into a foreign Wayland surface: raw pointers provided by the host
++    // app, which shares its wl_display so both surfaces are the same wl client.
++    int64_t wl_display_ptr;
++    int64_t wl_parent_surface;
++    int wl_subsurface_x;
++    int wl_subsurface_y;
++    int wl_subsurface_w;
++    int wl_subsurface_h;
+ 
+     float force_monitor_aspect;
+     float monitor_pixel_aspect;
+diff --git a/video/out/wayland_common.c b/video/out/wayland_common.c
+index b5b889b..d231d16 100644
+--- a/video/out/wayland_common.c
++++ b/video/out/wayland_common.c
+@@ -2717,7 +2717,11 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
+         wl_list_insert(&wl->output_list, &output->link);
+     }
+ 
+-    if (!strcmp(interface, wl_seat_interface.name) && found++) {
++    // When embedded, the host (Qt) owns all input. mpv must NOT bind a wl_seat:
++    // on a shared display it would receive duplicate pointer/keyboard events and
++    // run its own input handlers (window drag/resize) that deref the NULL
++    // xdg_toplevel and crash. Keys reach mpv via the client API instead.
++    if (!strcmp(interface, wl_seat_interface.name) && !wl->embedded && found++) {
+         if (ver < 5)
+             MP_WARN(wl, "Scrolling won't work because the compositor doesn't "
+                         "support version 5 of wl_seat protocol!\n");
+@@ -3072,6 +3076,8 @@ static void add_feedback(struct vo_wayland_feedback_pool *fback_pool,
+ 
+ static void do_minimize(struct vo_wayland_state *wl)
+ {
++    if (!wl->xdg_toplevel)
++        return;
+     if (wl->opts->window_minimized)
+         xdg_toplevel_set_minimized(wl->xdg_toplevel);
+ }
+@@ -3310,6 +3316,8 @@ static bool hdr_metadata_valid(struct vo_wayland_state *wl, struct pl_hdr_metada
+ 
+ static void request_decoration_mode(struct vo_wayland_state *wl, uint32_t mode)
+ {
++    if (!wl->xdg_toplevel_decoration)
++        return;
+     wl->requested_decoration = mode;
+     zxdg_toplevel_decoration_v1_set_mode(wl->xdg_toplevel_decoration, mode);
+ }
+@@ -3846,6 +3854,8 @@ static int spawn_cursor(struct vo_wayland_state *wl)
+ 
+ static void toggle_fullscreen(struct vo_wayland_state *wl)
+ {
++    if (!wl->xdg_toplevel)
++        return;
+     bool specific_screen = wl->opts->fsscreen_id >= 0 || wl->opts->fsscreen_name;
+     if (wl->opts->fullscreen && !specific_screen) {
+         xdg_toplevel_set_fullscreen(wl->xdg_toplevel, NULL);
+@@ -3875,6 +3885,8 @@ static void toggle_ime(struct vo_wayland_state *wl)
+ 
+ static void toggle_maximized(struct vo_wayland_state *wl)
+ {
++    if (!wl->xdg_toplevel)
++        return;
+     if (wl->opts->window_maximized) {
+         xdg_toplevel_set_maximized(wl->xdg_toplevel);
+     } else {
+@@ -3885,6 +3897,8 @@ static void toggle_maximized(struct vo_wayland_state *wl)
+ 
+ static void update_app_id(struct vo_wayland_state *wl)
+ {
++    if (!wl->xdg_toplevel)
++        return;
+     xdg_toplevel_set_app_id(wl->xdg_toplevel, wl->opts->appid);
+ }
+ 
+@@ -3929,6 +3943,8 @@ static void update_output_geometry(struct vo_wayland_state *wl, struct mp_rect o
+ static int update_window_title(struct vo_wayland_state *wl, const char *title)
+ {
+     /* The xdg-shell protocol requires that the title is UTF-8. */
++    if (!wl->xdg_toplevel)
++        return VO_TRUE;
+     void *tmp = talloc_new(NULL);
+     struct bstr b_title = bstr_sanitize_utf8_latin1(tmp, bstr0(title));
+     xdg_toplevel_set_title(wl->xdg_toplevel, bstrto0(tmp, b_title));
+@@ -3936,6 +3952,28 @@ static int update_window_title(struct vo_wayland_state *wl, const char *title)
+     return VO_TRUE;
+ }
+ 
++// When embedded we share the host's wl_display, so mpv's proxies live on a
++// private event queue (wl->queue) dispatched only by mpv's VO thread — never by
++// the host's (e.g. Qt's) event loop. These wrappers pick the queue-aware
++// libwayland calls in that case, and the normal default-queue ones otherwise.
++static int wl_prepare_read(struct vo_wayland_state *wl)
++{
++    return wl->queue ? wl_display_prepare_read_queue(wl->display, wl->queue)
++                     : wl_display_prepare_read(wl->display);
++}
++
++static int wl_dispatch_pending(struct vo_wayland_state *wl)
++{
++    return wl->queue ? wl_display_dispatch_queue_pending(wl->display, wl->queue)
++                     : wl_display_dispatch_pending(wl->display);
++}
++
++static int wl_roundtrip(struct vo_wayland_state *wl)
++{
++    return wl->queue ? wl_display_roundtrip_queue(wl->display, wl->queue)
++                     : wl_display_roundtrip(wl->display);
++}
++
+ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64_t timeout_ns)
+ {
+     if (wl->display_fd == -1)
+@@ -3946,8 +3984,8 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
+         {.fd = wl->wakeup_pipe[0], .events = POLLIN },
+     };
+ 
+-    while (wl_display_prepare_read(wl->display) != 0)
+-        wl_display_dispatch_pending(wl->display);
++    while (wl_prepare_read(wl) != 0)
++        wl_dispatch_pending(wl);
+     wl_display_flush(wl->display);
+ 
+     mp_poll(fds, nfds, timeout_ns);
+@@ -3967,11 +4005,13 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
+     if (fds[1].revents & POLLIN)
+         mp_flush_wakeup_pipe(wl->wakeup_pipe[0]);
+ 
+-    wl_display_dispatch_pending(wl->display);
++    wl_dispatch_pending(wl);
+ }
+ 
+ static void begin_dragging(struct vo_wayland_state *wl)
+ {
++    if (!wl->xdg_toplevel)
++        return;
+     struct vo_wayland_seat *s = wl->last_button_seat;
+     if (!mp_input_test_dragging(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y) &&
+         !wl->opts->fullscreen && s)
+@@ -4024,7 +4064,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+ {
+     struct vo_wayland_state *wl = vo->wl;
+     struct mp_vo_opts *opts = wl->opts;
+-    wl_display_dispatch_pending(wl->display);
++    wl_dispatch_pending(wl);
+ 
+     switch (request) {
+     case VOCTRL_CHECK_EVENTS: {
+@@ -4049,6 +4089,20 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+         while (m_config_cache_get_next_changed(wl->opts_cache, &opt)) {
+             if (opt == &opts->appid)
+                 update_app_id(wl);
++            if (wl->embedded && (opt == &opts->wl_subsurface_x || opt == &opts->wl_subsurface_y)) {
++                if (wl->embed_subsurface) {
++                    wl_subsurface_set_position(wl->embed_subsurface,
++                                               opts->wl_subsurface_x, opts->wl_subsurface_y);
++                    wl_surface_commit(wl->surface);
++                }
++            }
++            if (wl->embedded && (opt == &opts->wl_subsurface_w || opt == &opts->wl_subsurface_h)) {
++                int w = opts->wl_subsurface_w > 0 ? opts->wl_subsurface_w : 640;
++                int h = opts->wl_subsurface_h > 0 ? opts->wl_subsurface_h : 480;
++                wl->window_size = (struct mp_rect){0, 0, w, h};
++                wl->geometry = wl->window_size;
++                wl->pending_vo_events |= VO_EVENT_RESIZE;
++            }
+             if (opt == &opts->border)
+             {
+                 // This is stupid but the value of border shouldn't be written
+@@ -4131,7 +4185,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+             wl->state_change = true;
+             if (wl->opts->window_maximized) {
+                 xdg_toplevel_unset_maximized(wl->xdg_toplevel);
+-                wl_display_dispatch_pending(wl->display);
++                wl_dispatch_pending(wl);
+                 /* Make sure the compositor let us unmaximize */
+                 if (wl->opts->window_maximized)
+                     return VO_TRUE;
+@@ -4260,7 +4314,7 @@ bool vo_wayland_init(struct vo *vo)
+     struct vo_wayland_state *wl = vo->wl;
+ 
+     *wl = (struct vo_wayland_state) {
+-        .display = wl_display_connect(NULL),
++        .display = NULL, // set below: host-provided when embedding, else connect
+         .vo = vo,
+         .log = mp_log_new(wl, vo->log, "wayland"),
+         .bounded_width = 0,
+@@ -4276,6 +4330,14 @@ bool vo_wayland_init(struct vo *vo)
+     };
+     wl->opts = wl->opts_cache->opts;
+ 
++    /* Embedding: render into a wl_subsurface of a host-provided parent surface,
++     * reusing the host's wl_display so both surfaces belong to the same Wayland
++     * client (required for subsurface parenting across toolkits). */
++    wl->embedded = wl->opts->wl_parent_surface != 0;
++    wl->display = wl->opts->wl_display_ptr ?
++                  (struct wl_display *)(intptr_t)wl->opts->wl_display_ptr :
++                  wl_display_connect(NULL);
++
+     wl_list_init(&wl->output_list);
+     wl_list_init(&wl->seat_list);
+     wl_list_init(&wl->tranche_list);
+@@ -4287,10 +4349,17 @@ bool vo_wayland_init(struct vo *vo)
+         goto err;
+ 
+     wl->registry = wl_display_get_registry(wl->display);
++    if (wl->embedded) {
++        /* Put all of mpv's proxies on a private event queue so they are only
++         * dispatched by mpv's VO thread, never by the host's event loop on the
++         * shared display (the two racing on the default queue crashes). */
++        wl->queue = wl_display_create_queue(wl->display);
++        wl_proxy_set_queue((struct wl_proxy *)wl->registry, wl->queue);
++    }
+     wl_registry_add_listener(wl->registry, &registry_listener, wl);
+ 
+     /* Do a roundtrip to run the registry */
+-    wl_display_roundtrip(wl->display);
++    wl_roundtrip(wl);
+ 
+     if (!wl->surface) {
+         MP_FATAL(wl, "Compositor doesn't support %s (ver. 4)\n",
+@@ -4320,8 +4389,25 @@ bool vo_wayland_init(struct vo *vo)
+     if (create_viewports(wl))
+         goto err;
+ 
+-    if (create_xdg_surface(wl))
++    if (wl->embedded) {
++        if (!wl->subcompositor) {
++            MP_FATAL(wl, "Embedding requires the wl_subcompositor protocol!\n");
++            goto err;
++        }
++        struct wl_surface *parent =
++            (struct wl_surface *)(intptr_t)wl->opts->wl_parent_surface;
++        wl->embed_subsurface = wl_subcompositor_get_subsurface(
++            wl->subcompositor, wl->surface, parent);
++        wl_subsurface_set_desync(wl->embed_subsurface);
++        /* Place our video below the host's UI surface, so the host's
++         * transparent regions reveal the video underneath. */
++        wl_subsurface_place_below(wl->embed_subsurface, parent);
++        wl_subsurface_set_position(wl->embed_subsurface,
++                                   wl->opts->wl_subsurface_x,
++                                   wl->opts->wl_subsurface_y);
++    } else if (create_xdg_surface(wl)) {
+         goto err;
++    }
+ 
+     if (wl->xdg_activation) {
+         xdg_activate(wl);
+@@ -4407,7 +4493,7 @@ bool vo_wayland_init(struct vo *vo)
+                    wp_presentation_interface.name);
+     }
+ 
+-    if (wl->xdg_decoration_manager) {
++    if (wl->xdg_decoration_manager && !wl->embedded) {
+         wl->xdg_toplevel_decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(wl->xdg_decoration_manager, wl->xdg_toplevel);
+         zxdg_toplevel_decoration_v1_add_listener(wl->xdg_toplevel_decoration, &decoration_listener, wl);
+         request_decoration_mode(
+@@ -4460,7 +4546,7 @@ bool vo_wayland_init(struct vo *vo)
+ 
+     /* Do another roundtrip to ensure all of the above is initialized
+      * before mpv does anything else. */
+-    wl_display_roundtrip(wl->display);
++    wl_roundtrip(wl);
+ 
+     return true;
+ 
+@@ -4477,6 +4563,8 @@ bool vo_wayland_reconfig(struct vo *vo)
+ 
+     if (!wl->current_output) {
+         wl->current_output = find_output(wl);
++        if (!wl->current_output && wl->embedded && !wl_list_empty(&wl->output_list))
++            wl->current_output = wl_container_of(wl->output_list.next, wl->current_output, link);
+         if (!wl->current_output)
+             return false;
+         set_surface_scaling(wl);
+@@ -4484,6 +4572,18 @@ bool vo_wayland_reconfig(struct vo *vo)
+         wl->pending_vo_events |= VO_EVENT_DPI;
+     }
+ 
++    if (wl->embedded) {
++        /* No xdg configure arrives when embedded — the host drives our size via
++         * the wl-subsurface-w/h options. mpv aspect-fits the video into it. */
++        int w = wl->opts->wl_subsurface_w > 0 ? wl->opts->wl_subsurface_w : 640;
++        int h = wl->opts->wl_subsurface_h > 0 ? wl->opts->wl_subsurface_h : 480;
++        wl->window_size = (struct mp_rect){0, 0, w, h};
++        wl->geometry = wl->window_size;
++        wl->geometry_configured = true;
++        wl->pending_vo_events |= VO_EVENT_RESIZE;
++        return true;
++    }
++
+     if (wl->opts->auto_window_resize || !wl->geometry_configured)
+         set_geometry(wl, false);
+ 
+@@ -4540,7 +4640,7 @@ void vo_wayland_uninit(struct vo *vo)
+ 
+     // Ensure that any in-flight vo_wayland_preferred_description_info get deallocated.
+     if (wl->display)
+-        wl_display_roundtrip(wl->display);
++        wl_roundtrip(wl);
+ 
+     if (wl->compositor)
+         wl_compositor_destroy(wl->compositor);
+@@ -4656,6 +4756,9 @@ void vo_wayland_uninit(struct vo *vo)
+     if (wl->video_subsurface)
+         wl_subsurface_destroy(wl->video_subsurface);
+ 
++    if (wl->embed_subsurface)
++        wl_subsurface_destroy(wl->embed_subsurface);
++
+     if (wl->wm_base)
+         xdg_wm_base_destroy(wl->wm_base);
+ 
+@@ -4688,7 +4791,11 @@ void vo_wayland_uninit(struct vo *vo)
+     if (wl->wp_tablet_manager)
+         zwp_tablet_manager_v2_destroy(wl->wp_tablet_manager);
+ 
+-    if (wl->display)
++    if (wl->queue)
++        wl_event_queue_destroy(wl->queue);
++
++    /* Only disconnect a display WE connected — never the host's shared one. */
++    if (wl->display && !wl->embedded)
+         wl_display_disconnect(wl->display);
+ 
+     munmap(wl->compositor_format_map, wl->compositor_format_size);
+@@ -4737,10 +4844,10 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
+     /* If the compositor does not have presentation time, we cannot be sure
+      * that this wait is accurate. Do a hacky block with wl_display_roundtrip. */
+     if (!wl->use_present && !wl_display_get_error(wl->display))
+-        wl_display_roundtrip(wl->display);
++        wl_roundtrip(wl);
+ 
+     /* Only use this heuristic if the compositor doesn't support the suspended state. */
+-    if (wl->frame_wait && xdg_toplevel_get_version(wl->xdg_toplevel) < 6) {
++    if (wl->frame_wait && wl->xdg_toplevel && xdg_toplevel_get_version(wl->xdg_toplevel) < 6) {
+         // Only consider consecutive missed callbacks.
+         if (wl->timeout_count > 1) {
+             wl->hidden = true;
+diff --git a/video/out/wayland_common.h b/video/out/wayland_common.h
+index ed71848..b37797d 100644
+--- a/video/out/wayland_common.h
++++ b/video/out/wayland_common.h
+@@ -52,6 +52,9 @@ struct vo_wayland_state {
+     struct wl_surface       *video_surface;
+     struct wl_surface       *callback_surface;
+     struct wl_subsurface    *video_subsurface;
++    struct wl_subsurface    *embed_subsurface; // our surface as a subsurface of a host parent
++    struct wl_event_queue   *queue;            // private event queue (thread isolation) when embedded
++    bool                     embedded;          // rendering embedded in a foreign parent surface
+ 
+     /* Geometry */
+     struct mp_rect geometry;

@@ -12,6 +12,10 @@ Item {
     property var config: null // AppConfig — default quality + subtitle prefs
     property alias playing: player.playing
     property bool osdVisible: true
+    // True once mpv has the first frame up. Until then the app backdrop stays
+    // opaque so the transparent window doesn't briefly reveal the desktop
+    // through the not-yet-painted video subsurface.
+    property bool videoReady: false
     property var currentItem: ({})
     property var playerItem: ({})  // full item (trickplay/chapters), fetched on play
     property bool favorite: false
@@ -40,6 +44,53 @@ Item {
     property int _pendingSubIndex: -999
     property string _pendingSourceId: ""
     property bool _tracksApplied: false
+
+    // Keyboard: the player grabs focus while visible and forwards key presses
+    // to mpv, so mpv's own bindings + OSD feedback drive playback (d deinterlace,
+    // i stats, SPACE pause, arrows seek, t tone-mapping via input.conf, …).
+    // f/F11/Esc are app-level (fullscreen / exit).
+    focus: true
+    onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
+
+    Keys.onPressed: (event) => {
+        if (event.key === Qt.Key_Escape) {
+            const w = Window.window
+            if (w && w.visibility === Window.FullScreen) w.visibility = Window.Windowed
+            else root.stop()
+            event.accepted = true; return
+        }
+        if (event.key === Qt.Key_F || event.key === Qt.Key_F11) {
+            const w = Window.window
+            if (w) w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
+            root.showOsd(); event.accepted = true; return
+        }
+        const name = root._mpvKeyName(event)
+        if (name.length > 0) { player.sendKey(name); event.accepted = true }
+    }
+
+    // Translate a Qt key event to an mpv key name (for player.sendKey()).
+    function _mpvKeyName(event) {
+        var mods = ""
+        if (event.modifiers & Qt.ControlModifier) mods += "Ctrl+"
+        if (event.modifiers & Qt.AltModifier) mods += "Alt+"
+        if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F12)
+            return mods + "F" + (event.key - Qt.Key_F1 + 1)
+        var sp = ({})
+        sp[Qt.Key_Space] = "SPACE"; sp[Qt.Key_Left] = "LEFT"; sp[Qt.Key_Right] = "RIGHT"
+        sp[Qt.Key_Up] = "UP"; sp[Qt.Key_Down] = "DOWN"; sp[Qt.Key_PageUp] = "PGUP"
+        sp[Qt.Key_PageDown] = "PGDWN"; sp[Qt.Key_Home] = "HOME"; sp[Qt.Key_End] = "END"
+        sp[Qt.Key_Return] = "ENTER"; sp[Qt.Key_Enter] = "ENTER"; sp[Qt.Key_Backspace] = "BS"
+        if (sp[event.key] !== undefined) {
+            if (event.modifiers & Qt.ShiftModifier) mods += "Shift+"
+            return mods + sp[event.key]
+        }
+        if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 0x20) {
+            if (mods.length > 0 && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                return mods + String.fromCharCode(event.key).toLowerCase()
+            return mods + event.text
+        }
+        return ""
+    }
 
     Component.onCompleted: if (config) {
         maxBitrate = config.value("playback/maxBitrate", 0)
@@ -108,6 +159,7 @@ Item {
         root.favorite = (item.isFavorite === true)
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
+        root.videoReady = false
         showOsd()
         // detail-page version / default-track selections (carried on the item)
         root._pendingSourceId = item.mediaSourceId || ""
@@ -174,10 +226,20 @@ Item {
         target: root.client
         function onStreamReady(tag, info) {
             if (tag !== "stream:play") return
+            // Honor the server's preference-computed default tracks (audio
+            // language + subtitle mode/language) when the user didn't pick a
+            // track on the detail page. -1 => none/off. A manual pick (>=0)
+            // still wins.
+            if (root._pendingAudioIndex === -999)
+                root._pendingAudioIndex = (info.defaultAudioIndex !== undefined) ? info.defaultAudioIndex : -1
+            if (root._pendingSubIndex === -999)
+                root._pendingSubIndex = (info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1
+            root._tracksApplied = false
             player.pendingResume = root._resumeSeconds
             player.play(info.url)
             client.reportPlaybackStart(player.currentId)
-            console.log("[jf] stream", info.isTranscode ? "transcode" : "direct")
+            console.log("[jf] stream", info.isTranscode ? "transcode" : "direct",
+                        "tracks a/s:", root._pendingAudioIndex, "/", root._pendingSubIndex)
         }
         function onItemsReady(tag, items) {
             if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)
@@ -315,6 +377,7 @@ Item {
         if (player.currentId.length > 0)
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.playing = false
+        root.videoReady = false
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
@@ -359,6 +422,10 @@ Item {
 
         onFileLoaded: {
             console.log("[mpv] file loaded — streaming OK")
+            console.log("[mpv] vo:", player.queryProperty("current-vo"),
+                        "| gpu-api:", player.queryProperty("gpu-api"),
+                        "| hwdec:", player.queryProperty("hwdec-current"))
+            root.videoReady = true
             if (pendingResume > 0) {
                 player.seek(pendingResume)
                 pendingResume = 0
@@ -395,6 +462,7 @@ Item {
         hoverEnabled: true
         onPositionChanged: root.showOsd()
         onClicked: {
+            root.forceActiveFocus() // re-grab keyboard for mpv key forwarding
             root.showOsd()
             player.setPaused(!player.paused)
         }

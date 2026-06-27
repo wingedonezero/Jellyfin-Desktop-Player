@@ -12,7 +12,10 @@ ApplicationWindow {
     height: 800
     visible: true
     title: qsTr("Jellyfin Desktop")
-    color: Theme.background
+    // Transparent window: mpv renders in a native window stacked directly behind
+    // this one and shows through the player's video region. The opaque backdrop
+    // below covers everything except during playback, so the browse UI is solid.
+    color: "transparent"
 
     readonly property bool autoPlayEnabled: (typeof autoPlay !== "undefined") && autoPlay
     property var libraries: []
@@ -25,6 +28,16 @@ ApplicationWindow {
     }
 
     AppConfig { id: appConfig }
+
+    // Opaque app backdrop — covers the whole window so the browse/login UI is
+    // solid. Hidden during playback so the transparent window reveals the mpv
+    // video window behind it.
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.background
+        visible: !playerView.playing || !playerView.videoReady
+        z: -1000
+    }
 
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }

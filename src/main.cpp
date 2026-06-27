@@ -1,4 +1,4 @@
-#include <QGuiApplication>
+#include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
@@ -7,12 +7,18 @@
 
 int main(int argc, char *argv[])
 {
-    // MpvVideoItem renders through mpv's OpenGL render API into a
-    // QQuickFramebufferObject, so the Qt Quick scene graph MUST run on OpenGL.
-    // This has to happen before the first QQuickWindow is constructed.
+    // The QML scene graph runs on OpenGL; mpv renders separately with Vulkan
+    // (gpu-next) into a wl_subsurface of our window (see MpvVideoItem) on native
+    // Wayland, composited *below* the Qt window. The window needs an alpha
+    // channel so the video shows through the transparent player region — enable
+    // it before the first QQuickWindow. (On an X11 session the item falls back
+    // to a child-window embed.)
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    QQuickWindow::setDefaultAlphaBuffer(true);
 
-    QGuiApplication app(argc, argv);
+    // QApplication (not QGuiApplication): the mpv video surface is hosted in a
+    // native QWidget window.
+    QApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("jellyfin-desktop"));
     QGuiApplication::setOrganizationName(QStringLiteral("jellyfin-desktop")); // QSettings path
     QGuiApplication::setApplicationVersion(QStringLiteral(PROJECT_VERSION));

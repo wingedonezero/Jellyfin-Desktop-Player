@@ -12,4 +12,7 @@ QString configDir();
 // Write a documented default mpv.conf into configDir() if none exists yet.
 void ensureDefaultMpvConfig();
 
+// Write a default input.conf (mpv key bindings) into configDir() if none exists.
+void ensureDefaultInputConf();
+
 } // namespace Paths

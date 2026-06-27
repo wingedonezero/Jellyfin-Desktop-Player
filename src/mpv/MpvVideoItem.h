@@ -1,70 +1,34 @@
 #pragma once
 
 #include <QtQml/qqmlregistration.h>
-#include <QtQuick/QQuickFramebufferObject>
+#include <QQuickItem>
+#include <QPointer>
+#include <QRect>
 #include <QStringList>
 #include <QVariantList>
 
-#include <memory>
-
 #include <mpv/client.h>
-#include <mpv/render_gl.h>
+
+class QWidget;
+class QQuickWindow;
 
 // ----------------------------------------------------------------------------
-// Ownership helpers.
+// MpvVideoItem — a libmpv video surface for Qt Quick (Option A: mpv owns its
+// own window).
 //
-// The mpv handle and the GL render context have independent lifetimes: the
-// render context is created and destroyed on the Qt scene-graph render thread
-// (inside the Renderer), while the handle lives with the item on the GUI
-// thread. The handle MUST outlive the render context, or teardown crashes.
-// shared_ptr ownership makes that ordering correct no matter which side drops
-// last (MpvRenderResources holds a ref to MpvHandle).
-// ----------------------------------------------------------------------------
-
-struct MpvHandle {
-    mpv_handle *handle = nullptr;
-    explicit MpvHandle(mpv_handle *h) : handle(h) {}
-    ~MpvHandle()
-    {
-        if (handle) {
-            mpv_terminate_destroy(handle);
-        }
-    }
-    MpvHandle(const MpvHandle &) = delete;
-    MpvHandle &operator=(const MpvHandle &) = delete;
-};
-
-struct MpvRenderResources {
-    mpv_render_context *renderCtx = nullptr;
-    std::shared_ptr<MpvHandle> mpv; // keeps the handle alive past the context
-
-    explicit MpvRenderResources(std::shared_ptr<MpvHandle> h)
-        : mpv(std::move(h))
-    {
-    }
-
-    // MUST be called on the render thread with the GL context current.
-    void freeContext()
-    {
-        if (renderCtx) {
-            mpv_render_context_set_update_callback(renderCtx, nullptr, nullptr);
-            mpv_render_context_free(renderCtx);
-            renderCtx = nullptr;
-        }
-    }
-};
-
-// ----------------------------------------------------------------------------
-// MpvVideoItem — a libmpv video surface for Qt Quick.
+// Unlike the old render-API approach (mpv drew into a QQuickFramebufferObject),
+// mpv here renders with its real video output (vo=gpu-next, gpu-api=vulkan) into
+// a dedicated native X11 window that we keep stacked directly BEHIND the (now
+// transparent) Qt window, tracking this item's on-screen geometry. The QML UI —
+// including the OSD — composites on top through the transparent region. This is
+// what unlocks gpu-next/Vulkan, full mpv config, and mpv's native OSD/input.
 //
-// mpv renders through its OpenGL render API directly into this item's FBO. The
-// only external dependency is libmpv itself. Playback state is observed from
-// mpv and exposed as bindable properties — mpv is the authoritative source of
-// state; the UI reflects it. audioTracks/subtitleTracks are lists of
-// { id, label, selected } maps.
+// The control surface is unchanged: mpv is the authoritative source of state,
+// observed and exposed as bindable properties; the same invokables drive it.
+// audioTracks/subtitleTracks are lists of { id, label, selected, ffIndex } maps.
 // ----------------------------------------------------------------------------
 
-class MpvVideoItem : public QQuickFramebufferObject
+class MpvVideoItem : public QQuickItem
 {
     Q_OBJECT
     QML_ELEMENT
@@ -86,8 +50,6 @@ class MpvVideoItem : public QQuickFramebufferObject
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
     ~MpvVideoItem() override;
-
-    Renderer *createRenderer() const override;
 
     double position() const { return m_position; }
     double duration() const { return m_duration; }
@@ -117,6 +79,11 @@ public:
     Q_INVOKABLE void setSubDelay(double seconds);   // + => subtitles later
     Q_INVOKABLE void setAudioDelay(double seconds); // + => audio later
 
+    // --- input forwarding (so mpv's own input.conf + OSD work) ---
+    // Translate a Qt key/text to an mpv key name and feed it to mpv's input
+    // layer, which runs the binding and shows mpv's native OSD feedback.
+    Q_INVOKABLE void sendKey(const QString &mpvKeyName);
+
     // --- low-level passthrough (typed API grows on top of these) ---
     Q_INVOKABLE void command(const QStringList &args);
     Q_INVOKABLE void setOption(const QString &name, const QString &value);
@@ -137,15 +104,33 @@ Q_SIGNALS:
     void subDelayChanged();
     void audioDelayChanged();
     void bufferedRangesChanged();
+    // mpv log line (level: "error"/"warn"/...). Drives the playback-health UI.
+    void mpvLog(const QString &level, const QString &prefix, const QString &text);
+
+protected:
+    void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
+    void itemChange(ItemChange change, const ItemChangeData &data) override;
 
 private:
     static void onMpvWakeup(void *ctx); // called from an mpv-owned thread
     Q_INVOKABLE void pumpEvents();      // runs on the GUI thread
-    Q_INVOKABLE void scheduleUpdate();  // runs on the GUI thread
     void handlePropertyChange(mpv_event_property *prop);
     void updateTracks(const QVariantList &trackList);
     void updateChapters(const QVariantList &chapterList);
     void updateBufferedRanges(const QVariantMap &cacheState);
+
+    // The native window mpv renders into, kept behind the transparent Qt window
+    // and matched to this item's on-screen geometry.
+    void ensureHostWindow();
+    void syncHostGeometry();
+    void updateHostVisibility();
+    void attachToWindow(QQuickWindow *w);
+
+    // Wayland subsurface embed (primary on a Wayland session): mpv renders into
+    // a wl_subsurface of the window. mpv init is deferred until the window's
+    // wl_surface exists; the subsurface is then kept matched to this item's rect.
+    void maybeInitWayland();
+    void syncSubsurfaceGeometry();
 
     double m_position = 0.0;
     double m_duration = 0.0;
@@ -161,8 +146,10 @@ private:
     double m_audioDelay = 0.0;
     QVariantList m_bufferedRanges; // [{start,end}] seconds, from demuxer-cache-state
 
-    std::shared_ptr<MpvHandle> m_mpv;
-    std::shared_ptr<MpvRenderResources> m_resources;
-
-    friend class MpvRenderer;
+    mpv_handle *m_mpv = nullptr;
+    QWidget *m_host = nullptr;          // mpv's render window (wid target)
+    QPointer<QQuickWindow> m_window;    // the Qt window this item lives in
+    bool m_hostStacked = false;        // restack-below-once latch on (re)show
+    bool m_wayland = false;            // running on the Wayland platform
+    bool m_mpvInited = false;          // mpv_initialize() has run
 };
