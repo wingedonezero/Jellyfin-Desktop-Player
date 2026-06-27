@@ -122,6 +122,16 @@ hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else 
 
 
 # =============================================================================
+# VIDEO — deinterlace + aspect
+# =============================================================================
+#deinterlace=no             # for interlaced sources (old broadcast / DVD). no (default) | yes | auto.
+                            #   Toggle live with 'd' (mpv picks yadif/bwdif and shows the state on screen).
+#deinterlace-field-parity=auto # field order. auto (default) | tff | bff
+#video-aspect-override=-1   # force display aspect. -1 = honor the file (default). e.g. 16:9 | 4:3 | 2.35:1
+                            #   (the OSD's aspect control cycles this too)
+
+
+# =============================================================================
 # MOTION INTERPOLATION — smooths judder when fps != refresh ("soap-opera" look)
 #   mpv default: interpolation off, video-sync=audio (the normal cinematic look).
 #   interpolation NEEDS video-sync=display-resample to look right — enable both.
@@ -157,6 +167,12 @@ hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else 
 # =============================================================================
 #ao=pipewire                # output driver. pipewire >>modern Linux<< | pulse | alsa
 #audio-channels=auto        # negotiate layout with the device. auto >>rec<< | stereo | 5.1 | 7.1
+#alang=eng,en,English       # fallback audio-language order (your server preference is applied first).
+#ad-lavc-ac3drc=0           # AC3 dynamic-range compression 0.0..1.0. 0 = full range (no loudness flattening).
+#ad-lavc-downmix=no         # keep the original channel count; don't let the decoder pre-downmix. Default: no.
+#pipewire-buffer=native     # PipeWire buffer sizing. native = follow the server quantum. Default: native.
+#audio-pitch-correction=yes # keep pitch correct when changing playback speed. Default: yes.
+#replaygain=no              # loudness normalization from tags. no (default) | track | album
 #audio-exclusive=no         # take exclusive control of the device? Default: no (share with system sounds).
 #volume-max=130             # highest volume the player allows, in %. Default: 130.
 #audio-spdif=ac3,eac3,dts,dts-hd,truehd  # BITSTREAM these UNDECODED to an AVR over HDMI/SPDIF.
@@ -192,8 +208,24 @@ hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else 
 # =============================================================================
 #screenshot-format=png      # png >>lossless<< | jpg | webp | jxl | avif
 #screenshot-high-bit-depth=yes # capture in 10/12-bit when the source is HDR. Default: yes.
+#screenshot-png-compression=7 # PNG compression 0=fast/big .. 9=slow/small. Default: 7.
+#screenshot-template=%F-%P  # filename pattern. %F=filename, %P=timestamp. Default: mpv-shotNNNN.
 #screenshot-directory=~/Pictures/mpv
 #osd-font-size=55           # size of mpv's own status/seek text (the toasts on key presses). Default: 55.
+
+
+# =============================================================================
+# WINDOW / SESSION — the APP controls these, so setting them here has NO effect.
+#   Listed only so you know where they went: the video is embedded (no mpv
+#   window of its own), resume is server-side ("Continue Watching"), screen
+#   blanking is inhibited host-side over D-Bus, and end-of-file / play-next is
+#   driven by the app's queue.
+# =============================================================================
+#save-position-on-quit=no   # resume is server-side, not local watch-later.
+#stop-screensaver=yes       # handled host-side over D-Bus during playback.
+#keep-open=no               # the app decides end-of-file behaviour (play next / stop).
+#geometry=                  # initial window position/size — app-managed (embedded video).
+#autofit=                   # cap on the initial window size — app-managed (embedded video).
 
 
 # =============================================================================
