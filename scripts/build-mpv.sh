@@ -68,6 +68,14 @@ cd "$SRC_DIR"
 if [ ! -d mpv ]; then
   git clone --depth 1 --branch "v$MPV_VERSION" \
     https://github.com/mpv-player/mpv.git
+  # Apply our focused fork patches (e.g. native-Wayland subsurface embedding) to
+  # the pinned source. Only on a fresh clone — re-applying on an existing tree
+  # would conflict. Update mpv = delete .cache/mpv-src/mpv, bump version, rerun.
+  for p in "$REPO_ROOT"/patches/mpv/*.patch; do
+    [ -e "$p" ] || continue
+    echo "==> applying patch $(basename "$p")"
+    git -C mpv apply "$p" || { echo "ERROR: patch failed: $p (needs re-port for $MPV_VERSION)"; exit 1; }
+  done
 fi
 cd mpv
 rm -rf build

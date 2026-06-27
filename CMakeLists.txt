@@ -89,6 +89,7 @@ target_link_libraries(jellyfin-desktop PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Gui
+    Qt6::GuiPrivate
     Qt6::Widgets
     Qt6::Network
     Qt6::DBus

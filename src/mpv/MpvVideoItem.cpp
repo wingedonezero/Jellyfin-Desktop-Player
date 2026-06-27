@@ -3,11 +3,17 @@
 #include "Paths.h"
 
 #include <QByteArray>
+#include <QGuiApplication>
 #include <QQuickWindow>
 #include <QVariant>
 #include <QVector>
 #include <QWidget>
 #include <QtGlobal>
+
+#include <QtGui/qguiapplication_platform.h>
+#include <qpa/qplatformnativeinterface.h>
+
+#include <cstdint>
 
 namespace {
 // Recursively convert an mpv_node into a QVariant (used for track-list, etc.).
@@ -25,22 +31,28 @@ QVariant nodeToVariant(const mpv_node *node)
     case MPV_FORMAT_NODE_ARRAY: {
         QVariantList list;
         mpv_node_list *l = node->u.list;
-        for (int i = 0; i < l->num; ++i) {
+        for (int i = 0; i < l->num; ++i)
             list.append(nodeToVariant(&l->values[i]));
-        }
         return list;
     }
     case MPV_FORMAT_NODE_MAP: {
         QVariantMap map;
         mpv_node_list *l = node->u.list;
-        for (int i = 0; i < l->num; ++i) {
+        for (int i = 0; i < l->num; ++i)
             map.insert(QString::fromUtf8(l->keys[i]), nodeToVariant(&l->values[i]));
-        }
         return map;
     }
     default:
         return {};
     }
+}
+
+void setIntOpt(mpv_handle *mpv, const char *name, int64_t v, bool initialized)
+{
+    if (initialized)
+        mpv_set_property(mpv, name, MPV_FORMAT_INT64, &v);
+    else
+        mpv_set_option(mpv, name, MPV_FORMAT_INT64, &v);
 }
 } // namespace
 
@@ -51,33 +63,32 @@ QVariant nodeToVariant(const mpv_node *node)
 MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     : QQuickItem(parent)
 {
-    // mpv renders into its own native window, so this QML item paints nothing —
-    // it exists to (a) expose the control/state API and (b) drive the geometry
-    // of the mpv window behind the transparent Qt window.
+    // mpv renders into its own surface, so this QML item paints nothing — it
+    // exists to expose the control API and drive the geometry of mpv's surface.
     setFlag(ItemHasContents, false);
 
-    // The mpv render window must exist before mpv_initialize so we can hand its
-    // id to mpv via `wid`.
-    ensureHostWindow();
+    m_wayland = QGuiApplication::platformName() == QLatin1String("wayland");
+
+    // X11 fallback: mpv renders into a native child window (created up front so
+    // its id can be handed to mpv via `wid` before init). On Wayland we instead
+    // hand mpv our window's wl_surface and it makes a subsurface (deferred until
+    // the surface exists — see maybeInitWayland()).
+    if (!m_wayland)
+        ensureHostWindow();
 
     m_mpv = mpv_create();
-    if (!m_mpv) {
+    if (!m_mpv)
         qFatal("MpvVideoItem: mpv_create() failed");
-    }
 
-    // Load user config from a standard, editable location
-    // (~/.config/jellyfin-desktop/mpv.conf), generating a documented base file
-    // on first run. libmpv does not load config by default, so opt in here.
+    // Load user config (~/.config/jellyfin-desktop/mpv.conf), generating a
+    // documented base on first run. libmpv doesn't load config by default.
     Paths::ensureDefaultMpvConfig();
     const QByteArray configDir = Paths::configDir().toUtf8();
     mpv_set_option_string(m_mpv, "config-dir", configDir.constData());
     mpv_set_option_string(m_mpv, "config", "yes");
     mpv_set_option_string(m_mpv, "terminal", "no");
 
-    // Embed: mpv creates its own render surface inside this native window. The
-    // video output (vo=gpu-next, gpu-api=vulkan, …) now comes from mpv.conf —
-    // we no longer force vo, so the user's full config takes effect.
-    if (m_host) {
+    if (!m_wayland && m_host) {
         int64_t wid = static_cast<int64_t>(m_host->winId());
         mpv_set_option(m_mpv, "wid", MPV_FORMAT_INT64, &wid);
     }
@@ -96,15 +107,18 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_observe_property(m_mpv, 0, "audio-delay", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "demuxer-cache-state", MPV_FORMAT_NODE);
 
-    // Surface warnings/errors to the UI (bad config option, decode issues, …).
     mpv_request_log_messages(m_mpv, "warn");
-
     mpv_set_wakeup_callback(m_mpv, onMpvWakeup, this);
 
-    if (mpv_initialize(m_mpv) < 0) {
-        mpv_terminate_destroy(m_mpv);
-        m_mpv = nullptr;
-        qFatal("MpvVideoItem: mpv_initialize() failed");
+    // X11: we have the wid now, so init immediately. Wayland: defer until the
+    // window's wl_surface exists.
+    if (!m_wayland) {
+        if (mpv_initialize(m_mpv) < 0) {
+            mpv_terminate_destroy(m_mpv);
+            m_mpv = nullptr;
+            qFatal("MpvVideoItem: mpv_initialize() failed");
+        }
+        m_mpvInited = true;
     }
 }
 
@@ -120,16 +134,68 @@ MpvVideoItem::~MpvVideoItem()
 }
 
 // ----------------------------------------------------------------------------
-// Embedded render window
+// Wayland subsurface embedding (primary path)
+// ----------------------------------------------------------------------------
+
+void MpvVideoItem::maybeInitWayland()
+{
+    if (!m_wayland || m_mpvInited || !m_mpv || !window())
+        return;
+
+    QPlatformNativeInterface *ni = QGuiApplication::platformNativeInterface();
+    void *surface = ni ? ni->nativeResourceForWindow("surface", window()) : nullptr;
+    auto *wlApp = qGuiApp->nativeInterface<QNativeInterface::QWaylandApplication>();
+    void *display = wlApp ? static_cast<void *>(wlApp->display()) : nullptr;
+    if (!surface || !display)
+        return; // window not exposed yet — retry on the next frame
+
+    int64_t d = reinterpret_cast<int64_t>(display);
+    int64_t s = reinterpret_cast<int64_t>(surface);
+    mpv_set_option(m_mpv, "wl-display-ptr", MPV_FORMAT_INT64, &d);
+    mpv_set_option(m_mpv, "wl-parent-surface", MPV_FORMAT_INT64, &s);
+
+    const QPointF tl = mapToScene(QPointF(0, 0));
+    const qreal dpr = window()->devicePixelRatio();
+    int64_t x = qRound(tl.x());
+    int64_t y = qRound(tl.y());
+    int64_t w = qMax<int64_t>(16, qRound(width() * dpr));
+    int64_t h = qMax<int64_t>(16, qRound(height() * dpr));
+    mpv_set_option(m_mpv, "wl-subsurface-x", MPV_FORMAT_INT64, &x);
+    mpv_set_option(m_mpv, "wl-subsurface-y", MPV_FORMAT_INT64, &y);
+    mpv_set_option(m_mpv, "wl-subsurface-w", MPV_FORMAT_INT64, &w);
+    mpv_set_option(m_mpv, "wl-subsurface-h", MPV_FORMAT_INT64, &h);
+
+    if (mpv_initialize(m_mpv) < 0) {
+        qWarning("MpvVideoItem: mpv_initialize() (wayland embed) failed");
+        return;
+    }
+    m_mpvInited = true;
+}
+
+void MpvVideoItem::syncSubsurfaceGeometry()
+{
+    if (!m_wayland || !m_mpvInited || !m_mpv || !window() || !isVisible())
+        return;
+    const QPointF tl = mapToScene(QPointF(0, 0));
+    const qreal dpr = window()->devicePixelRatio();
+    int64_t w = qRound(width() * dpr);
+    int64_t h = qRound(height() * dpr);
+    if (w <= 0 || h <= 0)
+        return;
+    setIntOpt(m_mpv, "wl-subsurface-x", qRound(tl.x()), true);
+    setIntOpt(m_mpv, "wl-subsurface-y", qRound(tl.y()), true);
+    setIntOpt(m_mpv, "wl-subsurface-w", w, true);
+    setIntOpt(m_mpv, "wl-subsurface-h", h, true);
+}
+
+// ----------------------------------------------------------------------------
+// X11 child-window embedding (fallback)
 // ----------------------------------------------------------------------------
 
 void MpvVideoItem::ensureHostWindow()
 {
     if (m_host)
         return;
-    // A frameless, focus-less top-level native window. mpv owns its contents;
-    // Qt must not paint it. Kept stacked directly behind the transparent Qt
-    // window and matched to this item's on-screen rect.
     m_host = new QWidget(nullptr, Qt::FramelessWindowHint);
     m_host->setAttribute(Qt::WA_NativeWindow);
     m_host->setAttribute(Qt::WA_DontCreateNativeAncestors);
@@ -139,7 +205,7 @@ void MpvVideoItem::ensureHostWindow()
     m_host->setFocusPolicy(Qt::NoFocus);
     m_host->setStyleSheet(QStringLiteral("background:black;"));
     m_host->resize(16, 16);
-    m_host->winId(); // realise the native (X11) window now, for `wid`
+    m_host->winId();
 }
 
 void MpvVideoItem::syncHostGeometry()
@@ -161,8 +227,6 @@ void MpvVideoItem::updateHostVisibility()
         syncHostGeometry();
         if (!m_host->isVisible()) {
             m_host->show();
-            // Keep the mpv window directly behind the (transparent) Qt window:
-            // drop it to the bottom, then raise the Qt window above it.
             m_host->lower();
             if (m_window)
                 m_window->raise();
@@ -176,35 +240,56 @@ void MpvVideoItem::attachToWindow(QQuickWindow *w)
 {
     if (m_window == w)
         return;
-    if (m_window) {
+    if (m_window)
         disconnect(m_window, nullptr, this, nullptr);
-    }
     m_window = w;
-    if (m_window) {
+    if (!m_window)
+        return;
+
+    if (m_wayland) {
+        // Retry deferred init each frame until the wl_surface exists (cheap
+        // no-op after it's done), and track the item's geometry into the
+        // subsurface. Subsurface position is parent-relative, so window *moves*
+        // need no resync — only size/layout changes.
+        connect(m_window, &QQuickWindow::frameSwapped, this, [this] { maybeInitWayland(); });
+        connect(m_window, &QWindow::widthChanged, this, [this] { syncSubsurfaceGeometry(); });
+        connect(m_window, &QWindow::heightChanged, this, [this] { syncSubsurfaceGeometry(); });
+        maybeInitWayland();
+    } else {
         auto resync = [this] { syncHostGeometry(); };
         connect(m_window, &QWindow::xChanged, this, resync);
         connect(m_window, &QWindow::yChanged, this, resync);
         connect(m_window, &QWindow::widthChanged, this, resync);
         connect(m_window, &QWindow::heightChanged, this, resync);
-        connect(m_window, &QWindow::visibilityChanged, this,
-                [this] { updateHostVisibility(); });
+        connect(m_window, &QWindow::visibilityChanged, this, [this] { updateHostVisibility(); });
+        updateHostVisibility();
     }
-    updateHostVisibility();
 }
 
 void MpvVideoItem::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
 {
     QQuickItem::geometryChange(newGeometry, oldGeometry);
-    syncHostGeometry();
-    updateHostVisibility();
+    if (m_wayland) {
+        maybeInitWayland();
+        syncSubsurfaceGeometry();
+    } else {
+        syncHostGeometry();
+        updateHostVisibility();
+    }
 }
 
 void MpvVideoItem::itemChange(ItemChange change, const ItemChangeData &data)
 {
-    if (change == ItemSceneChange)
+    if (change == ItemSceneChange) {
         attachToWindow(data.window);
-    else if (change == ItemVisibleHasChanged)
-        updateHostVisibility();
+    } else if (change == ItemVisibleHasChanged) {
+        if (m_wayland) {
+            maybeInitWayland();
+            syncSubsurfaceGeometry();
+        } else {
+            updateHostVisibility();
+        }
+    }
     QQuickItem::itemChange(change, data);
 }
 
@@ -214,6 +299,8 @@ void MpvVideoItem::itemChange(ItemChange change, const ItemChangeData &data)
 
 void MpvVideoItem::play(const QString &url)
 {
+    if (m_wayland && !m_mpvInited)
+        maybeInitWayland(); // window is exposed by now; ensure mpv is up
     command({QStringLiteral("loadfile"), url});
 }
 
@@ -297,28 +384,23 @@ void MpvVideoItem::sendKey(const QString &mpvKeyName)
 {
     if (mpvKeyName.isEmpty())
         return;
-    // Feed mpv's input layer so its input.conf binding runs (and shows mpv's
-    // own OSD feedback, e.g. "Deinterlace: yes").
     command({QStringLiteral("keypress"), mpvKeyName});
 }
 
 void MpvVideoItem::command(const QStringList &args)
 {
-    if (!m_mpv) {
+    if (!m_mpv)
         return;
-    }
 
     QVector<QByteArray> bytes;
     bytes.reserve(args.size());
-    for (const QString &arg : args) {
+    for (const QString &arg : args)
         bytes.append(arg.toUtf8());
-    }
 
     QVector<const char *> argv;
     argv.reserve(bytes.size() + 1);
-    for (const QByteArray &b : bytes) {
+    for (const QByteArray &b : bytes)
         argv.append(b.constData());
-    }
     argv.append(nullptr);
 
     mpv_command(m_mpv, argv.data());
@@ -326,20 +408,17 @@ void MpvVideoItem::command(const QStringList &args)
 
 void MpvVideoItem::setOption(const QString &name, const QString &value)
 {
-    if (m_mpv) {
+    if (m_mpv)
         mpv_set_property_string(m_mpv, name.toUtf8().constData(), value.toUtf8().constData());
-    }
 }
 
 QString MpvVideoItem::queryProperty(const QString &name) const
 {
-    if (!m_mpv) {
+    if (!m_mpv)
         return {};
-    }
     char *value = mpv_get_property_string(m_mpv, name.toUtf8().constData());
-    if (!value) {
+    if (!value)
         return {};
-    }
     const QString result = QString::fromUtf8(value);
     mpv_free(value);
     return result;
@@ -356,14 +435,12 @@ void MpvVideoItem::onMpvWakeup(void *ctx)
 
 void MpvVideoItem::pumpEvents()
 {
-    if (!m_mpv) {
+    if (!m_mpv)
         return;
-    }
     while (true) {
         mpv_event *event = mpv_wait_event(m_mpv, 0);
-        if (event->event_id == MPV_EVENT_NONE) {
+        if (event->event_id == MPV_EVENT_NONE)
             break;
-        }
         switch (event->event_id) {
         case MPV_EVENT_FILE_LOADED:
             Q_EMIT fileLoaded();
@@ -392,9 +469,8 @@ void MpvVideoItem::pumpEvents()
 
 void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
 {
-    if (!prop) {
+    if (!prop)
         return;
-    }
     const QByteArray name(prop->name);
     if (name == "time-pos" && prop->format == MPV_FORMAT_DOUBLE) {
         m_position = *static_cast<double *>(prop->data);
@@ -456,7 +532,6 @@ void MpvVideoItem::updateBufferedRanges(const QVariantMap &cacheState)
             {QStringLiteral("start"), r.value(QStringLiteral("start")).toDouble()},
             {QStringLiteral("end"), r.value(QStringLiteral("end")).toDouble()}});
     }
-    // demuxer-cache-state ticks often; only notify QML when the ranges change
     if (ranges != m_bufferedRanges) {
         m_bufferedRanges = ranges;
         Q_EMIT bufferedRangesChanged();
@@ -472,28 +547,24 @@ void MpvVideoItem::updateTracks(const QVariantList &trackList)
         const QString type = t.value(QStringLiteral("type")).toString();
         const bool isAudio = (type == QLatin1String("audio"));
         const bool isSub = (type == QLatin1String("sub"));
-        if (!isAudio && !isSub) {
+        if (!isAudio && !isSub)
             continue;
-        }
         const int id = t.value(QStringLiteral("id")).toInt();
         const QString title = t.value(QStringLiteral("title")).toString();
         const QString lang = t.value(QStringLiteral("lang")).toString();
         QString label;
-        if (!title.isEmpty() && !lang.isEmpty()) {
+        if (!title.isEmpty() && !lang.isEmpty())
             label = QStringLiteral("%1 (%2)").arg(title, lang);
-        } else if (!title.isEmpty()) {
+        else if (!title.isEmpty())
             label = title;
-        } else if (!lang.isEmpty()) {
+        else if (!lang.isEmpty())
             label = lang;
-        } else {
+        else
             label = QStringLiteral("Track %1").arg(id);
-        }
         QVariantMap track;
         track[QStringLiteral("id")] = id;
         track[QStringLiteral("label")] = label;
         track[QStringLiteral("selected")] = t.value(QStringLiteral("selected")).toBool();
-        // ffmpeg stream index — equals the Jellyfin MediaStream Index for the same
-        // file, so the detail page can pre-select a track on direct play.
         track[QStringLiteral("ffIndex")] = t.value(QStringLiteral("ff-index"), -1).toInt();
         (isAudio ? m_audioTracks : m_subtitleTracks).append(track);
     }

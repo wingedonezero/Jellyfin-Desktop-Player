@@ -126,6 +126,12 @@ private:
     void updateHostVisibility();
     void attachToWindow(QQuickWindow *w);
 
+    // Wayland subsurface embed (primary on a Wayland session): mpv renders into
+    // a wl_subsurface of the window. mpv init is deferred until the window's
+    // wl_surface exists; the subsurface is then kept matched to this item's rect.
+    void maybeInitWayland();
+    void syncSubsurfaceGeometry();
+
     double m_position = 0.0;
     double m_duration = 0.0;
     bool m_paused = false;
@@ -144,4 +150,6 @@ private:
     QWidget *m_host = nullptr;          // mpv's render window (wid target)
     QPointer<QQuickWindow> m_window;    // the Qt window this item lives in
     bool m_hostStacked = false;        // restack-below-once latch on (re)show
+    bool m_wayland = false;            // running on the Wayland platform
+    bool m_mpvInited = false;          // mpv_initialize() has run
 };
