@@ -83,6 +83,7 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     // Load user config (~/.config/jellyfin-desktop/mpv.conf), generating a
     // documented base on first run. libmpv doesn't load config by default.
     Paths::ensureDefaultMpvConfig();
+    Paths::ensureDefaultInputConf();
     const QByteArray configDir = Paths::configDir().toUtf8();
     mpv_set_option_string(m_mpv, "config-dir", configDir.constData());
     mpv_set_option_string(m_mpv, "config", "yes");

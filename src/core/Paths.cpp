@@ -66,4 +66,31 @@ cache=yes
 )cfg");
 }
 
+void ensureDefaultInputConf()
+{
+    const QString path = configDir() + QStringLiteral("/input.conf");
+    if (QFile::exists(path)) {
+        return;
+    }
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        return;
+    }
+    file.write(R"cfg(# jellyfin-desktop — mpv input.conf
+#
+# mpv's default key bindings are ALWAYS active (the app forwards your key
+# presses to mpv), so most keys already work in the player without being listed
+# here, e.g.:
+#   d   cycle deinterlace          i   stats overlay (I = toggle)
+#   SPACE / p   pause              LEFT/RIGHT  seek 5s     UP/DOWN  seek 1m
+#   [ ]  speed down/up            v   subtitle visibility  m  mute
+# Full reference: https://mpv.io/manual/stable/#interactive-control
+#
+# NOTE: f / F11 / Esc are handled by the app (fullscreen / exit), not mpv.
+
+# Cycle the HDR->SDR tone-mapping curve live; the OSD names the active curve.
+t cycle-values tone-mapping "auto" "spline" "bt.2446a" "bt.2390" "reinhard" "hable"
+)cfg");
+}
+
 } // namespace Paths
