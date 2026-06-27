@@ -12,6 +12,10 @@ Item {
     property var config: null // AppConfig — default quality + subtitle prefs
     property alias playing: player.playing
     property bool osdVisible: true
+    // True once mpv has the first frame up. Until then the app backdrop stays
+    // opaque so the transparent window doesn't briefly reveal the desktop
+    // through the not-yet-painted video subsurface.
+    property bool videoReady: false
     property var currentItem: ({})
     property var playerItem: ({})  // full item (trickplay/chapters), fetched on play
     property bool favorite: false
@@ -108,6 +112,7 @@ Item {
         root.favorite = (item.isFavorite === true)
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
+        root.videoReady = false
         showOsd()
         // detail-page version / default-track selections (carried on the item)
         root._pendingSourceId = item.mediaSourceId || ""
@@ -315,6 +320,7 @@ Item {
         if (player.currentId.length > 0)
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.playing = false
+        root.videoReady = false
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
@@ -362,6 +368,7 @@ Item {
             console.log("[mpv] vo:", player.queryProperty("current-vo"),
                         "| gpu-api:", player.queryProperty("gpu-api"),
                         "| hwdec:", player.queryProperty("hwdec-current"))
+            root.videoReady = true
             if (pendingResume > 0) {
                 player.seek(pendingResume)
                 pendingResume = 0

@@ -35,7 +35,7 @@ ApplicationWindow {
     Rectangle {
         anchors.fill: parent
         color: Theme.background
-        visible: !playerView.playing
+        visible: !playerView.playing || !playerView.videoReady
         z: -1000
     }
 
