@@ -226,10 +226,20 @@ Item {
         target: root.client
         function onStreamReady(tag, info) {
             if (tag !== "stream:play") return
+            // Honor the server's preference-computed default tracks (audio
+            // language + subtitle mode/language) when the user didn't pick a
+            // track on the detail page. -1 => none/off. A manual pick (>=0)
+            // still wins.
+            if (root._pendingAudioIndex === -999)
+                root._pendingAudioIndex = (info.defaultAudioIndex !== undefined) ? info.defaultAudioIndex : -1
+            if (root._pendingSubIndex === -999)
+                root._pendingSubIndex = (info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1
+            root._tracksApplied = false
             player.pendingResume = root._resumeSeconds
             player.play(info.url)
             client.reportPlaybackStart(player.currentId)
-            console.log("[jf] stream", info.isTranscode ? "transcode" : "direct")
+            console.log("[jf] stream", info.isTranscode ? "transcode" : "direct",
+                        "tracks a/s:", root._pendingAudioIndex, "/", root._pendingSubIndex)
         }
         function onItemsReady(tag, items) {
             if (tag === "player:item" && items.length > 0 && items[0].id === player.currentId)

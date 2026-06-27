@@ -870,34 +870,28 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
                                    int subtitleStreamIndex, const QString &mediaSourceId)
 {
     const QString srcId = mediaSourceId.isEmpty() ? itemId : mediaSourceId; // chosen version
-    if (maxBitrate <= 0) {
-        // Auto: mpv direct-plays the original file — no server transcode, no
-        // PlaybackInfo round-trip. (The server reports direct-play unsupported
-        // for our generic profile, but mpv handles every codec, so we trust it.)
-        // Audio/subtitle selection is applied by the player on the loaded file.
-        m_playSessionId.clear();
-        m_mediaSourceId = srcId;
-        m_transcoding = false;
-        QVariantMap info;
-        info[QStringLiteral("url")] = streamUrl(itemId, srcId).toString();
-        info[QStringLiteral("isTranscode")] = false;
-        Q_EMIT streamReady(requestTag, info);
-        return;
-    }
+    const bool autoQuality = (maxBitrate <= 0);
 
+    // Always go through PlaybackInfo so the server applies the user's audio /
+    // subtitle preferences (AudioLanguagePreference, SubtitleMode, …) and
+    // returns the chosen default stream indices. In Auto quality we still
+    // direct-play (mpv handles every codec) — we just use PlaybackInfo for
+    // those preference-computed defaults.
     QJsonObject body;
     body[QStringLiteral("DeviceProfile")] = deviceProfile();
     if (maxBitrate > 0)
         body[QStringLiteral("MaxStreamingBitrate")] = maxBitrate;
     if (startTicks > 0)
         body[QStringLiteral("StartTimeTicks")] = startTicks;
-    body[QStringLiteral("EnableDirectPlay")] = (maxBitrate <= 0);
-    body[QStringLiteral("EnableDirectStream")] = (maxBitrate <= 0);
+    body[QStringLiteral("EnableDirectPlay")] = autoQuality;
+    body[QStringLiteral("EnableDirectStream")] = autoQuality;
     body[QStringLiteral("EnableTranscoding")] = true;
     body[QStringLiteral("AllowVideoStreamCopy")] = true;
     body[QStringLiteral("AllowAudioStreamCopy")] = true;
     if (!mediaSourceId.isEmpty())
         body[QStringLiteral("MediaSourceId")] = mediaSourceId;
+    // Only send explicit indices when the user picked them on the detail page;
+    // otherwise let the server compute defaults from the user's preferences.
     if (audioStreamIndex >= 0)
         body[QStringLiteral("AudioStreamIndex")] = audioStreamIndex;
     if (subtitleStreamIndex >= 0)
@@ -905,16 +899,18 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
 
     const QString path = QStringLiteral("/Items/%1/PlaybackInfo?userId=%2").arg(itemId, m_userId);
     QNetworkReply *reply = post(path, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, maxBitrate]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, autoQuality]() {
         reply->deleteLater();
         QVariantMap info;
         if (reply->error() != QNetworkReply::NoError) {
-            // PlaybackInfo failed → fall back to direct play.
+            // PlaybackInfo failed → direct play, no preference-computed defaults.
             m_playSessionId.clear();
             m_mediaSourceId = srcId;
             m_transcoding = false;
             info[QStringLiteral("url")] = streamUrl(itemId, srcId).toString();
             info[QStringLiteral("isTranscode")] = false;
+            info[QStringLiteral("defaultAudioIndex")] = -1;
+            info[QStringLiteral("defaultSubIndex")] = -1;
             Q_EMIT streamReady(requestTag, info);
             return;
         }
@@ -926,14 +922,21 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         if (m_mediaSourceId.isEmpty())
             m_mediaSourceId = itemId;
 
-        const QString transcodingUrl = ms.value(QStringLiteral("TranscodingUrl")).toString();
-        const bool supportsDirect = ms.value(QStringLiteral("SupportsDirectPlay")).toBool()
-                                  || ms.value(QStringLiteral("SupportsDirectStream")).toBool();
+        // Server-computed default tracks (honor the user's audio-language +
+        // subtitle mode/language). null => none. These are Jellyfin stream
+        // indices, which equal mpv's ff-index on direct play.
+        auto defIndex = [&ms](const char *key) {
+            const QJsonValue v = ms.value(QLatin1String(key));
+            return (v.isUndefined() || v.isNull()) ? -1 : v.toInt(-1);
+        };
+        const int defAudio = defIndex("DefaultAudioStreamIndex");
+        const int defSub = defIndex("DefaultSubtitleStreamIndex");
 
+        const QString transcodingUrl = ms.value(QStringLiteral("TranscodingUrl")).toString();
         QString url;
         bool isTranscode = false;
-        if (maxBitrate <= 0 && supportsDirect) {
-            url = streamUrl(itemId, srcId).toString();       // Auto + fits → direct
+        if (autoQuality) {
+            url = streamUrl(itemId, srcId).toString();       // mpv direct-plays every codec
         } else if (!transcodingUrl.isEmpty()) {
             url = m_serverUrl + transcodingUrl;              // server-provided HLS transcode
             isTranscode = true;
@@ -944,6 +947,10 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         info[QStringLiteral("url")] = url;
         info[QStringLiteral("isTranscode")] = isTranscode;
         info[QStringLiteral("playSessionId")] = m_playSessionId;
+        // On a transcode the server already baked in the chosen tracks, so don't
+        // try to re-select (ff-index wouldn't match the remuxed stream anyway).
+        info[QStringLiteral("defaultAudioIndex")] = isTranscode ? -1 : defAudio;
+        info[QStringLiteral("defaultSubIndex")] = isTranscode ? -1 : defSub;
         Q_EMIT streamReady(requestTag, info);
     });
 }
