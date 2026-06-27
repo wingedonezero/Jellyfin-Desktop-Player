@@ -88,6 +88,10 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_set_option_string(m_mpv, "config-dir", configDir.constData());
     mpv_set_option_string(m_mpv, "config", "yes");
     mpv_set_option_string(m_mpv, "terminal", "no");
+    // libmpv defaults input-default-bindings to NO; enable it so mpv's built-in
+    // key bindings (pause, deinterlace, stats, seek, …) actually fire when we
+    // forward keys via the `keypress` command. Our input.conf overrides still apply.
+    mpv_set_option_string(m_mpv, "input-default-bindings", "yes");
 
     if (!m_wayland && m_host) {
         int64_t wid = static_cast<int64_t>(m_host->winId());

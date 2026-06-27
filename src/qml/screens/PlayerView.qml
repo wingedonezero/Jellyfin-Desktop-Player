@@ -50,7 +50,7 @@ Item {
     // i stats, SPACE pause, arrows seek, t tone-mapping via input.conf, …).
     // f/F11/Esc are app-level (fullscreen / exit).
     focus: true
-    onVisibleChanged: if (visible) forceActiveFocus()
+    onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
 
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Escape) {
