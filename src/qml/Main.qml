@@ -55,6 +55,8 @@ ApplicationWindow {
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
+        else if (item.type === "Studio") // e.g. from search: a studio is a filtered library list
+            stack.push(libraryComp, { studioId: item.id, pageTitle: item.name })
         else
             stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
     }

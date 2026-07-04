@@ -119,6 +119,10 @@ public:
     Q_INVOKABLE void reportPlaybackStopped(const QString &itemId, qint64 positionTicks);
 
     // --- user data (fire-and-forget; UI updates optimistically) ---
+    Q_INVOKABLE void searchPeople(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void searchStudios(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void searchVideos(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void fetchSearchSuggestions(const QString &requestTag);
     Q_INVOKABLE void setFavorite(const QString &itemId, bool favorite);
     Q_INVOKABLE void setWatched(const QString &itemId, bool watched);
     Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard

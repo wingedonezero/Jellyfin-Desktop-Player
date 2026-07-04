@@ -453,12 +453,55 @@ void JellyfinClient::fetchFavorites(const QString &requestTag)
                  requestTag);
 }
 
+// Grouped search, mirroring jellyfin-web's parallel queries (useSearchItems):
+// the main Items query below plus the Persons/Studios/misc-Video ones after it.
+// The screen groups results into type sections client-side.
 void JellyfinClient::search(const QString &query, const QString &requestTag)
 {
     const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    requestItems(QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=48"
-                                "&IncludeItemTypes=Movie,Series,Episode&%3&%4")
+    QString path = QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+                                  "&IncludeItemTypes=Movie,Series,Episode,Playlist,BoxSet&%3&%4")
+                       .arg(m_userId, q, kItemFields, kImageTypes);
+    if (!m_userConfig.value(QStringLiteral("DisplayMissingEpisodes")).toBool())
+        path += QStringLiteral("&IsMissing=false");
+    requestItems(path, requestTag);
+}
+
+void JellyfinClient::searchPeople(const QString &query, const QString &requestTag)
+{
+    const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
+    requestItems(QStringLiteral("/Persons?searchTerm=%1&userId=%2&Limit=100"
+                                "&excludePersonTypes=Artist,AlbumArtist&%3&%4")
+                     .arg(q, m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+void JellyfinClient::searchStudios(const QString &query, const QString &requestTag)
+{
+    const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
+    requestItems(QStringLiteral("/Studios?searchTerm=%1&userId=%2&Limit=100&%3&%4")
+                     .arg(q, m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+// Loose video files (home videos / music videos): MediaTypes=Video minus the
+// types the main query already covers.
+void JellyfinClient::searchVideos(const QString &query, const QString &requestTag)
+{
+    const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
+    requestItems(QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+                                "&MediaTypes=Video&ExcludeItemTypes=Movie,Episode,TvChannel&%3&%4")
                      .arg(m_userId, q, kItemFields, kImageTypes),
+                 requestTag);
+}
+
+// Pre-query "Suggestions" panel: favorite-or-liked-first random picks (web's
+// useSearchSuggestions — rendered as text links, so no image fields needed).
+void JellyfinClient::fetchSearchSuggestions(const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Users/%1/Items?SortBy=IsFavoriteOrLiked,Random"
+                                "&IncludeItemTypes=Movie,Series&Limit=20&Recursive=true")
+                     .arg(m_userId),
                  requestTag);
 }
 

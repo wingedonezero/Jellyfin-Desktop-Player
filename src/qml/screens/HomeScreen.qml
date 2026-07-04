@@ -32,13 +32,19 @@ Item {
     }
     readonly property bool useEpisodeImages: cfgBool("display/episodeImagesNextUp", true)
 
-    // ordered list of home section keys (from Settings → Home; read at load)
+    // ordered list of home section keys (from Settings → Home; read at load).
+    // Tokens are jellyfin-web's HomeSectionType strings (smalllibrarytiles /
+    // librarybuttons / resume / nextup / latestmedia / none); web's audio/book/
+    // livetv section types are out of scope and render nothing.
     property var homeSections: []
     function loadSections() {
-        const def = ["resume", "nextup", "mymedia", "latest", "none", "none"]
+        const def = ["smalllibrarytiles", "resume", "nextup", "latestmedia", "none", "none", "none"]
         let s = []
-        for (var i = 0; i < 6; i++) {
-            const k = config ? config.value("home/section" + i, def[i]) : def[i]
+        for (var i = 0; i < 7; i++) {
+            let k = "" + (config ? config.value("home/section" + i, def[i]) : def[i])
+            // migrate this app's pre-web-vocabulary tokens
+            if (k === "mymedia") k = "smalllibrarytiles"
+            else if (k === "latest") k = "latestmedia"
             if (k && k !== "none") s.push(k)
         }
         homeSections = s
@@ -47,7 +53,8 @@ Item {
     function sectionHasContent(key) {
         if (key === "resume") return resumeModel.length > 0
         if (key === "nextup") return nextUpModel.length > 0
-        if (key === "mymedia" || key === "latest") return librariesModel.length > 0
+        if (key === "smalllibrarytiles" || key === "librarybuttons" || key === "latestmedia")
+            return librariesModel.length > 0
         return false
     }
 
@@ -123,6 +130,47 @@ Item {
             onItemOpenDetail: (it) => screen.openLibrary(it)
         }
     }
+    // web's "My Media (small)": a compact row of labelled buttons per library
+    Component {
+        id: libraryButtonsRow
+        ColumnLayout {
+            spacing: Theme.spacingSmall
+            Text {
+                text: qsTr("My Media")
+                color: Theme.textPrimary
+                font.pixelSize: Theme.fontMedium
+                font.bold: true
+                Layout.leftMargin: Theme.pagePad
+            }
+            Flow {
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.pagePad
+                Layout.rightMargin: Theme.pagePad
+                spacing: Theme.spacingSmall
+                Repeater {
+                    model: screen.librariesModel
+                    Rectangle {
+                        required property var modelData
+                        width: btnLabel.implicitWidth + 36
+                        height: 40
+                        radius: Theme.radius
+                        color: btnHover.hovered ? Theme.surfaceHover : Theme.surface
+                        border.color: Theme.divider
+                        border.width: 1
+                        Text {
+                            id: btnLabel
+                            anchors.centerIn: parent
+                            text: parent.modelData.name
+                            color: Theme.textPrimary
+                            font.pixelSize: Theme.fontNormal
+                        }
+                        HoverHandler { id: btnHover; cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: screen.openLibrary(parent.modelData) }
+                    }
+                }
+            }
+        }
+    }
     Component {
         id: latestRows
         ColumnLayout {
@@ -168,8 +216,9 @@ Item {
                     Layout.preferredHeight: (visible && item) ? item.implicitHeight : 0
                     sourceComponent: modelData === "resume" ? resumeRow
                                    : modelData === "nextup" ? nextUpRow
-                                   : modelData === "mymedia" ? myMediaRow
-                                   : modelData === "latest" ? latestRows : null
+                                   : modelData === "smalllibrarytiles" ? myMediaRow
+                                   : modelData === "librarybuttons" ? libraryButtonsRow
+                                   : modelData === "latestmedia" ? latestRows : null
                 }
             }
         }
