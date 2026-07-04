@@ -102,8 +102,11 @@ Item {
             return mods + sp[event.key]
         }
         if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 0x20) {
-            if (mods.length > 0 && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
-                return mods + String.fromCharCode(event.key).toLowerCase()
+            // mpv spells a shifted letter as the uppercase char (Ctrl+D = Ctrl+Shift+d)
+            if (mods.length > 0 && event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
+                const ch = String.fromCharCode(event.key)
+                return mods + ((event.modifiers & Qt.ShiftModifier) ? ch : ch.toLowerCase())
+            }
             return mods + event.text
         }
         return ""

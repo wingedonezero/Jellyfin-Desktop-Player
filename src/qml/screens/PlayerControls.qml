@@ -82,15 +82,15 @@ Item {
         if (mode === "Cover") {
             root.player.setOption("panscan", "1.0")
             root.player.setOption("keepaspect", "yes")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         } else if (mode === "Fill") {
             root.player.setOption("panscan", "0")
             root.player.setOption("keepaspect", "no")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         } else { // Auto
             root.player.setOption("panscan", "0")
             root.player.setOption("keepaspect", "yes")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         }
     }
     function refreshStats() {

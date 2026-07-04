@@ -322,7 +322,7 @@ void MpvVideoItem::play(const QString &url, double startSeconds)
         maybeInitWayland(); // window is exposed by now; ensure mpv is up
     if (startSeconds > 0.1)
         command({QStringLiteral("loadfile"), url, QStringLiteral("replace"), QStringLiteral("-1"),
-                 QStringLiteral("start=%1").arg(startSeconds)});
+                 QStringLiteral("start=%1").arg(QString::number(startSeconds, 'f', 3))});
     else
         command({QStringLiteral("loadfile"), url});
 }
