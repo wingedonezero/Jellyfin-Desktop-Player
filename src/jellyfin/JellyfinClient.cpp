@@ -31,22 +31,33 @@ const QString kDetailFields = QStringLiteral(
     "Tags,ProductionLocations,PremiereDate");
 
 // A stable per-machine device id so the server recognises this client across runs.
-QString makeDeviceId()
+QString makeDeviceId(const QString &profile)
 {
     QByteArray seed = QSysInfo::machineUniqueId();
     if (seed.isEmpty()) {
         seed = QSysInfo::machineHostName().toUtf8();
     }
     seed += "::jellyfin-desktop";
+    if (!profile.isEmpty())
+        seed += "::" + profile.toUtf8();
     return QString::fromLatin1(QCryptographicHash::hash(seed, QCryptographicHash::Sha1).toHex());
+}
+
+// JFD_PROFILE runs are a separate device to the server too, and the session is
+// clearly labelled in the dashboard (e.g. "hostname (test)") so a dev/test
+// login can't be mistaken for the real one.
+QString profileName()
+{
+    return qEnvironmentVariable("JFD_PROFILE");
 }
 } // namespace
 
 JellyfinClient::JellyfinClient(QObject *parent)
     : QObject(parent)
     , m_net(new QNetworkAccessManager(this))
-    , m_deviceId(makeDeviceId())
-    , m_deviceName(QSysInfo::machineHostName())
+    , m_deviceId(makeDeviceId(profileName()))
+    , m_deviceName(QSysInfo::machineHostName()
+                   + (profileName().isEmpty() ? QString() : QStringLiteral(" (%1)").arg(profileName())))
 {
     // Abort a request if no data transfers for 20s, instead of hanging forever
     // and holding one of Qt's 6 per-host connection slots (which, once enough
