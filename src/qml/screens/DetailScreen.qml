@@ -151,9 +151,11 @@ Item {
     }
     function playEpisode(ep) {
         let idx = 0
-        for (let i = 0; i < episodes.length; ++i)
-            if (episodes[i].id === ep.id) { idx = i; break }
-        screen.playQueue(episodes, idx) // queue the season so it auto-plays next
+        let q = episodes.slice()
+        for (let i = 0; i < q.length; ++i)
+            if (q[i].id === ep.id) { idx = i; break }
+        q[idx] = ep // honor a modified copy (context menu's "Play from beginning" zeroes ticks)
+        screen.playQueue(q, idx) // queue the season so it auto-plays next
     }
     function playPrimary() {
         if (!detail) return
@@ -439,6 +441,17 @@ Item {
 
         HoverHandler { id: epHover }
         TapHandler { onTapped: screen.openDetail(ep.modelData) } // body → episode detail
+        TapHandler { acceptedButtons: Qt.RightButton; onTapped: epMenu.popup() }
+        ItemContextMenu {
+            id: epMenu
+            item: ep.modelData; client: screen.client
+            playable: true; canAddTo: true
+            onPlay: (it) => screen.playEpisode(it)
+            onQueue: (it) => screen.cardAction("queue", it)
+            onPlayNext: (it) => screen.cardAction("playNext", it)
+            onAddToCollection: (it) => screen.itemAddToCollection(it)
+            onAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+        }
 
         RowLayout {
             anchors.fill: parent
@@ -492,6 +505,20 @@ Item {
                     wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
+            }
+            // "⋮" more button — same menu as right-click
+            Rectangle {
+                visible: epHover.hovered
+                Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 4
+                radius: 14
+                color: epMoreHover.hovered ? Theme.surface : "transparent"
+                border.color: Theme.divider
+                border.width: epMoreHover.hovered ? 1 : 0
+                Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
+                HoverHandler { id: epMoreHover }
+                TapHandler { onTapped: epMenu.popup() }
             }
         }
     }

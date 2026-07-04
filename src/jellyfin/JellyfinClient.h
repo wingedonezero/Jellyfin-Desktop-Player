@@ -154,6 +154,7 @@ Q_SIGNALS:
     void userConfigChanged();
     void quickConnectResult(bool ok, const QString &message);
     void playbackStopReported(); // the /Sessions/Playing/Stopped POST finished — server userData is committed
+    void userDataChanged();      // a favorite/played toggle landed — screens refetch badges
     void errorOccurred(const QString &message);
 
 private:

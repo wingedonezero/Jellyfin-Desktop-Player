@@ -1024,14 +1024,20 @@ void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
 {
     const QString path = QStringLiteral("/Users/%1/FavoriteItems/%2").arg(m_userId, itemId);
     QNetworkReply *reply = favorite ? post(path, QByteArray()) : del(path);
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        Q_EMIT userDataChanged(); // committed server-side — screens refetch badges
+    });
 }
 
 void JellyfinClient::setWatched(const QString &itemId, bool watched)
 {
     const QString path = QStringLiteral("/Users/%1/PlayedItems/%2").arg(m_userId, itemId);
     QNetworkReply *reply = watched ? post(path, QByteArray()) : del(path);
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        Q_EMIT userDataChanged();
+    });
 }
 
 void JellyfinClient::copyStreamUrl(const QString &itemId) const

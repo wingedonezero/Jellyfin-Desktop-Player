@@ -115,6 +115,20 @@ Item {
                 wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; Layout.fillWidth: true
             }
         }
+        // "⋮" more button — same menu as right-click
+        Rectangle {
+            visible: hover.hovered
+            Layout.preferredWidth: 28; Layout.preferredHeight: 28
+            Layout.alignment: Qt.AlignVCenter
+            Layout.rightMargin: 4
+            radius: 14
+            color: listMoreHover.hovered ? Theme.surface : "transparent"
+            border.color: Theme.divider
+            border.width: listMoreHover.hovered ? 1 : 0
+            Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
+            HoverHandler { id: listMoreHover }
+            TapHandler { onTapped: ctxMenu.popup() }
+        }
     }
 
     // ---- banner layout ----

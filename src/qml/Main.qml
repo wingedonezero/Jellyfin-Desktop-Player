@@ -61,6 +61,13 @@ ApplicationWindow {
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
 
+    function refreshAllPages() {
+        for (var i = 0; i < stack.depth; ++i) {
+            var page = stack.get(i)
+            if (page && page.refreshUserData) page.refreshUserData()
+        }
+    }
+
     // card context-menu actions (queue/playNext are live-queue ops) bubbled up
     // from any card via cardAction.
     function cardAction(verb, item) {
@@ -328,16 +335,14 @@ ApplicationWindow {
             else if (tag === "shell:addto")
                 win.addToOptions = items
         }
-        // The stop report has landed server-side (played flag / resume position
-        // committed), so every stacked page refetches its userData — same as
-        // jellyfin-web re-fetching item queries on its "playbackstop" event.
+        // The stop report / a played-favorite toggle has landed server-side, so
+        // every stacked page refetches its userData — same as jellyfin-web
+        // re-fetching item queries on playbackstop / mutation events.
         function onPlaybackStopReported() {
             console.log("[jf] stop reported — refreshing", stack.depth, "page(s)")
-            for (var i = 0; i < stack.depth; ++i) {
-                var page = stack.get(i)
-                if (page && page.refreshUserData) page.refreshUserData()
-            }
+            win.refreshAllPages()
         }
+        function onUserDataChanged() { win.refreshAllPages() }
     }
 
     Component.onCompleted: {
