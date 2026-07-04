@@ -438,11 +438,18 @@ Item {
 
         onFileLoaded: {
             console.log("[mpv] file loaded — streaming OK")
+            root.applySubtitleStyle()
+        }
+        // First presented frame (fires after the loadfile start= seek lands) —
+        // only now drop the opaque backdrop, or the transparent window flashes
+        // the desktop while mpv is still seeking to the resume point.
+        onPlaybackRestart: {
+            if (root.videoReady) return
+            root.videoReady = true
+            // hwdec-current is reliably populated by now (it was blank at file-loaded)
             console.log("[mpv] vo:", player.queryProperty("current-vo"),
                         "| gpu-api:", player.queryProperty("gpu-api"),
                         "| hwdec:", player.queryProperty("hwdec-current"))
-            root.videoReady = true
-            root.applySubtitleStyle()
         }
         onEndFile: (reason, error) => {
             console.log("[mpv] end-file, reason:", reason, error.length ? ("— " + error) : "")

@@ -470,6 +470,13 @@ void MpvVideoItem::pumpEvents()
         case MPV_EVENT_FILE_LOADED:
             Q_EMIT fileLoaded();
             break;
+        case MPV_EVENT_PLAYBACK_RESTART:
+            // Fires when playback actually presents (after load or seek) — the
+            // first moment a frame is really on screen. With loadfile start=,
+            // FILE_LOADED comes *before* the initial seek finishes, so this is
+            // the signal the opaque-backdrop handoff must wait for.
+            Q_EMIT playbackRestart();
+            break;
         case MPV_EVENT_END_FILE: {
             auto *ef = static_cast<mpv_event_end_file *>(event->data);
             QString reason = QStringLiteral("stop");

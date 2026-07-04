@@ -98,6 +98,7 @@ public:
 
 Q_SIGNALS:
     void fileLoaded();
+    void playbackRestart(); // first frame presented (after load or seek)
     // reason: "eof" | "stop" | "quit" | "error" | "redirect". error is
     // mpv's human-readable failure text (only for reason "error").
     void endFile(const QString &reason, const QString &error);
