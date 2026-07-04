@@ -103,22 +103,29 @@ src/
 ## NEXT — consumer parity with jellyfin-web (the active work)
 The foundation (shell, Home, Library, Detail, Search, Settings, player OSD,
 saved session) is built; the **server-admin surface was scrapped (2026-06-17)**.
-Remaining web **consumer** parity, committed per area (mirror jellyfin-web
-exactly — the one thing we invent is the mpv mapping):
-1. **Library browse depth** — view modes (poster/list/thumb/banner), alphabet
-   picker (`NameStartsWith`), real paging + `TotalRecordCount` (then wire
-   `display/libraryPageSize`), sort-direction + 4 missing sorts, the 7 missing
-   filter-dialog groups, Movies Favorites / TV Episodes tabs.
-2. **Search** — type-grouped sections + extra item types (People/Studios/
-   Collections/…) + a pre-query suggestions panel.
-3. **Detail** — Trailer button (`RemoteTrailers`/`LocalTrailerCount`).
-4. **Home** — align section vocab to web's full set.
-5. **Player keyboard shortcuts** (~22 keys; all map to existing mpv invokables).
+**2026-07-04: the big parity items landed** — library browse depth (view modes,
+alphabet picker, real paging + TotalRecordCount, full sorts, all filter groups),
+type-grouped Search with People/Studios/Collections + suggestions panel, Home
+on web's HomeSectionType tokens (7 slots, legacy values migrate on read),
+missing-episode rendering, card/episode-row context menus ("⋮" + right-click,
+mark played/favorite with instant refresh), watched-state refresh after
+playback/toggles (`playbackStopReported`/`userDataChanged` → per-screen
+`refreshUserData()`), player keyboard forwarding, playback-health toasts,
+buffering spinner, and the OSD Playback Info panel (play method / transcode
+reasons / source container). **Trailer button: dropped by user decision** —
+don't re-add. Remaining ideas (user will ask): hold-key speed boost, visible
+queue panel with reorder (both exceed web), server-side displayPreferences
+sync for settings interop.
 
-Authoritative gap list: `docs/web-parity-audit-2026-06-16.md` (Tier 4/5; the
-admin tiers there are now out of scope). Theme stays the single dark skin; a
+`docs/web-parity-audit-2026-06-16.md` is now largely historical — verify any
+claim against code before acting on it. Theme stays the single dark skin; a
 swappable-skin *picker* is a separate later project. Cast/SyncPlay render
 disabled (genuine engine limits); Live TV/DVR + Music browsing are out of scope.
+
+**Dev/test sandbox:** `JFD_PROFILE=<name>` isolates ALL config (settings/
+session/mpv.conf) under `jellyfin-desktop-<name>` and registers as a separate
+labelled device ("host (name)") on the server; `JFD_AUTOSTOP=<secs>` backs out
+of playback automatically (pairs with `JFD_AUTOPLAY=1` for headless testing).
 
 ### Cleanup still owed
 - The config dir still has leftover `instance.json`/`settings.json`/`mpv/` from
