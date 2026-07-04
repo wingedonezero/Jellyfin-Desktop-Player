@@ -19,8 +19,16 @@ int main(int argc, char *argv[])
     // QApplication (not QGuiApplication): the mpv video surface is hosted in a
     // native QWidget window.
     QApplication app(argc, argv);
-    QGuiApplication::setApplicationName(QStringLiteral("jellyfin-desktop"));
-    QGuiApplication::setOrganizationName(QStringLiteral("jellyfin-desktop")); // QSettings path
+    // JFD_PROFILE=<name> sandboxes ALL persistent state (QSettings session +
+    // settings, and the AppConfigLocation mpv.conf/input.conf dir) under
+    // jellyfin-desktop-<name>, so a dev/test login can never touch the real
+    // config. Absent => the normal jellyfin-desktop config.
+    QString appName = QStringLiteral("jellyfin-desktop");
+    const QString profile = qEnvironmentVariable("JFD_PROFILE");
+    if (!profile.isEmpty())
+        appName += QLatin1Char('-') + profile;
+    QGuiApplication::setApplicationName(appName);
+    QGuiApplication::setOrganizationName(appName); // QSettings path
     QGuiApplication::setApplicationVersion(QStringLiteral(PROJECT_VERSION));
 
     // libmpv requires LC_NUMERIC to be "C", but QGuiApplication initialises the
