@@ -1010,6 +1010,17 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         info[QStringLiteral("url")] = url;
         info[QStringLiteral("isTranscode")] = isTranscode;
         info[QStringLiteral("playSessionId")] = m_playSessionId;
+        // Server-side facts for the OSD "Playback Info" panel (web's Playback
+        // Data dialog): source container/bitrate + why a transcode was needed.
+        info[QStringLiteral("container")] = ms.value(QStringLiteral("Container")).toString();
+        info[QStringLiteral("sourceBitrate")] = ms.value(QStringLiteral("Bitrate")).toInt(0);
+        {
+            QStringList reasons;
+            const QJsonArray reasonArr = ms.value(QStringLiteral("TranscodeReasons")).toArray();
+            for (const QJsonValue &rv : reasonArr)
+                reasons.append(rv.toString());
+            info[QStringLiteral("transcodeReasons")] = reasons.join(QStringLiteral(", "));
+        }
         // On a transcode the server already baked in the chosen tracks, so don't
         // try to re-select (ff-index wouldn't match the remuxed stream anyway).
         info[QStringLiteral("defaultAudioIndex")] = isTranscode ? -1 : defAudio;

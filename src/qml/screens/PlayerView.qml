@@ -47,6 +47,7 @@ Item {
     property int skipForward: 30
     property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
+    property var streamInfo: ({}) // last streamReady payload → OSD Playback Info panel
     // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
     property int _pendingAudioIndex: -999
     property int _pendingSubIndex: -999
@@ -251,6 +252,7 @@ Item {
             if (root._pendingSubIndex === -999)
                 root._pendingSubIndex = (info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1
             root._tracksApplied = false
+            root.streamInfo = info
             player.play(info.url, root._resumeSeconds) // start= opens at the resume point directly
             client.reportPlaybackStart(player.currentId)
             console.log("[jf] stream", info.isTranscode ? "transcode" : "direct",
@@ -522,6 +524,7 @@ Item {
         title: root.composeTitle(root.currentItem)
         favorite: root.favorite
         repeatMode: root.repeatMode
+        streamInfo: root.streamInfo
         maxBitrate: root.maxBitrate
         skipBack: root.skipBack
         skipForward: root.skipForward
