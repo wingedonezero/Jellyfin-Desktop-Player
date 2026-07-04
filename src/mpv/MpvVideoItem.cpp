@@ -3,8 +3,10 @@
 #include "Paths.h"
 
 #include <QByteArray>
+#include <QDir>
 #include <QGuiApplication>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QVariant>
 #include <QVector>
 #include <QWidget>
@@ -92,6 +94,16 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     // key bindings (pause, deinterlace, stats, seek, …) actually fire when we
     // forward keys via the `keypress` command. Our input.conf overrides still apply.
     mpv_set_option_string(m_mpv, "input-default-bindings", "yes");
+    // The app draws its own OSD controls and mpv never receives pointer input,
+    // so its built-in controller script is dead weight. mpv's OSD *messages*
+    // (toggles, input.conf feedback) are unaffected. Pre-init options can still
+    // be overridden by the user's mpv.conf.
+    mpv_set_option_string(m_mpv, "osc", "no");
+    // Give `s`/`S` screenshots a sane destination (default would be the CWD).
+    const QString shotDir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)
+                            + QStringLiteral("/jellyfin-desktop");
+    QDir().mkpath(shotDir);
+    mpv_set_option_string(m_mpv, "screenshot-directory", shotDir.toUtf8().constData());
 
     if (!m_wayland && m_host) {
         int64_t wid = static_cast<int64_t>(m_host->winId());
@@ -111,6 +123,8 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     mpv_observe_property(m_mpv, 0, "sub-delay", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "audio-delay", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 0, "demuxer-cache-state", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 0, "cache-buffering-state", MPV_FORMAT_INT64);
 
     mpv_request_log_messages(m_mpv, "warn");
     mpv_set_wakeup_callback(m_mpv, onMpvWakeup, this);
@@ -302,11 +316,15 @@ void MpvVideoItem::itemChange(ItemChange change, const ItemChangeData &data)
 // Playback control
 // ----------------------------------------------------------------------------
 
-void MpvVideoItem::play(const QString &url)
+void MpvVideoItem::play(const QString &url, double startSeconds)
 {
     if (m_wayland && !m_mpvInited)
         maybeInitWayland(); // window is exposed by now; ensure mpv is up
-    command({QStringLiteral("loadfile"), url});
+    if (startSeconds > 0.1)
+        command({QStringLiteral("loadfile"), url, QStringLiteral("replace"), QStringLiteral("-1"),
+                 QStringLiteral("start=%1").arg(startSeconds)});
+    else
+        command({QStringLiteral("loadfile"), url});
 }
 
 void MpvVideoItem::seek(double seconds)
@@ -324,7 +342,9 @@ void MpvVideoItem::setPaused(bool paused)
 
 void MpvVideoItem::skip(double seconds)
 {
-    command({QStringLiteral("seek"), QString::number(seconds), QStringLiteral("relative")});
+    // exact: keyframe-snapped relative seeks can land whole seconds away from
+    // the ±10/30 the buttons promise (absolute seeks are already hr-seek).
+    command({QStringLiteral("seek"), QString::number(seconds), QStringLiteral("relative+exact")});
 }
 
 void MpvVideoItem::setVolume(double volume)
@@ -452,9 +472,32 @@ void MpvVideoItem::pumpEvents()
             break;
         case MPV_EVENT_END_FILE: {
             auto *ef = static_cast<mpv_event_end_file *>(event->data);
-            Q_EMIT endFile(ef ? QString::number(ef->reason) : QString());
+            QString reason = QStringLiteral("stop");
+            QString error;
+            if (ef) {
+                switch (ef->reason) {
+                case MPV_END_FILE_REASON_EOF:      reason = QStringLiteral("eof"); break;
+                case MPV_END_FILE_REASON_STOP:     reason = QStringLiteral("stop"); break;
+                case MPV_END_FILE_REASON_QUIT:     reason = QStringLiteral("quit"); break;
+                case MPV_END_FILE_REASON_REDIRECT: reason = QStringLiteral("redirect"); break;
+                case MPV_END_FILE_REASON_ERROR:
+                    reason = QStringLiteral("error");
+                    error = QString::fromUtf8(mpv_error_string(ef->error));
+                    break;
+                }
+            }
+            Q_EMIT endFile(reason, error);
             break;
         }
+        case MPV_EVENT_SHUTDOWN:
+            // The core quit underneath us (a `quit` command from a script or
+            // config). The handle is unusable from here on; surface it instead
+            // of wedging silently. (App-side key handling never forwards `q`.)
+            qWarning("MpvVideoItem: mpv core shut down unexpectedly");
+            Q_EMIT mpvLog(QStringLiteral("error"), QStringLiteral("core"),
+                          QStringLiteral("mpv core shut down — restart the app to restore playback"));
+            Q_EMIT endFile(QStringLiteral("quit"), QString());
+            break;
         case MPV_EVENT_PROPERTY_CHANGE:
             handlePropertyChange(static_cast<mpv_event_property *>(event->data));
             break;
@@ -477,6 +520,22 @@ void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
     if (!prop)
         return;
     const QByteArray name(prop->name);
+    if (prop->format == MPV_FORMAT_NONE) {
+        // Property became unavailable (file unloaded). Reset the scrubber state
+        // so the next file doesn't briefly show the previous one's position.
+        if (name == "time-pos") {
+            m_position = 0.0;
+            Q_EMIT positionChanged();
+        } else if (name == "duration") {
+            m_duration = 0.0;
+            Q_EMIT durationChanged();
+        } else if (name == "paused-for-cache") {
+            m_buffering = false;
+            m_bufferingPercent = 0;
+            Q_EMIT bufferingChanged();
+        }
+        return;
+    }
     if (name == "time-pos" && prop->format == MPV_FORMAT_DOUBLE) {
         m_position = *static_cast<double *>(prop->data);
         Q_EMIT positionChanged();
@@ -510,6 +569,12 @@ void MpvVideoItem::handlePropertyChange(mpv_event_property *prop)
         Q_EMIT audioDelayChanged();
     } else if (name == "demuxer-cache-state" && prop->format == MPV_FORMAT_NODE) {
         updateBufferedRanges(nodeToVariant(static_cast<mpv_node *>(prop->data)).toMap());
+    } else if (name == "paused-for-cache" && prop->format == MPV_FORMAT_FLAG) {
+        m_buffering = (*static_cast<int *>(prop->data) != 0);
+        Q_EMIT bufferingChanged();
+    } else if (name == "cache-buffering-state" && prop->format == MPV_FORMAT_INT64) {
+        m_bufferingPercent = static_cast<int>(*static_cast<int64_t *>(prop->data));
+        Q_EMIT bufferingChanged();
     }
 }
 

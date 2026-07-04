@@ -196,6 +196,40 @@ ApplicationWindow {
         visible: playing
         client: jellyfin
         config: appConfig
+        onToast: (message) => win.showToast(message)
+    }
+
+    // Window-level toast (playback errors, mpv.conf problems). Lives above the
+    // player AND the shell so a message survives the player closing on failure.
+    function showToast(message) {
+        toastLabel.text = message
+        toastPopup.visible = true
+        toastTimer.restart()
+    }
+    Rectangle {
+        id: toastPopup
+        visible: false
+        z: 10000
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 110 // above the OSD control bar
+        width: Math.min(toastLabel.implicitWidth + 32, win.width - 80)
+        height: toastLabel.implicitHeight + 20
+        radius: Theme.radius
+        color: "#E6202020"
+        border.color: Theme.divider
+        border.width: 1
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            width: parent.width - 32
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontNormal
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+        Timer { id: toastTimer; interval: 6000; onTriggered: toastPopup.visible = false }
+        MouseArea { anchors.fill: parent; onClicked: toastPopup.visible = false }
     }
 
     // ---- shared add-to-playlist/collection picker -------------------------
