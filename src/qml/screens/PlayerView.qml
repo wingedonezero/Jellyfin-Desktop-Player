@@ -33,12 +33,21 @@ Item {
     property var queue: []
     property int queueIndex: -1
     property int repeatMode: 0 // 0 none, 1 one, 2 all
+    // Repeat One the mpv way: the file loops at EOF instead of relying on an
+    // end-file → seek(0) round-trip (the file is already unloaded by then).
+    onRepeatModeChanged: player.setOption("loop-file", repeatMode === 1 ? "inf" : "no")
+
+    // playback-health toast (shown at window level by Main.qml — it must
+    // outlive the player when a failed stream closes it)
+    signal toast(string message)
+    Timer { id: logDedup; interval: 10000 }
     property int maxBitrate: 0 // 0 = Auto (direct play); >0 caps quality (transcode)
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
     property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
+    property var streamInfo: ({}) // last streamReady payload → OSD Playback Info panel
     // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
     property int _pendingAudioIndex: -999
     property int _pendingSubIndex: -999
@@ -64,6 +73,14 @@ Item {
             if (w) w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
             root.showOsd(); event.accepted = true; return
         }
+        // Keys whose *default mpv binding* would kill the embedded core or jump
+        // an mpv playlist we don't use — remap to their app equivalents instead
+        // of forwarding. (q/Q = quit → back out; </> = playlist prev/next →
+        // our queue; Enter = playlist-next → swallow, too easy to hit.)
+        if (event.key === Qt.Key_Q) { root.stop(); event.accepted = true; return }
+        if (event.text === "<") { root.playPrev(); event.accepted = true; return }
+        if (event.text === ">") { root.playNext(); event.accepted = true; return }
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { event.accepted = true; return }
         const name = root._mpvKeyName(event)
         if (name.length > 0) { player.sendKey(name); event.accepted = true }
     }
@@ -85,15 +102,22 @@ Item {
             return mods + sp[event.key]
         }
         if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 0x20) {
-            if (mods.length > 0 && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
-                return mods + String.fromCharCode(event.key).toLowerCase()
+            // mpv spells a shifted letter as the uppercase char (Ctrl+D = Ctrl+Shift+d)
+            if (mods.length > 0 && event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
+                const ch = String.fromCharCode(event.key)
+                return mods + ((event.modifiers & Qt.ShiftModifier) ? ch : ch.toLowerCase())
+            }
             return mods + event.text
         }
         return ""
     }
 
     Component.onCompleted: if (config) {
-        maxBitrate = config.value("playback/maxBitrate", 0)
+        // web parity: the in-network vs internet max-quality cap is picked by
+        // the server's /System/Endpoint answer for this connection
+        maxBitrate = Number(config.value((client && !client.inNetwork)
+                                         ? "playback/maxBitrateInternet"
+                                         : "playback/maxBitrate", 0)) || 0
         autoPlayNext = config.value("playback/autoPlayNext", true)
         skipBack = config.value("playback/skipBack", 10)
         skipForward = config.value("playback/skipForward", 30)
@@ -235,8 +259,8 @@ Item {
             if (root._pendingSubIndex === -999)
                 root._pendingSubIndex = (info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1
             root._tracksApplied = false
-            player.pendingResume = root._resumeSeconds
-            player.play(info.url)
+            root.streamInfo = info
+            player.play(info.url, root._resumeSeconds) // start= opens at the resume point directly
             client.reportPlaybackStart(player.currentId)
             console.log("[jf] stream", info.isTranscode ? "transcode" : "direct",
                         "tracks a/s:", root._pendingAudioIndex, "/", root._pendingSubIndex)
@@ -418,27 +442,44 @@ Item {
 
         property bool playing: false
         property string currentId: ""
-        property real pendingResume: 0
 
         onFileLoaded: {
             console.log("[mpv] file loaded — streaming OK")
+            root.applySubtitleStyle()
+        }
+        // First presented frame (fires after the loadfile start= seek lands) —
+        // only now drop the opaque backdrop, or the transparent window flashes
+        // the desktop while mpv is still seeking to the resume point.
+        onPlaybackRestart: {
+            if (root.videoReady) return
+            root.videoReady = true
+            // hwdec-current is reliably populated by now (it was blank at file-loaded)
             console.log("[mpv] vo:", player.queryProperty("current-vo"),
                         "| gpu-api:", player.queryProperty("gpu-api"),
                         "| hwdec:", player.queryProperty("hwdec-current"))
-            root.videoReady = true
-            if (pendingResume > 0) {
-                player.seek(pendingResume)
-                pendingResume = 0
-            }
-            root.applySubtitleStyle()
         }
-        onEndFile: (reason) => {
-            // mpv reasons: 0 eof, 2 stop (our loadfile/stop), 4 error.
-            console.log("[mpv] end-file, reason:", reason)
-            if (reason === "0")
+        onEndFile: (reason, error) => {
+            console.log("[mpv] end-file, reason:", reason, error.length ? ("— " + error) : "")
+            if (reason === "eof")
                 (root.autoPlayNext || root.repeatMode !== 0) ? root.playNext() : root.stop()
-            else if (reason !== "2")
-                root.stop()              // error etc.; (transcode fallback lands later)
+            else if (reason === "error") {
+                root.toast(qsTr("Playback failed: %1").arg(error.length ? error : qsTr("unknown error")))
+                root.stop()
+            } else if (reason !== "stop") // "quit"/"redirect": core gone or stream bounced
+                root.stop()
+        }
+        // Playback-health surfacing: mpv errors (failed stream, bad mpv.conf
+        // option, decoder trouble) pop a toast instead of dying silently.
+        // Identical messages are suppressed for 10s so per-frame decode spam
+        // can't flood the UI.
+        property string _lastLogMsg: ""
+        onMpvLog: (level, prefix, text) => {
+            if (level !== "error" && level !== "fatal") return
+            console.log("[mpv]", level, prefix + ":", text)
+            if (text === _lastLogMsg && logDedup.running) return
+            _lastLogMsg = text
+            logDedup.restart()
+            root.toast(prefix === "core" ? text : (prefix + ": " + text))
         }
         onTracksChanged: {
             console.log("[mpv] tracks — audio:", audioTracks.length, "subtitle:", subtitleTracks.length)
@@ -468,6 +509,27 @@ Item {
         }
     }
 
+    // Buffering (network stall) indicator — mpv paused itself to refill the
+    // cache. Matches the spinner every client shows; hidden during normal play.
+    Column {
+        anchors.centerIn: parent
+        spacing: Theme.spacingSmall
+        visible: player.playing && root.videoReady && player.buffering
+        BusyIndicator {
+            anchors.horizontalCenter: parent.horizontalCenter
+            running: parent.visible
+            width: 64; height: 64
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: player.bufferingPercent > 0 && player.bufferingPercent < 100
+            text: player.bufferingPercent + " %"
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontNormal
+            style: Text.Outline; styleColor: "#000000"
+        }
+    }
+
     PlayerControls {
         id: controls
         anchors.fill: parent
@@ -476,6 +538,7 @@ Item {
         title: root.composeTitle(root.currentItem)
         favorite: root.favorite
         repeatMode: root.repeatMode
+        streamInfo: root.streamInfo
         maxBitrate: root.maxBitrate
         skipBack: root.skipBack
         skipForward: root.skipForward

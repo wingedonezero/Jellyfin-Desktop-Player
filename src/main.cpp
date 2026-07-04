@@ -19,8 +19,16 @@ int main(int argc, char *argv[])
     // QApplication (not QGuiApplication): the mpv video surface is hosted in a
     // native QWidget window.
     QApplication app(argc, argv);
-    QGuiApplication::setApplicationName(QStringLiteral("jellyfin-desktop"));
-    QGuiApplication::setOrganizationName(QStringLiteral("jellyfin-desktop")); // QSettings path
+    // JFD_PROFILE=<name> sandboxes ALL persistent state (QSettings session +
+    // settings, and the AppConfigLocation mpv.conf/input.conf dir) under
+    // jellyfin-desktop-<name>, so a dev/test login can never touch the real
+    // config. Absent => the normal jellyfin-desktop config.
+    QString appName = QStringLiteral("jellyfin-desktop");
+    const QString profile = qEnvironmentVariable("JFD_PROFILE");
+    if (!profile.isEmpty())
+        appName += QLatin1Char('-') + profile;
+    QGuiApplication::setApplicationName(appName);
+    QGuiApplication::setOrganizationName(appName); // QSettings path
     QGuiApplication::setApplicationVersion(QStringLiteral(PROJECT_VERSION));
 
     // libmpv requires LC_NUMERIC to be "C", but QGuiApplication initialises the
@@ -40,6 +48,9 @@ int main(int argc, char *argv[])
     ctx->setContextProperty(QStringLiteral("initialUser"), qEnvironmentVariable("JFD_USER"));
     ctx->setContextProperty(QStringLiteral("initialPass"), qEnvironmentVariable("JFD_PASS"));
     ctx->setContextProperty(QStringLiteral("autoPlay"), qEnvironmentVariable("JFD_AUTOPLAY") == QLatin1String("1"));
+    // JFD_AUTOSTOP=<secs>: back out of playback automatically after N seconds
+    // (dev/test hook for the stop → report → refresh path). 0/absent = off.
+    ctx->setContextProperty(QStringLiteral("autoStopSecs"), qEnvironmentVariable("JFD_AUTOSTOP").toInt());
 
     engine.loadFromModule("JellyfinDesktop", "Main");
 

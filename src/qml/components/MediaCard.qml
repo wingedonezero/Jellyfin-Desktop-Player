@@ -147,6 +147,19 @@ Item {
                 }
             }
 
+            // "⋮" more button (web's card overlay menu) — same menu as right-click
+            Rectangle {
+                visible: hover.hovered
+                anchors { bottom: parent.bottom; right: parent.right; margins: 8 }
+                width: 28; height: 28; radius: 14
+                color: moreHover.hovered ? Theme.overlayStrong : Theme.overlayMedium
+                border.color: Theme.textPrimary
+                border.width: moreHover.hovered ? 1 : 0
+                Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
+                HoverHandler { id: moreHover }
+                TapHandler { onTapped: ctxMenu.popup() }
+            }
+
             // resume progress
             Rectangle {
                 visible: card.progress > 0

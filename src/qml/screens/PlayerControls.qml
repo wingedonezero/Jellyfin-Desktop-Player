@@ -38,6 +38,7 @@ Item {
     property real subScale: 1.0
     property bool statsVisible: false
     property var statsRows: []
+    property var streamInfo: ({}) // Jellyfin-side stream facts (play method / container / transcode reason)
 
     // ---- helpers ----------------------------------------------------------
     function fmt(t) {
@@ -81,15 +82,15 @@ Item {
         if (mode === "Cover") {
             root.player.setOption("panscan", "1.0")
             root.player.setOption("keepaspect", "yes")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         } else if (mode === "Fill") {
             root.player.setOption("panscan", "0")
             root.player.setOption("keepaspect", "no")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         } else { // Auto
             root.player.setOption("panscan", "0")
             root.player.setOption("keepaspect", "yes")
-            root.player.setOption("video-aspect-override", "-1")
+            root.player.setOption("video-aspect-override", "no") // -1 spelling is deprecated in 0.41
         }
     }
     function refreshStats() {
@@ -101,8 +102,21 @@ Item {
         const cache = parseFloat(p.queryProperty("demuxer-cache-duration"))
         const w = p.queryProperty("width")
         const h = p.queryProperty("height")
-        root.statsRows = [
-            { k: qsTr("Player"),           v: "mpv (libmpv, direct)" },
+        // Jellyfin side (web's "Playback Data" dialog): play method, source
+        // container/bitrate, and — when transcoding — the server's reasons.
+        const si = root.streamInfo || {}
+        const srcBr = si.sourceBitrate || 0
+        var rows = [
+            { k: qsTr("Player"),           v: "mpv (libmpv)" },
+            { k: qsTr("Play method"),      v: si.isTranscode === true ? qsTr("Transcode (HLS)") : qsTr("Direct Play") },
+        ]
+        if (si.isTranscode === true && si.transcodeReasons && si.transcodeReasons.length > 0)
+            rows.push({ k: qsTr("Transcode reason"), v: si.transcodeReasons })
+        if (si.container && si.container.length > 0)
+            rows.push({ k: qsTr("Source container"), v: si.container })
+        if (srcBr > 0)
+            rows.push({ k: qsTr("Source bitrate"), v: (srcBr / 1e6).toFixed(2) + " Mbps" })
+        rows = rows.concat([
             { k: qsTr("Video"),            v: q("video-codec") },
             { k: qsTr("Resolution"),       v: (w && h) ? (w + "×" + h) : "—" },
             { k: qsTr("Frame rate"),       v: isNaN(fps) ? "—" : fps.toFixed(2) + " fps" },
@@ -113,7 +127,8 @@ Item {
             { k: qsTr("Audio bitrate"),    v: isNaN(abr) ? "—" : Math.round(abr / 1000) + " kbps" },
             { k: qsTr("Container"),        v: q("file-format") },
             { k: qsTr("Buffered"),         v: isNaN(cache) ? "—" : cache.toFixed(1) + "s" },
-        ]
+        ])
+        root.statsRows = rows
     }
 
     // ---- reusable skin pieces --------------------------------------------

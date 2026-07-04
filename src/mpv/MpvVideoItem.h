@@ -46,6 +46,9 @@ class MpvVideoItem : public QQuickItem
     Q_PROPERTY(double subDelay READ subDelay NOTIFY subDelayChanged)
     Q_PROPERTY(double audioDelay READ audioDelay NOTIFY audioDelayChanged)
     Q_PROPERTY(QVariantList bufferedRanges READ bufferedRanges NOTIFY bufferedRangesChanged)
+    // Network stall state: mpv paused to refill its cache (drives the spinner).
+    Q_PROPERTY(bool buffering READ buffering NOTIFY bufferingChanged)
+    Q_PROPERTY(int bufferingPercent READ bufferingPercent NOTIFY bufferingChanged)
 
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
@@ -64,11 +67,15 @@ public:
     double subDelay() const { return m_subDelay; }
     double audioDelay() const { return m_audioDelay; }
     QVariantList bufferedRanges() const { return m_bufferedRanges; }
+    bool buffering() const { return m_buffering; }
+    int bufferingPercent() const { return m_bufferingPercent; }
 
     // --- playback control ---
-    Q_INVOKABLE void play(const QString &url);
+    // startSeconds > 0 is passed as a loadfile start= option, so playback opens
+    // directly at the resume point (no first-frame-then-seek flash).
+    Q_INVOKABLE void play(const QString &url, double startSeconds = 0);
     Q_INVOKABLE void seek(double seconds);    // absolute seek, in seconds
-    Q_INVOKABLE void skip(double seconds);    // relative seek, in seconds
+    Q_INVOKABLE void skip(double seconds);    // relative exact seek, in seconds
     Q_INVOKABLE void setPaused(bool paused);
     Q_INVOKABLE void setVolume(double volume);
     Q_INVOKABLE void setMuted(bool muted);
@@ -91,7 +98,10 @@ public:
 
 Q_SIGNALS:
     void fileLoaded();
-    void endFile(const QString &reason);
+    void playbackRestart(); // first frame presented (after load or seek)
+    // reason: "eof" | "stop" | "quit" | "error" | "redirect". error is
+    // mpv's human-readable failure text (only for reason "error").
+    void endFile(const QString &reason, const QString &error);
     void positionChanged();
     void durationChanged();
     void pausedChanged();
@@ -104,6 +114,7 @@ Q_SIGNALS:
     void subDelayChanged();
     void audioDelayChanged();
     void bufferedRangesChanged();
+    void bufferingChanged();
     // mpv log line (level: "error"/"warn"/...). Drives the playback-health UI.
     void mpvLog(const QString &level, const QString &prefix, const QString &text);
 
@@ -145,6 +156,8 @@ private:
     double m_subDelay = 0.0;
     double m_audioDelay = 0.0;
     QVariantList m_bufferedRanges; // [{start,end}] seconds, from demuxer-cache-state
+    bool m_buffering = false;      // paused-for-cache
+    int m_bufferingPercent = 0;    // cache-buffering-state
 
     mpv_handle *m_mpv = nullptr;
     QWidget *m_host = nullptr;          // mpv's render window (wid target)

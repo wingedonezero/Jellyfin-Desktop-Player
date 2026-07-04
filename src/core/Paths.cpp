@@ -127,7 +127,7 @@ hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else 
 #deinterlace=no             # for interlaced sources (old broadcast / DVD). no (default) | yes | auto.
                             #   Toggle live with 'd' (mpv picks yadif/bwdif and shows the state on screen).
 #deinterlace-field-parity=auto # field order. auto (default) | tff | bff
-#video-aspect-override=-1   # force display aspect. -1 = honor the file (default). e.g. 16:9 | 4:3 | 2.35:1
+#video-aspect-override=no   # force display aspect. no = honor the file (default). e.g. 16:9 | 4:3 | 2.35:1
                             #   (the OSD's aspect control cycles this too)
 
 
@@ -148,8 +148,8 @@ hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else 
 #   Tone mapping compresses that to fit. All commented => mpv auto-detects: on an
 #   SDR screen it tone-maps down; on an HDR screen it passes HDR through.
 # =============================================================================
-#target-colorspace-hint=yes # tell the display the real colorspace so HDR passthrough works.
-                            #   >>turn ON if you play HDR on an HDR display<<. Safe; only acts on HDR. Default: no.
+#target-colorspace-hint=auto # tell the display the real colorspace so HDR passthrough works.
+                            #   choices: auto >>default — hints when display params are known<< | yes | no.
 #tone-mapping=auto          # HDR->SDR curve. choices:
                             #   auto >>default = spline<< | spline >>best all-round<< | bt.2446a (broadcast) |
                             #   bt.2390 (reference) | st2094-40 (HDR10+ dynamic) | reinhard/hable/gamma (taste) |

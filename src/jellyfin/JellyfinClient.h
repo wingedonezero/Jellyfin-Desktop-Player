@@ -29,6 +29,9 @@ class JellyfinClient : public QObject
     Q_PROPERTY(bool authenticated READ isAuthenticated NOTIFY authenticatedChanged)
     Q_PROPERTY(QString userName READ userName NOTIFY authenticatedChanged)
     Q_PROPERTY(QVariantMap userConfig READ userConfig NOTIFY userConfigChanged)
+    // server-reported: is this connection in the server's LAN? (picks which
+    // max-quality cap applies, like jellyfin-web)
+    Q_PROPERTY(bool inNetwork READ inNetwork NOTIFY inNetworkChanged)
 
 public:
     explicit JellyfinClient(QObject *parent = nullptr);
@@ -39,6 +42,7 @@ public:
     bool isAuthenticated() const { return !m_token.isEmpty(); }
     QString userName() const { return m_userName; }
     QVariantMap userConfig() const { return m_userConfig; }
+    bool inNetwork() const { return m_inNetwork; }
 
     // Raw GET for admin/dashboard endpoints — emits jsonReady(tag, <array|object>).
     Q_INVOKABLE void getJson(const QString &path, const QString &requestTag);
@@ -119,6 +123,10 @@ public:
     Q_INVOKABLE void reportPlaybackStopped(const QString &itemId, qint64 positionTicks);
 
     // --- user data (fire-and-forget; UI updates optimistically) ---
+    Q_INVOKABLE void searchPeople(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void searchStudios(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void searchVideos(const QString &query, const QString &requestTag);
+    Q_INVOKABLE void fetchSearchSuggestions(const QString &requestTag);
     Q_INVOKABLE void setFavorite(const QString &itemId, bool favorite);
     Q_INVOKABLE void setWatched(const QString &itemId, bool watched);
     Q_INVOKABLE void copyStreamUrl(const QString &itemId) const; // → clipboard
@@ -152,7 +160,10 @@ Q_SIGNALS:
     void categoriesReady(const QString &requestTag, const QVariantList &categories);
     void passwordChanged(bool ok, const QString &message);
     void userConfigChanged();
+    void inNetworkChanged();
     void quickConnectResult(bool ok, const QString &message);
+    void playbackStopReported(); // the /Sessions/Playing/Stopped POST finished — server userData is committed
+    void userDataChanged();      // a favorite/played toggle landed — screens refetch badges
     void errorOccurred(const QString &message);
 
 private:
@@ -163,6 +174,7 @@ private:
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     void getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft);
     void saveSession() const;  // persist server+token to QSettings
+    void fetchEndpointInfo();  // GET /System/Endpoint → m_inNetwork
     static QVariantList parseItems(const QByteArray &json);
     static QVariantMap parseItem(const QJsonObject &o);
     QJsonObject deviceProfile() const; // capabilities sent to PlaybackInfo
@@ -175,6 +187,7 @@ private:
     QString m_deviceId;
     QString m_deviceName;
     QVariantMap m_userConfig;
+    bool m_inNetwork = true;
 
     // current playback session (for progress reports + transcode teardown)
     QString m_playSessionId;

@@ -34,14 +34,14 @@ Item {
     property var subLangs: []
     readonly property var bitrateOptions: bitrates.map(b => ({value: b, text: fmtBitrate(b)}))
     readonly property var segmentActions: [{value: "None", text: qsTr("None")}, {value: "AskToSkip", text: qsTr("Ask to skip")}, {value: "Skip", text: qsTr("Skip automatically")}]
-    readonly property var homeSectionOptions: [{value: "none", text: qsTr("None")}, {value: "resume", text: qsTr("Continue Watching")}, {value: "nextup", text: qsTr("Next Up")}, {value: "mymedia", text: qsTr("My Media")}, {value: "latest", text: qsTr("Latest Media")}]
-    readonly property var homeSectionDefaults: ["resume", "nextup", "mymedia", "latest", "none", "none"]
+    // jellyfin-web HomeSectionType tokens + labels (consumer subset)
+    readonly property var homeSectionOptions: [{value: "none", text: qsTr("None")}, {value: "smalllibrarytiles", text: qsTr("My Media")}, {value: "librarybuttons", text: qsTr("My Media (small)")}, {value: "resume", text: qsTr("Continue Watching")}, {value: "nextup", text: qsTr("Next Up")}, {value: "latestmedia", text: qsTr("Latest Media")}]
+    readonly property var homeSectionDefaults: ["smalllibrarytiles", "resume", "nextup", "latestmedia", "none", "none", "none"]
+    // pre-web-vocabulary values saved by older builds → their web tokens
+    function migrateHomeToken(v) { return v === "mymedia" ? "smalllibrarytiles" : v === "latest" ? "latestmedia" : v }
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
-    property bool homeContinue: true
-    property bool homeNextUp: true
-    property bool homeLatest: true
 
     property int prefRev: 0   // bump so pref()/prefBool()-bound controls re-evaluate
     function pref(key, def) { prefRev; return config ? config.value(key, def) : def }
@@ -88,9 +88,6 @@ Item {
         autoPlayNext = pref("playback/autoPlayNext", true)
         skipBack = pref("playback/skipBack", 10)
         skipForward = pref("playback/skipForward", 30)
-        homeContinue = pref("home/continueWatching", true)
-        homeNextUp = pref("home/nextUp", true)
-        homeLatest = pref("home/latest", true)
         mpvEditor.text = config ? config.readMpvConf() : ""
         if (client && client.authenticated) {
             client.fetchUserConfig()
@@ -402,12 +399,12 @@ Item {
                 SectionTitle { text: qsTr("Home") }
                 Hint { text: qsTr("Choose what appears in each row of the home screen, top to bottom. Applies on next launch.") }
                 Repeater {
-                    model: 6
+                    model: 7
                     ComboRow {
                         required property int index
                         label: qsTr("Row %1").arg(index + 1)
                         options: screen.homeSectionOptions
-                        value: screen.pref("home/section" + index, screen.homeSectionDefaults[index])
+                        value: screen.migrateHomeToken("" + screen.pref("home/section" + index, screen.homeSectionDefaults[index]))
                         onPicked: (v) => screen.setPref("home/section" + index, v)
                     }
                 }

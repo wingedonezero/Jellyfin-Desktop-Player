@@ -126,6 +126,23 @@ Item {
         if (!client || !itemId) return
         client.fetchItem(itemId, "d:item:" + itemId) // type-specific fetches follow once it returns
     }
+    // Playback just stopped: refetch only the user-facing state (played flag,
+    // resume progress, episode ticks, next-up) — unlike load() this keeps the
+    // selected season/version/tracks. The episode/next-up tags reuse the
+    // normal handlers, which simply replace the lists.
+    function refreshUserData() {
+        if (!client || !itemId || !detail) return
+        client.fetchItem(itemId, "d:userdata:" + itemId)
+        if (isSeries) {
+            client.fetchNextUp("d:nextup:" + detail.id, detail.id)
+            if (selectedSeasonId !== "")
+                client.fetchEpisodes(detail.id, selectedSeasonId, "d:episodes:" + selectedSeasonId)
+        } else if (isSeason) {
+            client.fetchEpisodes(detail.seriesId, detail.id, "d:episodes:" + detail.id)
+        } else if (isEpisode && detail.seriesId) {
+            client.fetchEpisodes(detail.seriesId, detail.seasonId, "d:morefrom:" + detail.id)
+        }
+    }
     function selectSeason(s) {
         selectedSeasonId = s.id
         selectedSeasonName = s.name
@@ -133,10 +150,13 @@ Item {
         client.fetchEpisodes(detail.id, s.id, "d:episodes:" + s.id)
     }
     function playEpisode(ep) {
+        // queue the season so it auto-plays next, skipping missing placeholders
+        let q = episodes.filter(e => e.isMissing !== true || e.id === ep.id)
         let idx = 0
-        for (let i = 0; i < episodes.length; ++i)
-            if (episodes[i].id === ep.id) { idx = i; break }
-        screen.playQueue(episodes, idx) // queue the season so it auto-plays next
+        for (let i = 0; i < q.length; ++i)
+            if (q[i].id === ep.id) { idx = i; break }
+        q[idx] = ep // honor a modified copy (context menu's "Play from beginning" zeroes ticks)
+        screen.playQueue(q, idx)
     }
     function playPrimary() {
         if (!detail) return
@@ -145,10 +165,11 @@ Item {
             // queues the whole series from there (crosses seasons)
             client.fetchNextUp("d:seriesplay:" + detail.id, detail.id)
         } else if (isSeason) {
-            if (episodes.length > 0) {
-                let ep = episodes[0]
-                for (let i = 0; i < episodes.length; ++i)
-                    if (!episodes[i].played) { ep = episodes[i]; break }
+            var real = episodes.filter(e => e.isMissing !== true)
+            if (real.length > 0) {
+                let ep = real[0]
+                for (let i = 0; i < real.length; ++i)
+                    if (!real[i].played) { ep = real[i]; break }
                 playEpisode(ep)
             }
         } else if (isBoxSet) {
@@ -164,8 +185,9 @@ Item {
         else if (isBoxSet) playShuffled(playableChildren)
     }
     function playShuffled(list) {
-        if (!list || list.length === 0) return
-        var a = list.slice()
+        if (!list) return
+        var a = list.filter(e => e.isMissing !== true)
+        if (a.length === 0) return
         for (var i = a.length - 1; i > 0; --i) { // Fisher–Yates
             var j = Math.floor(Math.random() * (i + 1))
             var t = a[i]; a[i] = a[j]; a[j] = t
@@ -257,6 +279,14 @@ Item {
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
                     else if (screen.isEpisode && screen.detail.seriesId)
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.seasonId, "d:morefrom:" + screen.detail.id)
+                }
+            } else if (tag === "d:userdata:" + screen.itemId) {
+                // refreshUserData(): update played/favorite/progress in place,
+                // without the d:item reset cascade (keeps season/version picks)
+                if (items.length > 0) {
+                    screen.detail = items[0]
+                    screen.favorite = screen.detail.isFavorite === true
+                    screen.played = screen.detail.played === true
                 }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
@@ -407,13 +437,28 @@ Item {
     component EpisodeRow: Rectangle {
         id: ep
         required property var modelData
+        readonly property bool missing: modelData.isMissing === true
+        readonly property real epProgress: (modelData.runTimeTicks > 0 && modelData.playbackTicks > 0)
+                                           ? Math.min(1, modelData.playbackTicks / modelData.runTimeTicks) : 0
         Layout.fillWidth: true
         implicitHeight: 110
         radius: Theme.radius
         color: epHover.hovered ? Theme.surfaceHover : "transparent"
+        opacity: missing ? 0.5 : 1.0
 
         HoverHandler { id: epHover }
         TapHandler { onTapped: screen.openDetail(ep.modelData) } // body → episode detail
+        TapHandler { acceptedButtons: Qt.RightButton; onTapped: epMenu.popup() }
+        ItemContextMenu {
+            id: epMenu
+            item: ep.modelData; client: screen.client
+            playable: true; canAddTo: true
+            onPlay: (it) => screen.playEpisode(it)
+            onQueue: (it) => screen.cardAction("queue", it)
+            onPlayNext: (it) => screen.cardAction("playNext", it)
+            onAddToCollection: (it) => screen.itemAddToCollection(it)
+            onAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+        }
 
         RowLayout {
             anchors.fill: parent
@@ -439,12 +484,24 @@ Item {
                 // play button — consumes the tap so the ▶ plays instead of opening detail
                 Rectangle {
                     anchors.centerIn: parent
-                    visible: epHover.hovered
+                    visible: epHover.hovered && !ep.missing
                     width: 40; height: 40; radius: 20
                     color: Theme.overlayStrong
                     border.color: Theme.textPrimary; border.width: 1
                     Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
                     TapHandler { onTapped: screen.playEpisode(ep.modelData) }
+                }
+                // resume progress (matches the card overlay)
+                Rectangle {
+                    visible: ep.epProgress > 0
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 3
+                    color: Theme.overlayMedium
+                    Rectangle {
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                        width: parent.width * ep.epProgress
+                        color: Theme.accent
+                    }
                 }
             }
             ColumnLayout {
@@ -452,6 +509,7 @@ Item {
                 spacing: 2
                 Text {
                     text: (ep.modelData.indexNumber !== undefined ? (ep.modelData.indexNumber + ". ") : "") + ep.modelData.name
+                          + (ep.missing ? (" — " + qsTr("Missing")) : "")
                     color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true
                     elide: Text.ElideRight; maximumLineCount: 1; Layout.fillWidth: true
                 }
@@ -467,6 +525,20 @@ Item {
                     wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
+            }
+            // "⋮" more button — same menu as right-click
+            Rectangle {
+                visible: epHover.hovered
+                Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 4
+                radius: 14
+                color: epMoreHover.hovered ? Theme.surface : "transparent"
+                border.color: Theme.divider
+                border.width: epMoreHover.hovered ? 1 : 0
+                Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
+                HoverHandler { id: epMoreHover }
+                TapHandler { onTapped: epMenu.popup() }
             }
         }
     }

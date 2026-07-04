@@ -18,6 +18,13 @@ ApplicationWindow {
     color: "transparent"
 
     readonly property bool autoPlayEnabled: (typeof autoPlay !== "undefined") && autoPlay
+    // dev/test: JFD_AUTOSTOP=<secs> backs out of playback automatically
+    readonly property int autoStopAfter: (typeof autoStopSecs !== "undefined") ? autoStopSecs : 0
+    Timer {
+        running: win.autoStopAfter > 0 && playerView.playing
+        interval: win.autoStopAfter * 1000
+        onTriggered: playerView.stop()
+    }
     property var libraries: []
 
     JellyfinClient {
@@ -48,11 +55,20 @@ ApplicationWindow {
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
+        else if (item.type === "Studio") // e.g. from search: a studio is a filtered library list
+            stack.push(libraryComp, { studioId: item.id, pageTitle: item.name })
         else
             stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
+
+    function refreshAllPages() {
+        for (var i = 0; i < stack.depth; ++i) {
+            var page = stack.get(i)
+            if (page && page.refreshUserData) page.refreshUserData()
+        }
+    }
 
     // card context-menu actions (queue/playNext are live-queue ops) bubbled up
     // from any card via cardAction.
@@ -189,6 +205,40 @@ ApplicationWindow {
         visible: playing
         client: jellyfin
         config: appConfig
+        onToast: (message) => win.showToast(message)
+    }
+
+    // Window-level toast (playback errors, mpv.conf problems). Lives above the
+    // player AND the shell so a message survives the player closing on failure.
+    function showToast(message) {
+        toastLabel.text = message
+        toastPopup.visible = true
+        toastTimer.restart()
+    }
+    Rectangle {
+        id: toastPopup
+        visible: false
+        z: 10000
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 110 // above the OSD control bar
+        width: Math.min(toastLabel.implicitWidth + 32, win.width - 80)
+        height: toastLabel.implicitHeight + 20
+        radius: Theme.radius
+        color: "#E6202020"
+        border.color: Theme.divider
+        border.width: 1
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            width: parent.width - 32
+            color: Theme.textPrimary
+            font.pixelSize: Theme.fontNormal
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+        }
+        Timer { id: toastTimer; interval: 6000; onTriggered: toastPopup.visible = false }
+        MouseArea { anchors.fill: parent; onClicked: toastPopup.visible = false }
     }
 
     // ---- shared add-to-playlist/collection picker -------------------------
@@ -287,6 +337,14 @@ ApplicationWindow {
             else if (tag === "shell:addto")
                 win.addToOptions = items
         }
+        // The stop report / a played-favorite toggle has landed server-side, so
+        // every stacked page refetches its userData — same as jellyfin-web
+        // re-fetching item queries on playbackstop / mutation events.
+        function onPlaybackStopReported() {
+            console.log("[jf] stop reported — refreshing", stack.depth, "page(s)")
+            win.refreshAllPages()
+        }
+        function onUserDataChanged() { win.refreshAllPages() }
     }
 
     Component.onCompleted: {
