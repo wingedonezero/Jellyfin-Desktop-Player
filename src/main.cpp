@@ -48,6 +48,9 @@ int main(int argc, char *argv[])
     ctx->setContextProperty(QStringLiteral("initialUser"), qEnvironmentVariable("JFD_USER"));
     ctx->setContextProperty(QStringLiteral("initialPass"), qEnvironmentVariable("JFD_PASS"));
     ctx->setContextProperty(QStringLiteral("autoPlay"), qEnvironmentVariable("JFD_AUTOPLAY") == QLatin1String("1"));
+    // JFD_AUTOSTOP=<secs>: back out of playback automatically after N seconds
+    // (dev/test hook for the stop → report → refresh path). 0/absent = off.
+    ctx->setContextProperty(QStringLiteral("autoStopSecs"), qEnvironmentVariable("JFD_AUTOSTOP").toInt());
 
     engine.loadFromModule("JellyfinDesktop", "Main");
 

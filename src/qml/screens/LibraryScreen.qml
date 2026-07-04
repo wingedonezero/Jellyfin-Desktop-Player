@@ -160,6 +160,9 @@ Item {
         if (includeType() !== "") q += "&IncludeItemTypes=" + includeType()
         return q + "&" + p.join("&")
     }
+    // Playback just stopped: refetch the current page so played ticks /
+    // progress bars / unplayed counts are fresh (keeps page + filters).
+    function refreshUserData() { reloadItems() }
     function reloadItems() {
         if (!client) return
         if (favorites) { client.fetchFavorites(itemsTag); return }

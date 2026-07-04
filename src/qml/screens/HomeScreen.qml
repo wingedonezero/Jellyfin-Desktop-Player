@@ -59,6 +59,8 @@ Item {
         maybeReload()
     }
     function maybeReload() { if (client && client.authenticated) reload() }
+    // Playback just stopped: Continue Watching / Next Up / Latest are all stale.
+    function refreshUserData() { maybeReload() }
     function reload() {
         if (!client) return
         client.fetchResume("home:resume")

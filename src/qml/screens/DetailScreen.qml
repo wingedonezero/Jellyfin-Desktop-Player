@@ -126,6 +126,23 @@ Item {
         if (!client || !itemId) return
         client.fetchItem(itemId, "d:item:" + itemId) // type-specific fetches follow once it returns
     }
+    // Playback just stopped: refetch only the user-facing state (played flag,
+    // resume progress, episode ticks, next-up) — unlike load() this keeps the
+    // selected season/version/tracks. The episode/next-up tags reuse the
+    // normal handlers, which simply replace the lists.
+    function refreshUserData() {
+        if (!client || !itemId || !detail) return
+        client.fetchItem(itemId, "d:userdata:" + itemId)
+        if (isSeries) {
+            client.fetchNextUp("d:nextup:" + detail.id, detail.id)
+            if (selectedSeasonId !== "")
+                client.fetchEpisodes(detail.id, selectedSeasonId, "d:episodes:" + selectedSeasonId)
+        } else if (isSeason) {
+            client.fetchEpisodes(detail.seriesId, detail.id, "d:episodes:" + detail.id)
+        } else if (isEpisode && detail.seriesId) {
+            client.fetchEpisodes(detail.seriesId, detail.seasonId, "d:morefrom:" + detail.id)
+        }
+    }
     function selectSeason(s) {
         selectedSeasonId = s.id
         selectedSeasonName = s.name
@@ -257,6 +274,14 @@ Item {
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
                     else if (screen.isEpisode && screen.detail.seriesId)
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.seasonId, "d:morefrom:" + screen.detail.id)
+                }
+            } else if (tag === "d:userdata:" + screen.itemId) {
+                // refreshUserData(): update played/favorite/progress in place,
+                // without the d:item reset cascade (keeps season/version picks)
+                if (items.length > 0) {
+                    screen.detail = items[0]
+                    screen.favorite = screen.detail.isFavorite === true
+                    screen.played = screen.detail.played === true
                 }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items

@@ -18,6 +18,13 @@ ApplicationWindow {
     color: "transparent"
 
     readonly property bool autoPlayEnabled: (typeof autoPlay !== "undefined") && autoPlay
+    // dev/test: JFD_AUTOSTOP=<secs> backs out of playback automatically
+    readonly property int autoStopAfter: (typeof autoStopSecs !== "undefined") ? autoStopSecs : 0
+    Timer {
+        running: win.autoStopAfter > 0 && playerView.playing
+        interval: win.autoStopAfter * 1000
+        onTriggered: playerView.stop()
+    }
     property var libraries: []
 
     JellyfinClient {
@@ -286,6 +293,16 @@ ApplicationWindow {
                 win.playItem(items[0])
             else if (tag === "shell:addto")
                 win.addToOptions = items
+        }
+        // The stop report has landed server-side (played flag / resume position
+        // committed), so every stacked page refetches its userData — same as
+        // jellyfin-web re-fetching item queries on its "playbackstop" event.
+        function onPlaybackStopReported() {
+            console.log("[jf] stop reported — refreshing", stack.depth, "page(s)")
+            for (var i = 0; i < stack.depth; ++i) {
+                var page = stack.get(i)
+                if (page && page.refreshUserData) page.refreshUserData()
+            }
         }
     }
 

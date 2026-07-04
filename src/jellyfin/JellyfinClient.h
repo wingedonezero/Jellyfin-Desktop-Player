@@ -153,6 +153,7 @@ Q_SIGNALS:
     void passwordChanged(bool ok, const QString &message);
     void userConfigChanged();
     void quickConnectResult(bool ok, const QString &message);
+    void playbackStopReported(); // the /Sessions/Playing/Stopped POST finished — server userData is committed
     void errorOccurred(const QString &message);
 
 private:

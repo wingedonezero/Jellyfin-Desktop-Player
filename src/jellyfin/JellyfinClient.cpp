@@ -988,7 +988,13 @@ void JellyfinClient::reportPlaybackStopped(const QString &itemId, qint64 positio
     if (!m_playSessionId.isEmpty()) body[QStringLiteral("PlaySessionId")] = m_playSessionId;
     if (!m_mediaSourceId.isEmpty()) body[QStringLiteral("MediaSourceId")] = m_mediaSourceId;
     QNetworkReply *reply = post(QStringLiteral("/Sessions/Playing/Stopped"), QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        // Only now is the item's played/position state committed server-side,
+        // so screens refreshing on this signal read fresh userData (web parity:
+        // jellyfin-web re-fetches item queries on its playbackstop event).
+        Q_EMIT playbackStopReported();
+    });
 
     // Free the server-side transcode if one was running.
     if (m_transcoding && !m_playSessionId.isEmpty()) {
