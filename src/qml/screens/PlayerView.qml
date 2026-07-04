@@ -110,7 +110,11 @@ Item {
     }
 
     Component.onCompleted: if (config) {
-        maxBitrate = config.value("playback/maxBitrate", 0)
+        // web parity: the in-network vs internet max-quality cap is picked by
+        // the server's /System/Endpoint answer for this connection
+        maxBitrate = Number(config.value((client && !client.inNetwork)
+                                         ? "playback/maxBitrateInternet"
+                                         : "playback/maxBitrate", 0)) || 0
         autoPlayNext = config.value("playback/autoPlayNext", true)
         skipBack = config.value("playback/skipBack", 10)
         skipForward = config.value("playback/skipForward", 30)

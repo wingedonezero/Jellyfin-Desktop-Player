@@ -142,6 +142,25 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         saveSession();
         Q_EMIT authenticatedChanged();
         Q_EMIT userConfigChanged();
+        fetchEndpointInfo();
+    });
+}
+
+// Ask the server whether this connection is in-network (web parity: decides
+// which of the two max-quality caps applies). Defaults to true on any failure.
+void JellyfinClient::fetchEndpointInfo()
+{
+    QNetworkReply *reply = get(QStringLiteral("/System/Endpoint"));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError)
+            return; // keep the in-network default
+        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const bool inNet = obj.value(QStringLiteral("IsInNetwork")).toBool(true);
+        if (inNet != m_inNetwork) {
+            m_inNetwork = inNet;
+            Q_EMIT inNetworkChanged();
+        }
     });
 }
 
@@ -273,6 +292,7 @@ bool JellyfinClient::restoreSession()
     m_userName = userName;
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
+    fetchEndpointInfo();
     return true;
 }
 

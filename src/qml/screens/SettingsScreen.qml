@@ -42,9 +42,6 @@ Item {
     property bool autoPlayNext: true
     property int skipBack: 10
     property int skipForward: 30
-    property bool homeContinue: true
-    property bool homeNextUp: true
-    property bool homeLatest: true
 
     property int prefRev: 0   // bump so pref()/prefBool()-bound controls re-evaluate
     function pref(key, def) { prefRev; return config ? config.value(key, def) : def }
@@ -91,9 +88,6 @@ Item {
         autoPlayNext = pref("playback/autoPlayNext", true)
         skipBack = pref("playback/skipBack", 10)
         skipForward = pref("playback/skipForward", 30)
-        homeContinue = pref("home/continueWatching", true)
-        homeNextUp = pref("home/nextUp", true)
-        homeLatest = pref("home/latest", true)
         mpvEditor.text = config ? config.readMpvConf() : ""
         if (client && client.authenticated) {
             client.fetchUserConfig()
