@@ -150,12 +150,13 @@ Item {
         client.fetchEpisodes(detail.id, s.id, "d:episodes:" + s.id)
     }
     function playEpisode(ep) {
+        // queue the season so it auto-plays next, skipping missing placeholders
+        let q = episodes.filter(e => e.isMissing !== true || e.id === ep.id)
         let idx = 0
-        let q = episodes.slice()
         for (let i = 0; i < q.length; ++i)
             if (q[i].id === ep.id) { idx = i; break }
         q[idx] = ep // honor a modified copy (context menu's "Play from beginning" zeroes ticks)
-        screen.playQueue(q, idx) // queue the season so it auto-plays next
+        screen.playQueue(q, idx)
     }
     function playPrimary() {
         if (!detail) return
@@ -164,10 +165,11 @@ Item {
             // queues the whole series from there (crosses seasons)
             client.fetchNextUp("d:seriesplay:" + detail.id, detail.id)
         } else if (isSeason) {
-            if (episodes.length > 0) {
-                let ep = episodes[0]
-                for (let i = 0; i < episodes.length; ++i)
-                    if (!episodes[i].played) { ep = episodes[i]; break }
+            var real = episodes.filter(e => e.isMissing !== true)
+            if (real.length > 0) {
+                let ep = real[0]
+                for (let i = 0; i < real.length; ++i)
+                    if (!real[i].played) { ep = real[i]; break }
                 playEpisode(ep)
             }
         } else if (isBoxSet) {
@@ -183,8 +185,9 @@ Item {
         else if (isBoxSet) playShuffled(playableChildren)
     }
     function playShuffled(list) {
-        if (!list || list.length === 0) return
-        var a = list.slice()
+        if (!list) return
+        var a = list.filter(e => e.isMissing !== true)
+        if (a.length === 0) return
         for (var i = a.length - 1; i > 0; --i) { // Fisher–Yates
             var j = Math.floor(Math.random() * (i + 1))
             var t = a[i]; a[i] = a[j]; a[j] = t
@@ -434,10 +437,14 @@ Item {
     component EpisodeRow: Rectangle {
         id: ep
         required property var modelData
+        readonly property bool missing: modelData.isMissing === true
+        readonly property real epProgress: (modelData.runTimeTicks > 0 && modelData.playbackTicks > 0)
+                                           ? Math.min(1, modelData.playbackTicks / modelData.runTimeTicks) : 0
         Layout.fillWidth: true
         implicitHeight: 110
         radius: Theme.radius
         color: epHover.hovered ? Theme.surfaceHover : "transparent"
+        opacity: missing ? 0.5 : 1.0
 
         HoverHandler { id: epHover }
         TapHandler { onTapped: screen.openDetail(ep.modelData) } // body → episode detail
@@ -477,12 +484,24 @@ Item {
                 // play button — consumes the tap so the ▶ plays instead of opening detail
                 Rectangle {
                     anchors.centerIn: parent
-                    visible: epHover.hovered
+                    visible: epHover.hovered && !ep.missing
                     width: 40; height: 40; radius: 20
                     color: Theme.overlayStrong
                     border.color: Theme.textPrimary; border.width: 1
                     Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
                     TapHandler { onTapped: screen.playEpisode(ep.modelData) }
+                }
+                // resume progress (matches the card overlay)
+                Rectangle {
+                    visible: ep.epProgress > 0
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 3
+                    color: Theme.overlayMedium
+                    Rectangle {
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                        width: parent.width * ep.epProgress
+                        color: Theme.accent
+                    }
                 }
             }
             ColumnLayout {
@@ -490,6 +509,7 @@ Item {
                 spacing: 2
                 Text {
                     text: (ep.modelData.indexNumber !== undefined ? (ep.modelData.indexNumber + ". ") : "") + ep.modelData.name
+                          + (ep.missing ? (" — " + qsTr("Missing")) : "")
                     color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; font.bold: true
                     elide: Text.ElideRight; maximumLineCount: 1; Layout.fillWidth: true
                 }

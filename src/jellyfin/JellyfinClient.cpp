@@ -403,6 +403,10 @@ void JellyfinClient::fetchEpisodes(const QString &seriesId, const QString &seaso
 {
     QString path = QStringLiteral("/Shows/%1/Episodes?userId=%2&%3&%4")
                        .arg(seriesId, m_userId, kItemFields, kImageTypes);
+    // web parity: virtual (missing) episodes are listed only when the user's
+    // server-side DisplayMissingEpisodes preference is on
+    if (!m_userConfig.value(QStringLiteral("DisplayMissingEpisodes")).toBool())
+        path += QStringLiteral("&IsMissing=false");
     if (!seasonId.isEmpty())
         path += QStringLiteral("&seasonId=%1").arg(seasonId);
     // startItemId returns the series' episodes from that one onward (across
@@ -755,6 +759,11 @@ QVariantMap JellyfinClient::parseItem(const QJsonObject &o)
         people.append(pm);
     }
     m[QStringLiteral("people")] = people;
+
+    // Virtual = a missing episode placeholder (only present when the user's
+    // DisplayMissingEpisodes preference is on) — rendered dimmed, not playable.
+    m[QStringLiteral("isMissing")] =
+        o.value(QStringLiteral("LocationType")).toString() == QLatin1String("Virtual");
 
     // user data: resume position, played/favorite state, unwatched count
     const QJsonObject userData = o.value(QStringLiteral("UserData")).toObject();
