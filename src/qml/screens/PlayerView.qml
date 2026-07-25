@@ -545,6 +545,11 @@ Item {
         onMpvLog: (level, prefix, text) => {
             if (level !== "error" && level !== "fatal") return
             console.log("[mpv]", level, prefix + ":", text)
+            // ffmpeg codec chatter ("h264: no frame!" after a mid-stream open,
+            // per-frame decode grumbles) is transient and self-healing — log it
+            // but don't toast. A decode failure that actually kills playback
+            // still surfaces via the end-file error toast.
+            if (prefix.startsWith("ffmpeg")) return
             if (text === _lastLogMsg && logDedup.running) return
             _lastLogMsg = text
             logDedup.restart()
