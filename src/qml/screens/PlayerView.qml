@@ -53,6 +53,15 @@ Item {
     property int _pendingSubIndex: -999
     property string _pendingSourceId: ""
     property bool _tracksApplied: false
+    // Remember-selections (web's autoSetNextTracks): the Jellyfin stream indices
+    // currently selected in mpv (kept live from track-list), plus a snapshot of
+    // the previous queue item's streams + selection taken at item change. The
+    // next item scores its streams against the snapshot and keeps the match.
+    property int _lastAudioJf: -1
+    property int _lastSubJf: -1     // -1 = subtitles off
+    property var _prevStreams: []
+    property int _prevAudioJf: -1
+    property int _prevSubJf: -999   // -999 = no previous item (don't carry "off")
 
     // Keyboard: the player grabs focus while visible and forwards key presses
     // to mpv, so mpv's own bindings + OSD feedback drive playback (d deinterlace,
@@ -175,6 +184,17 @@ Item {
         if (queueIndex < 0 || queueIndex >= queue.length)
             return
         const item = queue[queueIndex]
+        // snapshot the outgoing item's streams + live track selection before
+        // they're overwritten (the "prevSource" of web's autoSetNextTracks)
+        if (player.currentId.length > 0) {
+            root._prevStreams = root.streamInfo.mediaStreams || []
+            root._prevAudioJf = root._lastAudioJf
+            root._prevSubJf = root._lastSubJf
+        } else {
+            root._prevStreams = []
+            root._prevAudioJf = -1
+            root._prevSubJf = -999
+        }
         if (player.currentId.length > 0 && player.currentId !== item.id)
             client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
         player.currentId = item.id
@@ -240,6 +260,36 @@ Item {
         }
         root._tracksApplied = true
     }
+    // Port of web playbackmanager's rankStreamType: score each stream of `type`
+    // in the new source against the previously selected one — +1 same codec,
+    // +1 same relative position, +2 same display title, +2 same language — and
+    // return the best candidate's Jellyfin index if it scores >= 3, else null.
+    function _rankTrackMatch(prevStreams, prevIndex, newStreams, type) {
+        if (prevIndex < 0 || !prevStreams || prevStreams.length === 0 || !newStreams) return null
+        var prev = null
+        for (var i = 0; i < prevStreams.length; ++i)
+            if (prevStreams[i].index === prevIndex) { prev = prevStreams[i]; break }
+        if (!prev) return null
+        var prevRel = 0
+        for (i = 0; i < prevStreams.length; ++i) {
+            if (prevStreams[i].type !== type) continue
+            if (prevStreams[i].index === prevIndex) break
+            prevRel++
+        }
+        var best = null, bestScore = 0, rel = 0
+        for (i = 0; i < newStreams.length; ++i) {
+            var s = newStreams[i]
+            if (s.type !== type) continue
+            var score = 0
+            if (prev.codec && prev.codec === s.codec) score += 1
+            if (prevRel === rel) score += 1
+            if (prev.title && prev.title === s.title) score += 2
+            if (prev.language && prev.language !== "und" && prev.language === s.language) score += 2
+            if (score > bestScore && score >= 3) { bestScore = score; best = s.index }
+            rel++
+        }
+        return best
+    }
     function setQuality(bitrate) {
         if (root.maxBitrate === bitrate) return
         root.maxBitrate = bitrate
@@ -250,14 +300,33 @@ Item {
         target: root.client
         function onStreamReady(tag, info) {
             if (tag !== "stream:play") return
-            // Honor the server's preference-computed default tracks (audio
-            // language + subtitle mode/language) when the user didn't pick a
-            // track on the detail page. -1 => none/off. A manual pick (>=0)
-            // still wins.
-            if (root._pendingAudioIndex === -999)
-                root._pendingAudioIndex = (info.defaultAudioIndex !== undefined) ? info.defaultAudioIndex : -1
-            if (root._pendingSubIndex === -999)
-                root._pendingSubIndex = (info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1
+            // When the user didn't pick a track on the detail page (-999), the
+            // default is: the previous episode's live selection carried over
+            // (web's Remember audio/subtitle selections, when enabled and a
+            // stream match scores high enough), else the server's preference-
+            // computed default (audio language + subtitle mode/language).
+            // -1 => none/off. A manual pick (>=0) still wins. Transcodes skip
+            // the carry-over: tracks are baked server-side from its defaults.
+            var uc = (root.client && root.client.userConfig) ? root.client.userConfig : ({})
+            if (root._pendingAudioIndex === -999) {
+                var carriedA = (!info.isTranscode && uc.RememberAudioSelections !== false)
+                    ? root._rankTrackMatch(root._prevStreams, root._prevAudioJf, info.mediaStreams, "Audio") : null
+                root._pendingAudioIndex = (carriedA !== null) ? carriedA
+                    : ((info.defaultAudioIndex !== undefined) ? info.defaultAudioIndex : -1)
+                if (carriedA !== null) console.log("[jf] remember-selections: audio ->", carriedA)
+            }
+            if (root._pendingSubIndex === -999) {
+                var carriedS = null
+                if (!info.isTranscode && uc.RememberSubtitleSelections !== false && root._prevSubJf !== -999)
+                    carriedS = (root._prevSubJf === -1) ? -1 // "off" is remembered too, like web
+                        : root._rankTrackMatch(root._prevStreams, root._prevSubJf, info.mediaStreams, "Subtitle")
+                root._pendingSubIndex = (carriedS !== null) ? carriedS
+                    : ((info.defaultSubIndex !== undefined) ? info.defaultSubIndex : -1)
+                if (carriedS !== null) console.log("[jf] remember-selections: subtitle ->", carriedS)
+            }
+            // the new item starts out on whatever we're about to select
+            root._lastAudioJf = root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1
+            root._lastSubJf = root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1
             root._tracksApplied = false
             root.streamInfo = info
             player.play(info.url, root._resumeSeconds) // start= opens at the resume point directly
@@ -476,6 +545,11 @@ Item {
         onMpvLog: (level, prefix, text) => {
             if (level !== "error" && level !== "fatal") return
             console.log("[mpv]", level, prefix + ":", text)
+            // ffmpeg codec chatter ("h264: no frame!" after a mid-stream open,
+            // per-frame decode grumbles) is transient and self-healing — log it
+            // but don't toast. A decode failure that actually kills playback
+            // still surfaces via the end-file error toast.
+            if (prefix.startsWith("ffmpeg")) return
             if (text === _lastLogMsg && logDedup.running) return
             _lastLogMsg = text
             logDedup.restart()
@@ -487,6 +561,17 @@ Item {
             if (audioTracks.length > 0 && !root._tracksApplied
                     && (root._pendingAudioIndex >= 0 || root._pendingSubIndex >= -1))
                 root._applyPendingTracks()
+            // remember-selections: keep the live Jellyfin indices of whatever is
+            // selected (OSD picks included). ffIndex == server index on direct
+            // play only; skip transcodes and the empty end-of-file track list.
+            if (root._tracksApplied && audioTracks.length > 0 && !root.streamInfo.isTranscode) {
+                for (var i = 0; i < audioTracks.length; ++i)
+                    if (audioTracks[i].selected) { root._lastAudioJf = audioTracks[i].ffIndex; break }
+                var sel = -1
+                for (var j = 0; j < subtitleTracks.length; ++j)
+                    if (subtitleTracks[j].selected) { sel = subtitleTracks[j].ffIndex; break }
+                root._lastSubJf = sel
+            }
         }
     }
 
@@ -501,6 +586,9 @@ Item {
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
+        // hide the pointer with the OSD (it only auto-hides during playback);
+        // any movement brings both back via showOsd()
+        cursorShape: root.osdVisible ? Qt.ArrowCursor : Qt.BlankCursor
         onPositionChanged: root.showOsd()
         onClicked: {
             root.forceActiveFocus() // re-grab keyboard for mpv key forwarding
