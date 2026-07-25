@@ -1045,6 +1045,20 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         // try to re-select (ff-index wouldn't match the remuxed stream anyway).
         info[QStringLiteral("defaultAudioIndex")] = isTranscode ? -1 : defAudio;
         info[QStringLiteral("defaultSubIndex")] = isTranscode ? -1 : defSub;
+        // The source's streams, so the player can carry the previous episode's
+        // track selection over (web's RememberAudio/SubtitleSelections).
+        QVariantList streamList;
+        const QJsonArray streamArr = ms.value(QStringLiteral("MediaStreams")).toArray();
+        for (const QJsonValue &sv : streamArr) {
+            const QJsonObject s = sv.toObject();
+            streamList.append(QVariantMap{
+                {QStringLiteral("type"), s.value(QStringLiteral("Type")).toString()},
+                {QStringLiteral("codec"), s.value(QStringLiteral("Codec")).toString()},
+                {QStringLiteral("title"), s.value(QStringLiteral("DisplayTitle")).toString()},
+                {QStringLiteral("language"), s.value(QStringLiteral("Language")).toString()},
+                {QStringLiteral("index"), s.value(QStringLiteral("Index")).toInt()}});
+        }
+        info[QStringLiteral("mediaStreams")] = streamList;
         Q_EMIT streamReady(requestTag, info);
     });
 }
