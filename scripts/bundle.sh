@@ -88,6 +88,31 @@ for cat in wayland-graphics-integration-client wayland-shell-integration wayland
 done
 echo "==> added Wayland integration plugins"
 
+# 3.5. Overlay the vendored, null-guarded QtWaylandClient (scripts/
+# build-qtwayland.sh) over the system copies linuxdeploy just bundled — the
+# stock lib segfaults on zombie wl_output/wl_surface event args, which our
+# shared-display mpv embed provokes whenever screens blank (see
+# patches/qtwayland/). Same-version ABI, so third-party extras that link it
+# (adwaita decoration, layer-shell) keep working.
+QTWL="$WT/.cache/qtwayland-prefix/lib/x86_64-linux-gnu"
+if [ -d "$QTWL" ]; then
+  for lib in libQt6WaylandClient libQt6WaylandEglClientHwIntegration libQt6WlShellIntegration; do
+    cp "$QTWL/$lib".so.6.* "$APPDIR/usr/lib/$lib.so.6"   # .so.6.x.y → the bundled .so.6
+    patchelf --set-rpath '$ORIGIN' "$APPDIR/usr/lib/$lib.so.6"  # like linuxdeploy's deployed libs
+  done
+  cp "$QTWL"/qt6/plugins/platforms/libqwayland-*.so "$APPDIR/usr/plugins/platforms/"
+  patchelf --set-rpath '$ORIGIN/../../lib' "$APPDIR/usr/plugins/platforms"/libqwayland-*.so
+  for cat in wayland-graphics-integration-client wayland-shell-integration wayland-decoration-client; do
+    [ -d "$QTWL/qt6/plugins/$cat" ] || continue
+    cp "$QTWL/qt6/plugins/$cat"/*.so "$APPDIR/usr/plugins/$cat/"
+    patchelf --set-rpath '$ORIGIN/../../lib' "$APPDIR/usr/plugins/$cat"/*.so
+  done
+  echo "==> overlaid patched QtWaylandClient"
+else
+  echo "WARNING: no vendored qtwayland ($QTWL) — bundling stock (crashy) QtWaylandClient." >&2
+  echo "         Run scripts/build-qtwayland.sh first." >&2
+fi
+
 # Pack with an ABSOLUTE AppDir path — appimagetool runs from a temp cwd under
 # extract-and-run, so a relative path wouldn't resolve.
 ARCH=x86_64 appimagetool.AppImage "$APPDIR" "$OUT/Jellyfin-Desktop-x86_64.AppImage"

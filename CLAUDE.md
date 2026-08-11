@@ -85,6 +85,15 @@ src/
   user's mpv.conf can't break embedding.
 - QML_ELEMENT header dirs must be on the include path (the generated
   `*_qmltyperegistrations.cpp` does `#include <Basename.h>`).
+- **Shared wl_display zombie crashes (screen blank!):** Qt + embedded mpv are
+  ONE Wayland client, so each side receives events referencing the OTHER
+  side's proxies — or NULL once a proxy is destroyed mid-flight (libwayland
+  "zombie"). Both sides are patched to tolerate this: mpv via
+  `patches/mpv/0001-*` (foreign-output guards in surface enter/leave) and
+  QtWaylandClient via `patches/qtwayland/0001-*` + `scripts/build-qtwayland.sh`
+  (null guard in every generated `fromObject()`; bundle.sh overlays the
+  patched lib into the AppImage — rebuild it when system Qt changes minor
+  version). Don't regress either; stock qtwayland segfaults on DPMS blank.
 
 ## Status — what works (verified live against the server)
 - ✅ Saved login/session → Home (jf-web rows) → Library (tabs/sort/filter) →
