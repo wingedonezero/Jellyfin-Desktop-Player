@@ -34,11 +34,11 @@ cmake --build build
 **Dev/test auto-login + auto-play** (env vars → QML context properties in
 `main.cpp`; absent => normal interactive login):
 ```
-JFD_SERVER=http://192.168.1.11:8096 JFD_USER=Testing JFD_PASS=testing123 \
+JFD_SERVER=http://192.168.1.13:8096 JFD_USER=Testing JFD_PASS=testing123 \
 JFD_AUTOPLAY=1 ./build/jellyfin-desktop
 ```
 Test account: **`Testing` / `testing123`** on the user's server
-**`http://192.168.1.11:8096`** (works; has media).
+**`http://192.168.1.13:8096`** (works; has media).
 
 ## Project structure
 ```

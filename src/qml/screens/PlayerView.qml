@@ -47,6 +47,12 @@ Item {
     property int skipForward: 30
     property bool showRemaining: false // duration label shows -remaining instead of total
     property real _resumeSeconds: 0
+    // A transcode's HLS stream starts AT the resume offset, so mpv's time-pos
+    // is relative to it. Everything reported to the server must add this back
+    // (web's playbackmanager does the same with startPositionTicks), or a
+    // resumed transcode would clobber the saved position with tiny values.
+    property real _transcodeOffset: 0
+    function absPosition() { return root._transcodeOffset + player.position }
     property var streamInfo: ({}) // last streamReady payload → OSD Playback Info panel
     // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
     property int _pendingAudioIndex: -999
@@ -196,7 +202,7 @@ Item {
             root._prevSubJf = -999
         }
         if (player.currentId.length > 0 && player.currentId !== item.id)
-            client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
+            client.reportPlaybackStopped(player.currentId, Math.round(root.absPosition() * 10000000))
         player.currentId = item.id
         root.currentItem = item
         root.playerItem = item   // queue item may lack trickplay; enriched by the fetch below
@@ -234,7 +240,7 @@ Item {
     // we are now.
     function reloadAtPosition() {
         if (player.currentId.length === 0) return
-        root._resumeSeconds = player.position
+        root._resumeSeconds = root.absPosition()
         root._tracksApplied = false
         client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
                              root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
@@ -329,7 +335,12 @@ Item {
             root._lastSubJf = root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1
             root._tracksApplied = false
             root.streamInfo = info
-            player.play(info.url, root._resumeSeconds) // start= opens at the resume point directly
+            // Direct play: mpv opens the full file, start= seeks to the resume
+            // point. Transcode: the server's HLS already begins at the resume
+            // offset (StartTimeTicks was in the request) — starting again would
+            // double-seek, so open at 0 and remember the offset for reporting.
+            root._transcodeOffset = info.isTranscode ? root._resumeSeconds : 0
+            player.play(info.url, info.isTranscode ? 0 : root._resumeSeconds)
             client.reportPlaybackStart(player.currentId)
             console.log("[jf] stream", info.isTranscode ? "transcode" : "direct",
                         "tracks a/s:", root._pendingAudioIndex, "/", root._pendingSubIndex)
@@ -395,7 +406,7 @@ Item {
     // MediaSegmentManager.onPlayerTimeUpdate.
     function _checkSegments() {
         if (!player.playing || root.segments.length === 0) return
-        var time = player.position * 10000000 // ticks
+        var time = root.absPosition() * 10000000 // ticks (segments are absolute)
         var seg = null
         for (var i = 0; i < root.segments.length; ++i) {
             var s = root.segments[i]
@@ -408,7 +419,7 @@ Item {
             // skip once: seek to the end if it's a real (>1s) segment ahead of us
             if (seg.endTicks > seg.startTicks && (seg.endTicks - seg.startTicks) >= 10000000
                     && time < seg.endTicks - 5000000)
-                player.seek(seg.endTicks / 10000000)
+                player.seek(seg.endTicks / 10000000 - root._transcodeOffset)
         } else if (act === "AskToSkip") {
             if (root.currentSkipSegment !== seg) root.currentSkipSegment = seg // identity-stable
         } else if (root.currentSkipSegment) {
@@ -419,7 +430,7 @@ Item {
         var seg = root.currentSkipSegment
         if (!seg) return
         root.currentSkipSegment = null
-        if (seg.endTicks > 0) player.seek(seg.endTicks / 10000000)
+        if (seg.endTicks > 0) player.seek(seg.endTicks / 10000000 - root._transcodeOffset)
         else playNext()
     }
     function skipLabel(type) {
@@ -468,9 +479,10 @@ Item {
         if (!player.playing)
             return
         if (player.currentId.length > 0)
-            client.reportPlaybackStopped(player.currentId, Math.round(player.position * 10000000))
+            client.reportPlaybackStopped(player.currentId, Math.round(root.absPosition() * 10000000))
         player.playing = false
         root.videoReady = false
+        root._transcodeOffset = 0
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
@@ -775,7 +787,7 @@ Item {
         onTriggered: {
             if (player.currentId.length > 0)
                 root.client.reportPlaybackProgress(player.currentId,
-                                                   Math.round(player.position * 10000000),
+                                                   Math.round(root.absPosition() * 10000000),
                                                    player.paused)
         }
     }
