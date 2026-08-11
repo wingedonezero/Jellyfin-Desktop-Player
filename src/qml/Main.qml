@@ -63,11 +63,22 @@ ApplicationWindow {
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
 
+    property double _lastRefreshMs: 0
     function refreshAllPages() {
+        win._lastRefreshMs = Date.now()
         for (var i = 0; i < stack.depth; ++i) {
             var page = stack.get(i)
             if (page && page.refreshUserData) page.refreshUserData()
         }
+    }
+    // Coming back to the app after being away (other window / screen off):
+    // re-query the stacked pages so Continue Watching etc. is current, like
+    // jellyfin-web refetching on visibilitychange. Throttled so quick focus
+    // flips (menus, alt-tabbing around) don't hammer the server.
+    onActiveChanged: {
+        if (active && jellyfin.authenticated && !playerView.playing
+                && Date.now() - win._lastRefreshMs > 60000)
+            refreshAllPages()
     }
 
     // card context-menu actions (queue/playNext are live-queue ops) bubbled up
@@ -124,6 +135,15 @@ ApplicationWindow {
             id: stack
             anchors { top: appBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
             initialItem: homeComp
+            // Navigating back re-queries the revealed page (web parity: pages
+            // refetch on viewshow) — a Detail visit may have changed played/
+            // favorite state, and Home's rows go stale while covered.
+            property int _prevDepth: 1
+            onDepthChanged: {
+                if (depth < _prevDepth && currentItem && currentItem.refreshUserData)
+                    currentItem.refreshUserData()
+                _prevDepth = depth
+            }
         }
     }
 
