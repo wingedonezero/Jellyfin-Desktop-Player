@@ -1,0 +1,17 @@
+diff --git a/src/qtwaylandscanner/qtwaylandscanner.cpp b/src/qtwaylandscanner/qtwaylandscanner.cpp
+index 7f2769f..a224c99 100644
+--- a/src/qtwaylandscanner/qtwaylandscanner.cpp
++++ b/src/qtwaylandscanner/qtwaylandscanner.cpp
+@@ -1162,6 +1162,12 @@ bool Scanner::process()
+ 
+             printf("    %s *%s::fromObject(struct ::%s *object)\n", interfaceName, interfaceName, interfaceName);
+             printf("    {\n");
++            /* The compositor can reference an object the client has already
++             * destroyed (a libwayland "zombie"), which demarshals as a null
++             * argument in event handlers — e.g. wl_surface.enter after an
++             * output was removed. Never touch a null proxy. */
++            printf("        if (!object)\n");
++            printf("            return nullptr;\n");
+             if (hasEvents) {
+                 printf("        if (wl_proxy_get_listener((struct ::wl_proxy *)object) != (void *)&m_%s_listener)\n", interfaceName);
+                 printf("            return nullptr;\n");
