@@ -35,10 +35,51 @@ index 12dafea..b72170e 100644
      float force_monitor_aspect;
      float monitor_pixel_aspect;
 diff --git a/video/out/wayland_common.c b/video/out/wayland_common.c
-index b5b889b..d231d16 100644
+index b5b889b..ab663dd 100644
 --- a/video/out/wayland_common.c
 +++ b/video/out/wayland_common.c
-@@ -2717,7 +2717,11 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
+@@ -1689,6 +1689,7 @@ static void surface_handle_enter(void *data, struct wl_surface *wl_surface,
+     if (!wl->current_output)
+         return;
+ 
++    struct vo_wayland_output *old_current = wl->current_output;
+     struct mp_rect old_output_geometry = wl->current_output->geometry;
+     struct mp_rect old_geometry = wl->geometry;
+     wl->current_output = NULL;
+@@ -1704,6 +1705,16 @@ static void surface_handle_enter(void *data, struct wl_surface *wl_surface,
+             ++outputs;
+     }
+ 
++    /* Embedded on a shared wl_display, the compositor also sends enter events
++     * referencing the host's (Qt's) wl_output proxies, which are not in our
++     * output_list — the loop above then leaves current_output NULL and the
++     * code below would crash on it. Ignore those events: the compositor sends
++     * a separate enter for our own binding of the same output. */
++    if (!wl->current_output) {
++        wl->current_output = old_current;
++        return;
++    }
++
+     if (outputs == 1)
+         update_output_geometry(wl, old_geometry, old_output_geometry);
+ 
+@@ -1726,6 +1737,15 @@ static void surface_handle_leave(void *data, struct wl_surface *wl_surface,
+ 
+     int outputs = 0;
+     struct vo_wayland_output *o;
++    /* Shared-display leave events can reference a foreign (host) wl_output
++     * proxy we never bound — see surface_handle_enter. Ignore those. */
++    bool known = false;
++    wl_list_for_each(o, &wl->output_list, link) {
++        if (o->output == output)
++            known = true;
++    }
++    if (!known)
++        return;
+     wl_list_for_each(o, &wl->output_list, link) {
+         if (o->output == output)
+             o->has_surface = false;
+@@ -2717,7 +2737,11 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
          wl_list_insert(&wl->output_list, &output->link);
      }
  
@@ -51,7 +92,7 @@ index b5b889b..d231d16 100644
          if (ver < 5)
              MP_WARN(wl, "Scrolling won't work because the compositor doesn't "
                          "support version 5 of wl_seat protocol!\n");
-@@ -3072,6 +3076,8 @@ static void add_feedback(struct vo_wayland_feedback_pool *fback_pool,
+@@ -3072,6 +3096,8 @@ static void add_feedback(struct vo_wayland_feedback_pool *fback_pool,
  
  static void do_minimize(struct vo_wayland_state *wl)
  {
@@ -60,7 +101,7 @@ index b5b889b..d231d16 100644
      if (wl->opts->window_minimized)
          xdg_toplevel_set_minimized(wl->xdg_toplevel);
  }
-@@ -3310,6 +3316,8 @@ static bool hdr_metadata_valid(struct vo_wayland_state *wl, struct pl_hdr_metada
+@@ -3310,6 +3336,8 @@ static bool hdr_metadata_valid(struct vo_wayland_state *wl, struct pl_hdr_metada
  
  static void request_decoration_mode(struct vo_wayland_state *wl, uint32_t mode)
  {
@@ -69,7 +110,19 @@ index b5b889b..d231d16 100644
      wl->requested_decoration = mode;
      zxdg_toplevel_decoration_v1_set_mode(wl->xdg_toplevel_decoration, mode);
  }
-@@ -3846,6 +3854,8 @@ static int spawn_cursor(struct vo_wayland_state *wl)
+@@ -3355,6 +3383,11 @@ static void remove_output(struct vo_wayland_output *out)
+ 
+     MP_VERBOSE(out->wl, "Deregistering output %s %s (%s) (0x%x)\n", out->make,
+                out->model, out->name, out->id);
++    /* Don't leave current_output dangling when the compositor removes the
++     * output we're on (e.g. DPMS off) — NULL is an anticipated state; the
++     * next reconfig/enter picks a live output. */
++    if (out->wl->current_output == out)
++        out->wl->current_output = NULL;
+     wl_list_remove(&out->link);
+     wl_output_destroy(out->output);
+     talloc_free(out->make);
+@@ -3846,6 +3879,8 @@ static int spawn_cursor(struct vo_wayland_state *wl)
  
  static void toggle_fullscreen(struct vo_wayland_state *wl)
  {
@@ -78,7 +131,7 @@ index b5b889b..d231d16 100644
      bool specific_screen = wl->opts->fsscreen_id >= 0 || wl->opts->fsscreen_name;
      if (wl->opts->fullscreen && !specific_screen) {
          xdg_toplevel_set_fullscreen(wl->xdg_toplevel, NULL);
-@@ -3875,6 +3885,8 @@ static void toggle_ime(struct vo_wayland_state *wl)
+@@ -3875,6 +3910,8 @@ static void toggle_ime(struct vo_wayland_state *wl)
  
  static void toggle_maximized(struct vo_wayland_state *wl)
  {
@@ -87,7 +140,7 @@ index b5b889b..d231d16 100644
      if (wl->opts->window_maximized) {
          xdg_toplevel_set_maximized(wl->xdg_toplevel);
      } else {
-@@ -3885,6 +3897,8 @@ static void toggle_maximized(struct vo_wayland_state *wl)
+@@ -3885,6 +3922,8 @@ static void toggle_maximized(struct vo_wayland_state *wl)
  
  static void update_app_id(struct vo_wayland_state *wl)
  {
@@ -96,7 +149,17 @@ index b5b889b..d231d16 100644
      xdg_toplevel_set_app_id(wl->xdg_toplevel, wl->opts->appid);
  }
  
-@@ -3929,6 +3943,8 @@ static void update_output_geometry(struct vo_wayland_state *wl, struct mp_rect o
+@@ -3902,6 +3941,9 @@ static void update_output_scaling(struct vo_wayland_state *wl)
+ static void update_output_geometry(struct vo_wayland_state *wl, struct mp_rect old_geometry,
+                                    struct mp_rect old_output_geometry)
+ {
++    if (!wl->current_output)
++        return;
++
+     if (wl->need_rescale) {
+         update_output_scaling(wl);
+         return;
+@@ -3929,6 +3971,8 @@ static void update_output_geometry(struct vo_wayland_state *wl, struct mp_rect o
  static int update_window_title(struct vo_wayland_state *wl, const char *title)
  {
      /* The xdg-shell protocol requires that the title is UTF-8. */
@@ -105,7 +168,7 @@ index b5b889b..d231d16 100644
      void *tmp = talloc_new(NULL);
      struct bstr b_title = bstr_sanitize_utf8_latin1(tmp, bstr0(title));
      xdg_toplevel_set_title(wl->xdg_toplevel, bstrto0(tmp, b_title));
-@@ -3936,6 +3952,28 @@ static int update_window_title(struct vo_wayland_state *wl, const char *title)
+@@ -3936,6 +3980,28 @@ static int update_window_title(struct vo_wayland_state *wl, const char *title)
      return VO_TRUE;
  }
  
@@ -134,7 +197,7 @@ index b5b889b..d231d16 100644
  static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64_t timeout_ns)
  {
      if (wl->display_fd == -1)
-@@ -3946,8 +3984,8 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
+@@ -3946,8 +4012,8 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
          {.fd = wl->wakeup_pipe[0], .events = POLLIN },
      };
  
@@ -145,7 +208,7 @@ index b5b889b..d231d16 100644
      wl_display_flush(wl->display);
  
      mp_poll(fds, nfds, timeout_ns);
-@@ -3967,11 +4005,13 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
+@@ -3967,11 +4033,13 @@ static void wayland_dispatch_events(struct vo_wayland_state *wl, int nfds, int64
      if (fds[1].revents & POLLIN)
          mp_flush_wakeup_pipe(wl->wakeup_pipe[0]);
  
@@ -160,7 +223,7 @@ index b5b889b..d231d16 100644
      struct vo_wayland_seat *s = wl->last_button_seat;
      if (!mp_input_test_dragging(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y) &&
          !wl->opts->fullscreen && s)
-@@ -4024,7 +4064,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+@@ -4024,7 +4092,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
  {
      struct vo_wayland_state *wl = vo->wl;
      struct mp_vo_opts *opts = wl->opts;
@@ -169,7 +232,7 @@ index b5b889b..d231d16 100644
  
      switch (request) {
      case VOCTRL_CHECK_EVENTS: {
-@@ -4049,6 +4089,20 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+@@ -4049,6 +4117,20 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
          while (m_config_cache_get_next_changed(wl->opts_cache, &opt)) {
              if (opt == &opts->appid)
                  update_app_id(wl);
@@ -190,7 +253,7 @@ index b5b889b..d231d16 100644
              if (opt == &opts->border)
              {
                  // This is stupid but the value of border shouldn't be written
-@@ -4131,7 +4185,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
+@@ -4131,7 +4213,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
              wl->state_change = true;
              if (wl->opts->window_maximized) {
                  xdg_toplevel_unset_maximized(wl->xdg_toplevel);
@@ -199,7 +262,7 @@ index b5b889b..d231d16 100644
                  /* Make sure the compositor let us unmaximize */
                  if (wl->opts->window_maximized)
                      return VO_TRUE;
-@@ -4260,7 +4314,7 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4260,7 +4342,7 @@ bool vo_wayland_init(struct vo *vo)
      struct vo_wayland_state *wl = vo->wl;
  
      *wl = (struct vo_wayland_state) {
@@ -208,7 +271,7 @@ index b5b889b..d231d16 100644
          .vo = vo,
          .log = mp_log_new(wl, vo->log, "wayland"),
          .bounded_width = 0,
-@@ -4276,6 +4330,14 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4276,6 +4358,14 @@ bool vo_wayland_init(struct vo *vo)
      };
      wl->opts = wl->opts_cache->opts;
  
@@ -223,7 +286,7 @@ index b5b889b..d231d16 100644
      wl_list_init(&wl->output_list);
      wl_list_init(&wl->seat_list);
      wl_list_init(&wl->tranche_list);
-@@ -4287,10 +4349,17 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4287,10 +4377,17 @@ bool vo_wayland_init(struct vo *vo)
          goto err;
  
      wl->registry = wl_display_get_registry(wl->display);
@@ -242,7 +305,7 @@ index b5b889b..d231d16 100644
  
      if (!wl->surface) {
          MP_FATAL(wl, "Compositor doesn't support %s (ver. 4)\n",
-@@ -4320,8 +4389,25 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4320,8 +4417,25 @@ bool vo_wayland_init(struct vo *vo)
      if (create_viewports(wl))
          goto err;
  
@@ -269,7 +332,7 @@ index b5b889b..d231d16 100644
  
      if (wl->xdg_activation) {
          xdg_activate(wl);
-@@ -4407,7 +4493,7 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4407,7 +4521,7 @@ bool vo_wayland_init(struct vo *vo)
                     wp_presentation_interface.name);
      }
  
@@ -278,7 +341,7 @@ index b5b889b..d231d16 100644
          wl->xdg_toplevel_decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(wl->xdg_decoration_manager, wl->xdg_toplevel);
          zxdg_toplevel_decoration_v1_add_listener(wl->xdg_toplevel_decoration, &decoration_listener, wl);
          request_decoration_mode(
-@@ -4460,7 +4546,7 @@ bool vo_wayland_init(struct vo *vo)
+@@ -4460,7 +4574,7 @@ bool vo_wayland_init(struct vo *vo)
  
      /* Do another roundtrip to ensure all of the above is initialized
       * before mpv does anything else. */
@@ -287,7 +350,7 @@ index b5b889b..d231d16 100644
  
      return true;
  
-@@ -4477,6 +4563,8 @@ bool vo_wayland_reconfig(struct vo *vo)
+@@ -4477,6 +4591,8 @@ bool vo_wayland_reconfig(struct vo *vo)
  
      if (!wl->current_output) {
          wl->current_output = find_output(wl);
@@ -296,7 +359,7 @@ index b5b889b..d231d16 100644
          if (!wl->current_output)
              return false;
          set_surface_scaling(wl);
-@@ -4484,6 +4572,18 @@ bool vo_wayland_reconfig(struct vo *vo)
+@@ -4484,6 +4600,18 @@ bool vo_wayland_reconfig(struct vo *vo)
          wl->pending_vo_events |= VO_EVENT_DPI;
      }
  
@@ -315,7 +378,7 @@ index b5b889b..d231d16 100644
      if (wl->opts->auto_window_resize || !wl->geometry_configured)
          set_geometry(wl, false);
  
-@@ -4540,7 +4640,7 @@ void vo_wayland_uninit(struct vo *vo)
+@@ -4540,7 +4668,7 @@ void vo_wayland_uninit(struct vo *vo)
  
      // Ensure that any in-flight vo_wayland_preferred_description_info get deallocated.
      if (wl->display)
@@ -324,7 +387,7 @@ index b5b889b..d231d16 100644
  
      if (wl->compositor)
          wl_compositor_destroy(wl->compositor);
-@@ -4656,6 +4756,9 @@ void vo_wayland_uninit(struct vo *vo)
+@@ -4656,6 +4784,9 @@ void vo_wayland_uninit(struct vo *vo)
      if (wl->video_subsurface)
          wl_subsurface_destroy(wl->video_subsurface);
  
@@ -334,7 +397,7 @@ index b5b889b..d231d16 100644
      if (wl->wm_base)
          xdg_wm_base_destroy(wl->wm_base);
  
-@@ -4688,7 +4791,11 @@ void vo_wayland_uninit(struct vo *vo)
+@@ -4688,7 +4819,11 @@ void vo_wayland_uninit(struct vo *vo)
      if (wl->wp_tablet_manager)
          zwp_tablet_manager_v2_destroy(wl->wp_tablet_manager);
  
@@ -347,7 +410,7 @@ index b5b889b..d231d16 100644
          wl_display_disconnect(wl->display);
  
      munmap(wl->compositor_format_map, wl->compositor_format_size);
-@@ -4737,10 +4844,10 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
+@@ -4737,10 +4872,10 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
      /* If the compositor does not have presentation time, we cannot be sure
       * that this wait is accurate. Do a hacky block with wl_display_roundtrip. */
      if (!wl->use_present && !wl_display_get_error(wl->display))
