@@ -48,6 +48,7 @@ qt_add_qml_module(jellyfin-desktop
         src/qml/theme/Features.qml
         # reusable components
         src/qml/components/JIconButton.qml
+        src/qml/components/JSmoothWheel.qml
         src/qml/components/DarkMenu.qml
         src/qml/components/DarkMenuItem.qml
         src/qml/components/MediaCard.qml
@@ -73,6 +74,8 @@ qt_add_qml_module(jellyfin-desktop
         src/jellyfin/JellyfinClient.cpp
         src/core/AppConfig.h
         src/core/AppConfig.cpp
+        src/core/ItemListModel.h
+        src/core/ItemListModel.cpp
         src/core/ScreenSaverInhibitor.h
         src/core/ScreenSaverInhibitor.cpp
 )
