@@ -548,6 +548,7 @@ Item {
         contentWidth: width
         contentHeight: content.implicitHeight
         clip: true
+        JSmoothWheel {}
         ScrollBar.vertical: ScrollBar {}
 
         ColumnLayout {

@@ -373,7 +373,7 @@ Item {
                 OptionRow { text: qsTr("BlurHash placeholders"); stub: true }
 
                 GroupLabel { text: qsTr("LIBRARY") }
-                StepperRow { label: qsTr("Library page size (0 = all)"); value: screen.pref("display/libraryPageSize", 100); step: 25; minValue: 0; maxValue: 500; suffix: ""; onChanged: (v) => screen.setPref("display/libraryPageSize", v) }
+                StepperRow { label: qsTr("Library fetch size (items per scroll load, 0 = all)"); value: screen.pref("display/libraryPageSize", 100); step: 25; minValue: 0; maxValue: 500; suffix: ""; onChanged: (v) => screen.setPref("display/libraryPageSize", v) }
                 Hint { text: qsTr("Number of items to show per library page (0 disables paging).") }
                 ToggleRow { label: qsTr("Display missing episodes within seasons"); on: screen.cfg("DisplayMissingEpisodes", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("DisplayMissingEpisodes", v) } }
                 Hint { text: qsTr("This must also be enabled for TV libraries in the server configuration.") }

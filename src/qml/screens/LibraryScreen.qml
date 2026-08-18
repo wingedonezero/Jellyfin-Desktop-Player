@@ -27,8 +27,7 @@ Item {
     signal itemAddToCollection(var item)
     signal cardAction(string verb, var item)
 
-    // data per tab
-    property var items: []
+    // data per tab (the items grid lives in itemsModel, declared below)
     property var genres: []
     property var studios: []
     property var collections: []
@@ -72,9 +71,12 @@ Item {
     property bool expTags: false
     property bool expYears: false
     readonly property var alphabet: ["✕","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
-    property int startIndex: 0
     property int totalCount: 0
-    property int pageSize: 100   // display/libraryPageSize (0 = no pagination)
+    property int pageSize: 100   // display/libraryPageSize — fetch chunk (0 = fetch all at once)
+    // infinite scroll state: pages append into itemsModel as the grid nears the
+    // bottom; a user-data refresh updates rows in place (scroll preserved).
+    property bool loadingMore: false
+    property bool refreshingItems: false
 
     readonly property bool filteredView: favorites || genreId !== "" || studioId !== "" || tagName !== ""
     readonly property var tabs: {
@@ -123,7 +125,7 @@ Item {
     function includeType() { return collectionType === "movies" ? "Movie" : collectionType === "tvshows" ? "Series" : "" }
     function toggleVal(arr, v) { var a = arr.slice(); var i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); return a }
     function inArr(arr, v) { return arr.indexOf(v) >= 0 }
-    function applyFilters() { startIndex = 0; reloadItems() }
+    function applyFilters() { reloadItems() }
     function fActive() {
         return fltFilters.length || fltSeriesStatus.length || fltVideoTypes.length || fltGenres.length
             || fltOfficialRatings.length || fltTags.length || fltYears.length
@@ -160,16 +162,41 @@ Item {
         if (includeType() !== "") q += "&IncludeItemTypes=" + includeType()
         return q + "&" + p.join("&")
     }
-    // Playback just stopped: refetch the current page so played ticks /
-    // progress bars / unplayed counts are fresh (keeps page + filters).
-    function refreshUserData() { reloadItems() }
-    function reloadItems() {
+    // Playback just stopped (or watched/favorite toggled): refetch everything
+    // currently loaded in ONE request and update rows in place — played ticks /
+    // progress bars refresh without the grid resetting or losing scroll.
+    function refreshUserData() {
+        refreshingItems = true
+        if (favorites) { client.fetchFavorites(itemsTag); return }
+        fetchPage(0, Math.max(itemsModel.count, pageSize))
+    }
+    function fetchPage(start, limit) {
         if (!client) return
         if (favorites) { client.fetchFavorites(itemsTag); return }
-        if (genreId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&GenreIds=" + genreId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
-        if (studioId !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&StudioIds=" + studioId + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
-        if (tagName !== "") { client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, "&Tags=" + encodeURIComponent(tagName) + "&Recursive=true" + filterPart() + namePart(), startIndex, pageSize); return }
-        if (parentId !== "") client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, filterPart() + namePart(), startIndex, pageSize)
+        var extra = ""
+        if (genreId !== "") extra = "&GenreIds=" + genreId + "&Recursive=true"
+        else if (studioId !== "") extra = "&StudioIds=" + studioId + "&Recursive=true"
+        else if (tagName !== "") extra = "&Tags=" + encodeURIComponent(tagName) + "&Recursive=true"
+        else if (parentId === "") return
+        client.fetchItemsPaged(parentId, itemsTag, sortBy, sortOrder, extra + filterPart() + namePart(), start, limit)
+    }
+    function reloadItems() {
+        loadingMore = false; refreshingItems = false
+        fetchPage(0, pageSize)
+    }
+    // Infinite scroll: fetch the next chunk when the grid nears the bottom.
+    function maybeLoadMore() {
+        if (pageSize <= 0 || loadingMore || refreshingItems) return
+        if (itemsModel.count === 0 || itemsModel.count >= totalCount) return
+        loadingMore = true
+        fetchPage(itemsModel.count, pageSize)
+    }
+    // A short first page (small chunk size / large window) can leave the
+    // viewport unfilled with nothing to scroll — top up until it overflows.
+    function fillViewport() {
+        if (curKind !== "items") return
+        var v = (viewMode === "list" || viewMode === "banner") ? wideV : gridV
+        if (v && v.visible && v.contentHeight > 0 && v.contentHeight <= v.height) maybeLoadMore()
     }
     function loadKind(kind) {
         if (!client) return
@@ -202,24 +229,27 @@ Item {
             client.fetchItems(parentId, "lib:spre:" + list[i].id, "Random", "Ascending",
                               "&StudioIds=" + list[i].id + "&Recursive=true" + inc + "&Limit=12")
     }
-    function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; startIndex = 0; reloadItems() }
-    function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); startIndex = 0; reloadItems() }
+    function setSort(s) { sortBy = s; if (s.indexOf("SortName") !== 0) nameStartsWith = ""; reloadItems() }
+    function setAlpha(l) { nameStartsWith = (l === "✕" ? "" : l); reloadItems() }
     function alphaSel(l) { return l === "✕" ? (nameStartsWith === "") : (nameStartsWith === l) }
     function namePart() { return nameStartsWith !== "" ? ("&NameStartsWith=" + encodeURIComponent(nameStartsWith)) : "" }
-    function pagePrev() { startIndex = Math.max(0, startIndex - pageSize); reloadItems() }
-    function pageNext() { startIndex = startIndex + pageSize; reloadItems() }
     function pageLabel() {
-        if (pageSize > 0 && totalCount > 0) {
-            var end = Math.min(startIndex + pageSize, totalCount)
-            return (startIndex + 1) + "-" + end + " " + qsTr("of") + " " + totalCount
-        }
-        return qsTr("%n item(s)", "", items.length)
+        if (totalCount > 0 && itemsModel.count < totalCount)
+            return itemsModel.count + " " + qsTr("of") + " " + totalCount
+        return qsTr("%n item(s)", "", Math.max(totalCount, itemsModel.count))
     }
+
+    ItemListModel { id: itemsModel }
 
     Connections {
         target: screen.client
         function onItemsReady(tag, its) {
-            if (tag === screen.itemsTag) screen.items = its
+            if (tag === screen.itemsTag) {
+                // favorites view (non-paged): refresh updates in place, else reset
+                if (screen.refreshingItems) { itemsModel.updateItems(its); screen.refreshingItems = false }
+                else itemsModel.setItems(its)
+                screen.totalCount = its.length
+            }
             else if (tag === "lib:genres:" + screen.parentId) { screen.genres = its; screen.loadGenrePreviews(its) }
             else if (tag.indexOf("lib:gpre:") === 0) {
                 var gid = tag.substring(9)
@@ -238,7 +268,20 @@ Item {
             else if (tag === "lib:eps:" + screen.parentId) screen.episodeItems = its
         }
         function onItemsPageReady(tag, its, total, start) {
-            if (tag === screen.itemsTag) { screen.items = its; screen.totalCount = total }
+            if (tag !== screen.itemsTag) return
+            screen.totalCount = total
+            if (start > 0) {
+                // Stale appends (a sort/filter changed while this was in flight)
+                // no longer start where the model ends — drop them.
+                if (start === itemsModel.count) itemsModel.appendItems(its)
+                screen.loadingMore = false
+            } else if (screen.refreshingItems) {
+                itemsModel.updateItems(its)
+                screen.refreshingItems = false
+            } else {
+                itemsModel.setItems(its)
+            }
+            Qt.callLater(screen.fillViewport)
         }
         function onJsonReady(tag, data) { if (tag === "lib:filters:" + screen.parentId && data) screen.filterData = data }
         function onCategoriesReady(tag, cats) { if (tag === "lib:sugRecs:" + screen.parentId) screen.sugRecs = cats }
@@ -267,11 +310,15 @@ Item {
         signal addPlaylist(var it)
         signal addCollection(var it)
         signal cardAct(string verb, var it)
+        signal nearEnd()
         leftMargin: Theme.pagePad; rightMargin: Theme.pagePad; topMargin: Theme.spacingSmall; bottomMargin: Theme.spacingLarge
         cellWidth: (gshape === "thumb" ? Theme.cardThumbWidth : Theme.cardPosterWidth) + Theme.spacing
         cellHeight: (gshape === "thumb" ? Theme.cardThumbHeight : Theme.cardPosterHeight) + 50
         clip: true
         model: gitems
+        cacheBuffer: 1200   // pre-create ~2 rows past the viewport so scrolling never pops in blanks
+        onContentYChanged: if (contentHeight > height && contentY + height >= contentHeight - cellHeight * 3) nearEnd()
+        JSmoothWheel {}
         ScrollBar.vertical: ScrollBar {}
         delegate: Item {
             id: icell
@@ -298,10 +345,14 @@ Item {
         signal addPlaylist(var it)
         signal addCollection(var it)
         signal cardAct(string verb, var it)
+        signal nearEnd()
         clip: true
         topMargin: Theme.spacingSmall; bottomMargin: Theme.spacingLarge
         spacing: Theme.spacingSmall
         model: litems
+        cacheBuffer: 1200
+        onContentYChanged: if (contentHeight > height && contentY + height >= contentHeight - 600) nearEnd()
+        JSmoothWheel {}
         ScrollBar.vertical: ScrollBar {}
         delegate: MediaWideRow {
             required property var modelData
@@ -324,6 +375,7 @@ Item {
         cellHeight: 64
         clip: true
         model: chips
+        JSmoothWheel {}
         ScrollBar.vertical: ScrollBar {}
         delegate: Item {
             id: ccell
@@ -400,18 +452,10 @@ Item {
             Layout.leftMargin: Theme.pagePad
             Layout.rightMargin: Theme.pagePad
             Layout.topMargin: screen.filteredView ? Theme.spacing : 0
-            JIconButton {
-                text: "‹"; visible: screen.pageSize > 0 && screen.startIndex > 0
-                onClicked: screen.pagePrev()
-            }
             Text {
                 text: screen.pageLabel()
                 color: Theme.textSecondary; font.pixelSize: Theme.fontNormal
                 verticalAlignment: Text.AlignVCenter
-            }
-            JIconButton {
-                text: "›"; visible: screen.pageSize > 0 && (screen.startIndex + screen.pageSize) < screen.totalCount
-                onClicked: screen.pageNext()
             }
             Item { Layout.fillWidth: true }
             JIconButton {
@@ -463,11 +507,13 @@ Item {
                 readonly property bool wide: screen.viewMode === "list" || screen.viewMode === "banner"
                 readonly property bool alphaOn: screen.curKind === "items" && screen.sortBy.indexOf("SortName") === 0
                 ItemGrid {
+                    id: gridV
                     anchors.fill: parent
                     anchors.rightMargin: itemsPane.alphaOn ? 22 : 0
                     visible: !itemsPane.wide
-                    gitems: itemsPane.wide ? [] : screen.items
+                    model: itemsPane.wide ? null : itemsModel
                     gshape: screen.viewMode === "thumb" ? "thumb" : "poster"
+                    onNearEnd: screen.maybeLoadMore()
                     onActivate: (it) => screen.itemActivated(it)
                     onOpenDetail: (it) => screen.itemOpenDetail(it)
                     onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
@@ -475,11 +521,13 @@ Item {
                     onCardAct: (verb, it) => screen.cardAction(verb, it)
                 }
                 WideList {
+                    id: wideV
                     anchors.fill: parent
                     anchors.rightMargin: itemsPane.alphaOn ? 22 : 0
                     visible: itemsPane.wide
-                    litems: itemsPane.wide ? screen.items : []
+                    model: itemsPane.wide ? itemsModel : null
                     lmode: screen.viewMode === "banner" ? "banner" : "list"
+                    onNearEnd: screen.maybeLoadMore()
                     onActivate: (it) => screen.itemActivated(it)
                     onOpenDetail: (it) => screen.itemOpenDetail(it)
                     onAddPlaylist: (it) => screen.itemAddToPlaylist(it)
@@ -513,6 +561,7 @@ Item {
                 contentWidth: width
                 contentHeight: sugCol.implicitHeight + Theme.spacingLarge
                 clip: true
+                JSmoothWheel {}
                 ScrollBar.vertical: ScrollBar {}
                 ColumnLayout {
                     id: sugCol
@@ -561,6 +610,7 @@ Item {
                 contentWidth: width
                 contentHeight: genreCol.implicitHeight + Theme.spacingLarge
                 clip: true
+                JSmoothWheel {}
                 ScrollBar.vertical: ScrollBar {}
                 ColumnLayout {
                     id: genreCol
@@ -591,6 +641,7 @@ Item {
                 contentWidth: width
                 contentHeight: studioCol.implicitHeight + Theme.spacingLarge
                 clip: true
+                JSmoothWheel {}
                 ScrollBar.vertical: ScrollBar {}
                 ColumnLayout {
                     id: studioCol
