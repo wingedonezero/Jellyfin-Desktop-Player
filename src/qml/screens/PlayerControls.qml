@@ -136,6 +136,9 @@ Item {
         property color fg: Theme.textPrimary
         flat: true
         hoverEnabled: true
+        // Keyboard stays with the player (Space = pause, arrows = seek via mpv);
+        // a clicked button must not keep focus or Space re-triggers it.
+        focusPolicy: Qt.NoFocus
         implicitWidth: Theme.iconButton
         implicitHeight: Theme.iconButton
         font.pixelSize: 18
@@ -276,6 +279,7 @@ Item {
 
                 Slider {
                     id: scrubber
+                    focusPolicy: Qt.NoFocus // arrows keep seeking through mpv, not nudging the handle
                     Layout.fillWidth: true
                     from: 0
                     to: Math.max(1, root.player.duration)
@@ -486,6 +490,7 @@ Item {
                 }
                 Slider {
                     id: volume
+                    focusPolicy: Qt.NoFocus
                     Layout.preferredWidth: 100
                     from: 0
                     to: 100

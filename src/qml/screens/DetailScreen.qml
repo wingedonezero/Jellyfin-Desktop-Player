@@ -489,7 +489,8 @@ Item {
                     color: Theme.overlayStrong
                     border.color: Theme.textPrimary; border.width: 1
                     Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
-                    TapHandler { onTapped: screen.playEpisode(ep.modelData) }
+                    // exclusive grab: don't let the row-body handler also open the episode page
+                    TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: screen.playEpisode(ep.modelData) }
                 }
                 // resume progress (matches the card overlay)
                 Rectangle {
@@ -538,7 +539,7 @@ Item {
                 border.width: epMoreHover.hovered ? 1 : 0
                 Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
                 HoverHandler { id: epMoreHover }
-                TapHandler { onTapped: epMenu.popup() }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: epMenu.popup() }
             }
         }
     }

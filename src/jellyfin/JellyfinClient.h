@@ -187,6 +187,11 @@ private:
     QString m_deviceId;
     QString m_deviceName;
     QVariantMap m_userConfig;
+    // setUserConfig POSTs the WHOLE configuration, so it must not run before the
+    // server's copy is known (a restored session starts with an empty cache).
+    bool m_userConfigLoaded = false;
+    QVariantMap m_pendingUserConfig; // edits made before the fetch landed
+    void postUserConfig();
     bool m_inNetwork = true;
 
     // current playback session (for progress reports + transcode teardown)

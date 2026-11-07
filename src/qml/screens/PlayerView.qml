@@ -53,6 +53,12 @@ Item {
     // resumed transcode would clobber the saved position with tiny values.
     property real _transcodeOffset: 0
     function absPosition() { return root._transcodeOffset + player.position }
+    // Position to REPORT to the server. Before the first frame is up, mpv's
+    // time-pos is 0 (and reset to 0 on unload) — reporting that would wipe the
+    // item's saved resume point (stop at "0" = drop from Continue Watching).
+    // Until the video is actually playing, the best-known position is where we
+    // asked to resume from.
+    function reportSeconds() { return root.videoReady ? root.absPosition() : root._resumeSeconds }
     property var streamInfo: ({}) // last streamReady payload → OSD Playback Info panel
     // detail-page selections carried into playback (-999 = unset, -1 = subtitles off)
     property int _pendingAudioIndex: -999
@@ -76,16 +82,33 @@ Item {
     focus: true
     onVisibleChanged: if (visible) Qt.callLater(forceActiveFocus)
 
+    // Fullscreen is owned here: remember what the window was (maximized vs
+    // normal) so leaving fullscreen restores it instead of always "Windowed",
+    // and leave it automatically when playback stops (web exits fullscreen on
+    // stop too) — otherwise a video ending in fullscreen strands the browse UI.
+    property int _preFullscreenVisibility: Window.Windowed
+    function isFullscreen() { const w = Window.window; return !!w && w.visibility === Window.FullScreen }
+    function setFullscreen(on) {
+        const w = Window.window
+        if (!w) return
+        if (on && w.visibility !== Window.FullScreen) {
+            root._preFullscreenVisibility = (w.visibility === Window.Maximized) ? Window.Maximized : Window.Windowed
+            w.visibility = Window.FullScreen
+        } else if (!on && w.visibility === Window.FullScreen) {
+            w.visibility = root._preFullscreenVisibility
+        }
+    }
+    function toggleFullscreen() { setFullscreen(!isFullscreen()) }
+
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Escape) {
-            const w = Window.window
-            if (w && w.visibility === Window.FullScreen) w.visibility = Window.Windowed
+            if (root.isFullscreen()) root.setFullscreen(false)
             else root.stop()
             event.accepted = true; return
         }
-        if (event.key === Qt.Key_F || event.key === Qt.Key_F11) {
-            const w = Window.window
-            if (w) w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
+        if ((event.key === Qt.Key_F || event.key === Qt.Key_F11)
+                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier))) {
+            root.toggleFullscreen()
             root.showOsd(); event.accepted = true; return
         }
         // Keys whose *default mpv binding* would kill the embedded core or jump
@@ -127,17 +150,30 @@ Item {
         return ""
     }
 
-    Component.onCompleted: if (config) {
-        // web parity: the in-network vs internet max-quality cap is picked by
-        // the server's /System/Endpoint answer for this connection
-        maxBitrate = Number(config.value((client && !client.inNetwork)
-                                         ? "playback/maxBitrateInternet"
-                                         : "playback/maxBitrate", 0)) || 0
-        autoPlayNext = config.value("playback/autoPlayNext", true)
-        skipBack = config.value("playback/skipBack", 10)
-        skipForward = config.value("playback/skipForward", 30)
+    // Playback prefs are re-read for every item (and live when Settings changes
+    // them), not once at startup — this view lives for the whole session.
+    // The quality cap is only picked up per item: changing it mid-play would
+    // make the OSD quality menu disagree with the stream that's actually open.
+    function reloadPrefs(includeQuality) {
+        if (!config) return
+        if (includeQuality) {
+            // web parity: the in-network vs internet max-quality cap is picked by
+            // the server's /System/Endpoint answer for this connection
+            maxBitrate = Number(config.value((client && !client.inNetwork)
+                                             ? "playback/maxBitrateInternet"
+                                             : "playback/maxBitrate", 0)) || 0
+        }
+        var apn = config.value("playback/autoPlayNext", true)
+        autoPlayNext = (apn === true || apn === "true" || apn === 1 || apn === "1")
+        skipBack = Number(config.value("playback/skipBack", 10)) || 10
+        skipForward = Number(config.value("playback/skipForward", 30)) || 30
         var rt = config.value("playback/remainingTime", false)
         showRemaining = (rt === true || rt === "true" || rt === 1 || rt === "1")
+    }
+    Component.onCompleted: reloadPrefs(true)
+    Connections {
+        target: root.config
+        function onValueChanged(key) { if (key.indexOf("playback/") === 0) root.reloadPrefs(false) }
     }
 
     function playItem(item) {
@@ -202,7 +238,8 @@ Item {
             root._prevSubJf = -999
         }
         if (player.currentId.length > 0 && player.currentId !== item.id)
-            client.reportPlaybackStopped(player.currentId, Math.round(root.absPosition() * 10000000))
+            client.reportPlaybackStopped(player.currentId, Math.round(root.reportSeconds() * 10000000))
+        root.reloadPrefs(true) // the item picks up the current default quality + prefs
         player.currentId = item.id
         root.currentItem = item
         root.playerItem = item   // queue item may lack trickplay; enriched by the fetch below
@@ -210,6 +247,9 @@ Item {
         root._resumeSeconds = item.playbackTicks ? (item.playbackTicks / 10000000) : 0
         player.playing = true
         root.videoReady = false
+        // per-item state (mpv keeps these across files; web resets them per playback)
+        player.setSubDelay(0)
+        player.setAudioDelay(0)
         showOsd()
         // detail-page version / default-track selections (carried on the item)
         root._pendingSourceId = item.mediaSourceId || ""
@@ -306,6 +346,13 @@ Item {
         target: root.client
         function onStreamReady(tag, info) {
             if (tag !== "stream:play") return
+            // Late reply for an item we've since left (backed out, or picked
+            // another title before PlaybackInfo returned) — ignore it, or it
+            // would start that stream behind the browse UI.
+            if (!player.playing || info.itemId !== player.currentId) {
+                console.log("[jf] stale stream reply ignored for", info.itemId)
+                return
+            }
             // When the user didn't pick a track on the detail page (-999), the
             // default is: the previous episode's live selection carried over
             // (web's Remember audio/subtitle selections, when enabled and a
@@ -479,7 +526,8 @@ Item {
         if (!player.playing)
             return
         if (player.currentId.length > 0)
-            client.reportPlaybackStopped(player.currentId, Math.round(root.absPosition() * 10000000))
+            client.reportPlaybackStopped(player.currentId, Math.round(root.reportSeconds() * 10000000))
+        root.setFullscreen(false)
         player.playing = false
         root.videoReady = false
         root._transcodeOffset = 0
@@ -661,11 +709,7 @@ Item {
             root.favorite = !root.favorite
             root.client.setFavorite(player.currentId, root.favorite)
         }
-        onToggleFullscreen: {
-            const w = Window.window
-            if (w)
-                w.visibility = (w.visibility === Window.FullScreen) ? Window.Windowed : Window.FullScreen
-        }
+        onToggleFullscreen: root.toggleFullscreen()
     }
 
     // Transient "Skip Intro / Outro / …" button during an AskToSkip segment.
@@ -785,7 +829,8 @@ Item {
         repeat: true
         running: player.playing
         onTriggered: {
-            if (player.currentId.length > 0)
+            // nothing to report until mpv has the stream open (see reportSeconds)
+            if (player.currentId.length > 0 && root.videoReady)
                 root.client.reportPlaybackProgress(player.currentId,
                                                    Math.round(root.absPosition() * 10000000),
                                                    player.paused)

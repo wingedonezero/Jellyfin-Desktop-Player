@@ -28,6 +28,7 @@ QVariant AppConfig::value(const QString &key, const QVariant &def) const
 void AppConfig::setValue(const QString &key, const QVariant &val)
 {
     QSettings().setValue(key, val);
+    Q_EMIT valueChanged(key);
 }
 
 QString AppConfig::readMpvConf() const

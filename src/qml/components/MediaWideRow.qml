@@ -97,7 +97,9 @@ Item {
                 width: 16; height: 16; radius: 8; color: Theme.watched
                 Text { anchors.centerIn: parent; text: "✓"; color: Theme.accentText; font.pixelSize: 10; font.bold: true }
             }
-            TapHandler { enabled: row.playable; onTapped: row.activated(row.item) }
+            // ReleaseWithinBounds on the inner handlers: exclusive grab, so the
+            // row-body handler doesn't ALSO fire and navigate to Detail
+            TapHandler { enabled: row.playable; gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: row.activated(row.item) }
         }
         ColumnLayout {
             Layout.fillWidth: true; spacing: 2
@@ -127,7 +129,7 @@ Item {
             border.width: listMoreHover.hovered ? 1 : 0
             Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
             HoverHandler { id: listMoreHover }
-            TapHandler { onTapped: ctxMenu.popup() }
+            TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: ctxMenu.popup() }
         }
     }
 
@@ -167,7 +169,7 @@ Item {
                 width: 46; height: 46; radius: 23; color: Theme.overlayStrong
                 border.color: Theme.textPrimary; border.width: 1
                 Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 20 }
-                TapHandler { onTapped: row.activated(row.item) }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: row.activated(row.item) }
             }
         }
     }

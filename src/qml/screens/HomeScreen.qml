@@ -30,7 +30,13 @@ Item {
         var v = config ? config.value(key, def) : def
         return v === true || v === "true" || v === 1 || v === "1"
     }
-    readonly property bool useEpisodeImages: cfgBool("display/episodeImagesNextUp", true)
+    property bool useEpisodeImages: cfgBool("display/episodeImagesNextUp", true)
+    Connections {
+        target: screen.config
+        function onValueChanged(key) {
+            if (key === "display/episodeImagesNextUp") screen.useEpisodeImages = screen.cfgBool(key, true)
+        }
+    }
 
     // ordered list of home section keys (from Settings → Home; read at load).
     // Tokens are jellyfin-web's HomeSectionType strings (smalllibrarytiles /

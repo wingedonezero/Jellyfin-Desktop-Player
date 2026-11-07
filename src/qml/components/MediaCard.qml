@@ -125,7 +125,9 @@ Item {
                 border.color: Theme.textPrimary
                 border.width: 1
                 Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 20 }
-                TapHandler { onTapped: card.activated(card.item) }
+                // ReleaseWithinBounds: take the exclusive grab so the card-body
+                // TapHandler below doesn't ALSO fire (▶ would open Detail too)
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: card.activated(card.item) }
             }
 
             // watched check / unplayed count
@@ -157,7 +159,7 @@ Item {
                 border.width: moreHover.hovered ? 1 : 0
                 Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
                 HoverHandler { id: moreHover }
-                TapHandler { onTapped: ctxMenu.popup() }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: ctxMenu.popup() }
             }
 
             // resume progress

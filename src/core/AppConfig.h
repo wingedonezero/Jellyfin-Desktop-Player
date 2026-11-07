@@ -32,4 +32,9 @@ public:
     // mpv.conf editing (seeds the documented default first if missing)
     Q_INVOKABLE QString readMpvConf() const;
     Q_INVOKABLE bool writeMpvConf(const QString &text) const;
+
+Q_SIGNALS:
+    // Emitted by setValue so long-lived views (player, Home, Theme) can apply a
+    // changed preference live instead of on the next launch.
+    void valueChanged(const QString &key);
 };

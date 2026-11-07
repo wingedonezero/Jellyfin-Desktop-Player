@@ -134,6 +134,8 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         m_userId = user.value(QStringLiteral("Id")).toString();
         m_userName = user.value(QStringLiteral("Name")).toString();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        m_userConfigLoaded = true;
+        m_pendingUserConfig.clear();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
@@ -169,6 +171,9 @@ void JellyfinClient::logout()
     m_token.clear();
     m_userId.clear();
     m_userName.clear();
+    m_userConfig.clear();
+    m_userConfigLoaded = false;
+    m_pendingUserConfig.clear();
     QSettings().remove(QStringLiteral("session"));
     Q_EMIT authenticatedChanged();
 }
@@ -227,6 +232,15 @@ void JellyfinClient::fetchUserConfig()
         }
         const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        m_userConfigLoaded = true;
+        // settings changed while the config was still unknown: apply on top of
+        // the real server state and push once (never POST a partial object)
+        if (!m_pendingUserConfig.isEmpty()) {
+            for (auto it = m_pendingUserConfig.cbegin(); it != m_pendingUserConfig.cend(); ++it)
+                m_userConfig.insert(it.key(), it.value());
+            m_pendingUserConfig.clear();
+            postUserConfig();
+        }
         Q_EMIT userConfigChanged();
     });
 }
@@ -240,6 +254,19 @@ void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
         return;
     m_userConfig.insert(key, value);
     Q_EMIT userConfigChanged();
+    if (!m_userConfigLoaded) {
+        // A restored session hasn't fetched the user's configuration yet.
+        // POSTing the near-empty cache would reset every OTHER preference
+        // (audio language, subtitle mode, …) to defaults on the server.
+        m_pendingUserConfig.insert(key, value);
+        fetchUserConfig();
+        return;
+    }
+    postUserConfig();
+}
+
+void JellyfinClient::postUserConfig()
+{
     const QJsonObject body = QJsonObject::fromVariantMap(m_userConfig);
     QNetworkReply *reply = post(QStringLiteral("/Users/%1/Configuration").arg(m_userId),
                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -293,6 +320,7 @@ bool JellyfinClient::restoreSession()
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
     fetchEndpointInfo();
+    fetchUserConfig(); // search/episodes read DisplayMissingEpisodes; settings POST the whole object
     return true;
 }
 
@@ -867,7 +895,9 @@ QUrl JellyfinClient::streamUrl(const QString &itemId, const QString &sourceId) c
     q.addQueryItem(QStringLiteral("static"), QStringLiteral("true"));
     q.addQueryItem(QStringLiteral("mediaSourceId"), sourceId.isEmpty() ? itemId : sourceId);
     q.addQueryItem(QStringLiteral("deviceId"), m_deviceId);
-    q.addQueryItem(QStringLiteral("api_key"), m_token);
+    // "ApiKey" is the only token query param Jellyfin 12 accepts by default
+    // (legacy "api_key" is off unless EnableLegacyAuthorization); 10.11 takes both.
+    q.addQueryItem(QStringLiteral("ApiKey"), m_token);
     url.setQuery(q);
     return url;
 }
@@ -985,6 +1015,7 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
     connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, autoQuality]() {
         reply->deleteLater();
         QVariantMap info;
+        info[QStringLiteral("itemId")] = itemId; // lets the player drop replies for an item it left
         if (reply->error() != QNetworkReply::NoError) {
             // PlaybackInfo failed → direct play, no preference-computed defaults.
             m_playSessionId.clear();

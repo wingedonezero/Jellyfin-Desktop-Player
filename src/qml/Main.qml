@@ -367,10 +367,19 @@ ApplicationWindow {
         function onUserDataChanged() { win.refreshAllPages() }
     }
 
-    Component.onCompleted: {
-        // apply client-local display prefs that affect the whole UI
+    // client-local display prefs that affect the whole UI — applied at start and
+    // live when Settings changes them
+    function applyDisplayPrefs() {
         var fa = appConfig.value("display/fastAnimations", false)
         Theme.fastAnimations = (fa === true || fa === "true" || fa === 1 || fa === "1")
+    }
+    Connections {
+        target: appConfig
+        function onValueChanged(key) { if (key === "display/fastAnimations") win.applyDisplayPrefs() }
+    }
+
+    Component.onCompleted: {
+        applyDisplayPrefs()
 
         if (jellyfin.restoreSession()) // saved login: skip re-auth
             return

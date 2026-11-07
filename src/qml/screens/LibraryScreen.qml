@@ -487,7 +487,7 @@ Item {
             }
             JIconButton {
                 text: screen.sortOrder === "Ascending" ? "↑" : "↓"
-                onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.startIndex = 0; screen.reloadItems() }
+                onClicked: { screen.sortOrder = (screen.sortOrder === "Ascending" ? "Descending" : "Ascending"); screen.reloadItems() }
             }
             JIconButton {
                 text: "▤"

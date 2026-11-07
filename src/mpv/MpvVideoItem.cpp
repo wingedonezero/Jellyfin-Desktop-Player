@@ -320,6 +320,9 @@ void MpvVideoItem::play(const QString &url, double startSeconds)
 {
     if (m_wayland && !m_mpvInited)
         maybeInitWayland(); // window is exposed by now; ensure mpv is up
+    // mpv keeps "pause" across loadfile: pausing one item and then starting the
+    // next (skip/queue/new title) would open it frozen with the OSD showing ▶.
+    setPaused(false);
     if (startSeconds > 0.1)
         command({QStringLiteral("loadfile"), url, QStringLiteral("replace"), QStringLiteral("-1"),
                  QStringLiteral("start=%1").arg(QString::number(startSeconds, 'f', 3))});
