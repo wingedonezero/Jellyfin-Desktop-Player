@@ -43,6 +43,7 @@ Item {
     property string selectedSeasonId: ""
     property string selectedSeasonName: ""
     property var similar: []
+    property var inCollections: []     // the BoxSets this item belongs to (web 12 "Collections" row)
 
     readonly property bool isSeries: detail && detail.type === "Series"
     readonly property bool isPerson: detail && detail.type === "Person"
@@ -255,6 +256,35 @@ Item {
         var pp = (detail && detail.people) ? detail.people : []
         return pp.filter(p => p.type === t)
     }
+    function roleLabel(t) {
+        return t === "Director" ? qsTr("Director") : t === "Writer" ? qsTr("Writer")
+             : t === "Producer" ? qsTr("Producer") : t === "Creator" ? qsTr("Creator") : t
+    }
+    // web 12 renderCast: Writer/Director/Producer entries sharing a person Id
+    // become ONE card labelled "Director / Writer"; crew without a Role show
+    // their type as the label (getPeopleRoleOrTypeLabel). Actors are untouched.
+    function mergeCrew(pp) {
+        var crew = { Director: true, Writer: true, Producer: true }
+        var out = [], byId = ({})
+        for (var i = 0; i < pp.length; ++i) {
+            var p = pp[i]
+            if (!crew[p.type]) { out.push(p); continue }
+            if (p.id && byId[p.id] !== undefined) {
+                var m = out[byId[p.id]]
+                if (m.roleList.indexOf(p.type) < 0) {
+                    m.roleList.push(p.type)
+                    m.role = m.roleList.map(screen.roleLabel).join(" / ")
+                }
+                continue
+            }
+            var c = Object.assign({}, p)
+            c.roleList = [p.type]
+            if (!c.role) c.role = screen.roleLabel(p.type)
+            if (p.id) byId[p.id] = out.length
+            out.push(c)
+        }
+        return out
+    }
     function fmtDate(iso) {
         if (!iso) return ""
         var d = new Date(iso)
@@ -269,7 +299,8 @@ Item {
                 screen.detail = items.length > 0 ? items[0] : ({})
                 screen.favorite = screen.detail.isFavorite === true
                 screen.played = screen.detail.played === true
-                screen.cast = screen.detail.people || []
+                screen.cast = screen.mergeCrew(screen.detail.people || [])
+                screen.inCollections = []
                 screen.overviewExpanded = false
                 screen.selectSource(0) // reset version + default tracks for the new item
                 if (screen.isPerson) {
@@ -277,6 +308,8 @@ Item {
                 } else {
                     screen.client.fetchSimilar(screen.itemId, "d:similar:" + screen.itemId)
                     screen.client.fetchSpecialFeatures(screen.itemId, "d:extras:" + screen.itemId)
+                    if (!screen.isContainer) // which collections include this item (12.0+; empty → row hidden)
+                        screen.client.fetchItemCollections(screen.itemId, "d:incollections:" + screen.itemId)
                     if (screen.isSeries) {
                         screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
                         screen.client.fetchNextUp("d:nextup:" + screen.detail.id, screen.detail.id)
@@ -312,6 +345,8 @@ Item {
                 screen.seriesNextUp = items
             } else if (screen.detail && tag === "d:morefrom:" + screen.detail.id) {
                 screen.moreFrom = items.filter(e => e.id !== screen.detail.id) // exclude the current episode
+            } else if (tag === "d:incollections:" + screen.itemId) {
+                screen.inCollections = items
             } else if (tag === "d:similar:" + screen.itemId) {
                 screen.similar = items
             } else if (tag === "d:filmography:" + screen.itemId) {
@@ -717,7 +752,8 @@ Item {
                         // director / writer rows
                         Repeater {
                             model: [{ label: qsTr("Director"), people: screen.peopleByType("Director") },
-                                    { label: qsTr("Writer"),   people: screen.peopleByType("Writer") }]
+                                    { label: qsTr("Writer"),   people: screen.peopleByType("Writer") },
+                                    { label: qsTr("Creator"),  people: screen.peopleByType("Creator") }] // TV creators (web 12)
                                    .filter(r => r.people.length > 0)
                             RowLayout {
                                 id: dwRow
@@ -1142,6 +1178,19 @@ Item {
                 client: screen.client
                 shape: "thumb"
                 onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
+            }
+
+            // --- collections this item is part of (web 12 renderItemCollections) ---
+            MediaRow {
+                title: qsTr("Collections")
+                model: screen.inCollections
+                client: screen.client
+                shape: "poster"
+                onItemActivated: (it) => screen.openDetail(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)

@@ -72,6 +72,9 @@ public:
                                      const QString &sortBy, const QString &sortOrder,
                                      const QString &extraQuery, int startIndex, int limit);
     // Available filter values for a library → jsonReady(tag, {Genres,OfficialRatings,Tags,Years}).
+    Q_INVOKABLE void fetchItemFilters2(const QString &parentId, const QString &includeItemTypes,
+                                       const QString &requestTag);
+    Q_INVOKABLE void fetchItemCollections(const QString &itemId, const QString &requestTag);
     Q_INVOKABLE void fetchItemFilters(const QString &parentId, const QString &includeItemTypes,
                                       const QString &requestTag);
     Q_INVOKABLE void fetchItem(const QString &itemId,
@@ -117,7 +120,8 @@ public:
     Q_INVOKABLE void requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
                                    const QString &requestTag = QStringLiteral("stream"),
                                    int audioStreamIndex = -1, int subtitleStreamIndex = -1,
-                                   const QString &mediaSourceId = QString());
+                                   const QString &mediaSourceId = QString(),
+                                   const QString &preferredSourceName = QString());
 
     // --- playback progress reporting ---
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId);

@@ -133,11 +133,14 @@ routes onto `/Items?userId=`, `/UserItems/Resume`, `/UserFavoriteItems`,
 `/UserPlayedItems`, `/Users/Me|Configuration|Password`; playlist create as a
 JSON body) landed in five commits, all verified live — **the user's server
 moved to 12.4.0 on 2026-11-07**, so the client now runs against 12 for real.
-**Still owed:** Tier 4 — new web parity since June:
-audio/subtitle-language library filters (`/Items/Filters2` → `audioLanguages`/
-`subtitleLanguages`), Collections row on Details (`/Items/{id}/Collections`),
-Creators + merged crew cards, chapter name in the scrubber bubble, version-
-persistent next-episode. jellyfin-web v12.4 moved `src/controllers/*` to
+Tier 4 (web parity since June) landed too: audio/subtitle-language library
+filters (`/Items/Filters2` → `audioLanguages`/`subtitleLanguages`, 12.0+),
+Collections row on Details (`/Items/{id}/Collections`, 12.0+), Creators row +
+merged crew cards ("Director / Writer"), and version carry-over (next episode /
+quality change keeps the same `MediaSource.Name`, web's getMatchingMediaSource).
+The chapter name in the scrubber bubble already existed. **Nothing owed from
+the audit.** Not ported (low value / out of scope): Upcoming grouped-by-date,
+Genres alphabet picker, still-watching prompt. jellyfin-web v12.4 moved `src/controllers/*` to
 `src/apps/legacy/controllers/*` and `experimental`→`modern`; Modern reuses the
 Legacy screens except Library browse, so our Legacy-mirroring UI is current.
 

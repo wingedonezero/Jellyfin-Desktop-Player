@@ -74,6 +74,10 @@ Item {
     property var _prevStreams: []
     property int _prevAudioJf: -1
     property int _prevSubJf: -999   // -999 = no previous item (don't carry "off")
+    // Version carry-over (web's getMatchingMediaSource): the playing item's
+    // MediaSource.Name; the next queue item prefers the version with the same
+    // name when the user didn't pick one explicitly.
+    property string _lastSourceName: ""
 
     // Keyboard: the player grabs focus while visible and forwards key presses
     // to mpv, so mpv's own bindings + OSD feedback drive playback (d deinterlace,
@@ -236,6 +240,7 @@ Item {
             root._prevStreams = []
             root._prevAudioJf = -1
             root._prevSubJf = -999
+            root._lastSourceName = "" // fresh start: nothing to carry over
         }
         if (player.currentId.length > 0 && player.currentId !== item.id)
             client.reportPlaybackStopped(player.currentId, Math.round(root.reportSeconds() * 10000000))
@@ -260,7 +265,8 @@ Item {
         client.requestStream(item.id, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
                              root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
                              root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
-                             root._pendingSourceId)
+                             root._pendingSourceId,
+                             root._pendingSourceId.length ? "" : root._lastSourceName)
         // fetch the full item so the OSD has trickplay sheets (the resume/episode
         // list items don't carry them); merged in onItemsReady below
         client.fetchItem(item.id, "player:item")
@@ -285,7 +291,8 @@ Item {
         client.requestStream(player.currentId, root.maxBitrate, Math.round(root._resumeSeconds * 10000000), "stream:play",
                              root._pendingAudioIndex >= 0 ? root._pendingAudioIndex : -1,
                              root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1,
-                             root._pendingSourceId)
+                             root._pendingSourceId,
+                             root._lastSourceName) // a quality change keeps the same version
     }
     // Apply detail-page audio/subtitle selection to the loaded file (direct play):
     // match the chosen Jellyfin stream index to the mpv track via its ffmpeg index.
@@ -382,6 +389,7 @@ Item {
             root._lastSubJf = root._pendingSubIndex >= 0 ? root._pendingSubIndex : -1
             root._tracksApplied = false
             root.streamInfo = info
+            root._lastSourceName = info.mediaSourceName || ""
             // Direct play: mpv opens the full file, start= seeks to the resume
             // point. Transcode: the server's HLS already begins at the resume
             // offset (StartTimeTicks was in the request) — starting again would

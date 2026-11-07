@@ -61,7 +61,12 @@ Item {
     property bool fltIs4K: false
     property bool fltIs3D: false
     property string fltHD: ""            // "" | "hd" | "sd"
+    property var fltAudioLangs: []       // ISO 639-2 codes (web 12 modern-library filter)
+    property var fltSubLangs: []
     property var filterData: ({})        // {Genres,OfficialRatings,Tags,Years} from /Items/Filters
+    property var filterData2: ({})       // {AudioLanguages,SubtitleLanguages:[{Name,Value}]} from /Items/Filters2
+    property bool expAudioLang: false
+    property bool expSubLang: false
     property bool expFilters: true
     property bool expStatus: false
     property bool expFeatures: false
@@ -118,7 +123,10 @@ Item {
         }
         reloadItems()
         loadKind(curKind)  // load the initial tab's content if it isn't the items grid
-        if (parentId !== "" && client) client.fetchItemFilters(parentId, includeType(), "lib:filters:" + parentId)
+        if (parentId !== "" && client) {
+            client.fetchItemFilters(parentId, includeType(), "lib:filters:" + parentId)
+            client.fetchItemFilters2(parentId, includeType(), "lib:filters2:" + parentId)
+        }
     }
     function setViewMode(m) { viewMode = m; if (config) config.setValue("library/view/" + parentId, m) }
     // Compute the kind FRESH from the current tab — the curKind binding is still
@@ -134,11 +142,11 @@ Item {
         return fltFilters.length || fltSeriesStatus.length || fltVideoTypes.length || fltGenres.length
             || fltOfficialRatings.length || fltTags.length || fltYears.length
             || fltHasSubtitles || fltHasTrailer || fltHasSpecialFeature || fltHasThemeSong || fltHasThemeVideo
-            || fltIs4K || fltIs3D || fltHD !== ""
+            || fltIs4K || fltIs3D || fltHD !== "" || fltAudioLangs.length || fltSubLangs.length
     }
     function resetFilters() {
         fltFilters = []; fltSeriesStatus = []; fltVideoTypes = []; fltGenres = []
-        fltOfficialRatings = []; fltTags = []; fltYears = []
+        fltOfficialRatings = []; fltTags = []; fltYears = []; fltAudioLangs = []; fltSubLangs = []
         fltHasSubtitles = false; fltHasTrailer = false; fltHasSpecialFeature = false
         fltHasThemeSong = false; fltHasThemeVideo = false; fltIs4K = false; fltIs3D = false; fltHD = ""
         applyFilters()
@@ -152,6 +160,8 @@ Item {
         if (fltOfficialRatings.length) p.push("OfficialRatings=" + fltOfficialRatings.map(g => encodeURIComponent(g)).join("|"))
         if (fltTags.length) p.push("Tags=" + fltTags.map(g => encodeURIComponent(g)).join("|"))
         if (fltYears.length) p.push("Years=" + fltYears.join(","))
+        if (fltAudioLangs.length) p.push("audioLanguages=" + fltAudioLangs.join(","))
+        if (fltSubLangs.length) p.push("subtitleLanguages=" + fltSubLangs.join(","))
         if (fltHasSubtitles) p.push("HasSubtitles=true")
         if (fltHasTrailer) p.push("HasTrailer=true")
         if (fltHasSpecialFeature) p.push("HasSpecialFeature=true")
@@ -293,7 +303,10 @@ Item {
         function onRequestFailed(tag) {
             if (tag === screen.itemsTag) { screen.loadingMore = false; screen.refreshingItems = false }
         }
-        function onJsonReady(tag, data) { if (tag === "lib:filters:" + screen.parentId && data) screen.filterData = data }
+        function onJsonReady(tag, data) {
+            if (tag === "lib:filters:" + screen.parentId && data) screen.filterData = data
+            else if (tag === "lib:filters2:" + screen.parentId && data) screen.filterData2 = data
+        }
         function onCategoriesReady(tag, cats) { if (tag === "lib:sugRecs:" + screen.parentId) screen.sugRecs = cats }
     }
 
@@ -798,6 +811,17 @@ Item {
                     Repeater {
                         model: screen.filterData.Years || []
                         FChk { required property var modelData; visible: screen.expYears; text: "" + modelData; checkedState: screen.inArr(screen.fltYears, "" + modelData); onClicked: { screen.fltYears = screen.toggleVal(screen.fltYears, "" + modelData); screen.applyFilters() } }
+                    }
+                    // Audio / subtitle languages (web 12 modern library; /Items/Filters2, movies+tv)
+                    FGroupHdr { visible: filterDialog.av && (screen.filterData2.AudioLanguages || []).length > 0; text: qsTr("Audio language"); collapsed: !screen.expAudioLang; onClicked: screen.expAudioLang = !screen.expAudioLang }
+                    Repeater {
+                        model: filterDialog.av ? (screen.filterData2.AudioLanguages || []) : []
+                        FChk { required property var modelData; visible: screen.expAudioLang; text: modelData.Name || modelData.Value; checkedState: screen.inArr(screen.fltAudioLangs, modelData.Value); onClicked: { screen.fltAudioLangs = screen.toggleVal(screen.fltAudioLangs, modelData.Value); screen.applyFilters() } }
+                    }
+                    FGroupHdr { visible: filterDialog.av && (screen.filterData2.SubtitleLanguages || []).length > 0; text: qsTr("Subtitle language"); collapsed: !screen.expSubLang; onClicked: screen.expSubLang = !screen.expSubLang }
+                    Repeater {
+                        model: filterDialog.av ? (screen.filterData2.SubtitleLanguages || []) : []
+                        FChk { required property var modelData; visible: screen.expSubLang; text: modelData.Name || modelData.Value; checkedState: screen.inArr(screen.fltSubLangs, modelData.Value); onClicked: { screen.fltSubLangs = screen.toggleVal(screen.fltSubLangs, modelData.Value); screen.applyFilters() } }
                     }
                     Item { Layout.fillWidth: true; Layout.preferredHeight: 12 }
                 }

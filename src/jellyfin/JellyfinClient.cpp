@@ -461,6 +461,27 @@ void JellyfinClient::fetchItemFilters(const QString &parentId, const QString &in
     getJsonAttempt(path, requestTag, 1); // → jsonReady(tag, object)
 }
 
+// /Items/Filters2 → {Genres[{Name,Id}], Tags[], AudioLanguages[{Name,Value}],
+// SubtitleLanguages[{Name,Value}]}. The language lists (12.0+) feed the
+// Library's audio/subtitle-language filters; older servers just omit them.
+void JellyfinClient::fetchItemFilters2(const QString &parentId, const QString &includeItemTypes,
+                                       const QString &requestTag)
+{
+    QString path = QStringLiteral("/Items/Filters2?userId=%1&recursive=true").arg(m_userId);
+    if (!parentId.isEmpty())         path += QStringLiteral("&parentId=%1").arg(parentId);
+    if (!includeItemTypes.isEmpty()) path += QStringLiteral("&includeItemTypes=%1").arg(includeItemTypes);
+    getJsonAttempt(path, requestTag, 1);
+}
+
+// The collections (BoxSets) an item belongs to — web 12's "Collections" row on
+// the item details page (GET /Items/{id}/Collections, 12.0+).
+void JellyfinClient::fetchItemCollections(const QString &itemId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Items/%1/Collections?userId=%2&%3&%4")
+                     .arg(itemId, m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
 void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
@@ -1036,7 +1057,8 @@ QJsonObject JellyfinClient::deviceProfile() const
 
 void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
                                    const QString &requestTag, int audioStreamIndex,
-                                   int subtitleStreamIndex, const QString &mediaSourceId)
+                                   int subtitleStreamIndex, const QString &mediaSourceId,
+                                   const QString &preferredSourceName)
 {
     const QString srcId = mediaSourceId.isEmpty() ? itemId : mediaSourceId; // chosen version
     const bool autoQuality = (maxBitrate <= 0);
@@ -1072,7 +1094,8 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
 
     const QString path = QStringLiteral("/Items/%1/PlaybackInfo?userId=%2").arg(itemId, m_userId);
     QNetworkReply *reply = post(path, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, autoQuality]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, requestTag, itemId, srcId, autoQuality, mediaSourceId, preferredSourceName]() {
         reply->deleteLater();
         QVariantMap info;
         info[QStringLiteral("itemId")] = itemId; // lets the player drop replies for an item it left
@@ -1091,7 +1114,17 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         const QJsonObject resp = QJsonDocument::fromJson(reply->readAll()).object();
         m_playSessionId = resp.value(QStringLiteral("PlaySessionId")).toString();
         const QJsonArray sources = resp.value(QStringLiteral("MediaSources")).toArray();
-        const QJsonObject ms = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+        // Version choice: an explicit detail-page pick (the server then returns
+        // only that source); else the source whose Name matches the previous
+        // item's (web's getMatchingMediaSource — the next episode keeps e.g.
+        // "Director's Cut" / "1080p" instead of silently switching); else first.
+        QJsonObject ms = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+        if (mediaSourceId.isEmpty() && !preferredSourceName.isEmpty()) {
+            for (const QJsonValue &sv : sources) {
+                const QJsonObject so = sv.toObject();
+                if (so.value(QStringLiteral("Name")).toString() == preferredSourceName) { ms = so; break; }
+            }
+        }
         m_mediaSourceId = ms.value(QStringLiteral("Id")).toString();
         if (m_mediaSourceId.isEmpty())
             m_mediaSourceId = itemId;
@@ -1110,17 +1143,18 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         QString url;
         bool isTranscode = false;
         if (autoQuality) {
-            url = streamUrl(itemId, srcId).toString();       // mpv direct-plays every codec
+            url = streamUrl(itemId, m_mediaSourceId).toString(); // mpv direct-plays every codec (chosen version)
         } else if (!transcodingUrl.isEmpty()) {
             url = m_serverUrl + transcodingUrl;              // server-provided HLS transcode
             isTranscode = true;
         } else {
-            url = streamUrl(itemId, srcId).toString();       // last-resort direct
+            url = streamUrl(itemId, m_mediaSourceId).toString(); // last-resort direct
         }
         m_transcoding = isTranscode;
         info[QStringLiteral("url")] = url;
         info[QStringLiteral("isTranscode")] = isTranscode;
         info[QStringLiteral("playSessionId")] = m_playSessionId;
+        info[QStringLiteral("mediaSourceName")] = ms.value(QStringLiteral("Name")).toString(); // for version carry-over
         // Server-side facts for the OSD "Playback Info" panel (web's Playback
         // Data dialog): source container/bitrate + why a transcode was needed.
         info[QStringLiteral("container")] = ms.value(QStringLiteral("Container")).toString();
