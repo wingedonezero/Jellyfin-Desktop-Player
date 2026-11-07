@@ -423,8 +423,6 @@ Item {
                 ComboRow { label: qsTr("Preferred audio language"); options: screen.audioLangs; value: screen.cfg("AudioLanguagePreference", ""); onPicked: (v) => { if (screen.client) screen.client.setUserConfig("AudioLanguagePreference", v) } }
                 ToggleRow { label: qsTr("Play default audio track regardless of language"); on: screen.cfg("PlayDefaultAudioTrack", false) === true; onSwitched: (v) => { if (screen.client) screen.client.setUserConfig("PlayDefaultAudioTrack", v) } }
                 ComboRow { label: qsTr("Allowed audio channels"); options: [{value: 0, text: qsTr("Auto")}, {value: 2, text: qsTr("Stereo")}, {value: 6, text: qsTr("5.1")}, {value: 8, text: qsTr("7.1")}]; value: screen.pref("playback/audioChannels", 0); onPicked: (v) => screen.setPref("playback/audioChannels", v) }
-                ComboRow { label: qsTr("Audio normalization"); options: [{value: "TrackGain", text: qsTr("Track")}, {value: "AlbumGain", text: qsTr("Album")}, {value: "None", text: qsTr("Off")}]; value: screen.pref("playback/audioNormalization", "TrackGain"); onPicked: (v) => screen.setPref("playback/audioNormalization", v) }
-                Hint { text: qsTr("Track gain plays every track at the same loudness; Album gain keeps an album's relative levels. Changing this requires restarting the current playback.") }
                 ToggleRow { label: qsTr("Disable VBR audio encoding"); on: screen.prefBool("playback/disableVbrAudio", false); onSwitched: (v) => screen.setPref("playback/disableVbrAudio", v) }
                 Hint { text: qsTr("Prevent the server from encoding audio with VBR for this client.") }
                 ToggleRow { label: qsTr("Allow DTS (audio passthrough)"); on: screen.prefBool("playback/enableDts", false); onSwitched: (v) => screen.setPref("playback/enableDts", v) }
@@ -440,8 +438,6 @@ Item {
                 Hint { text: qsTr("Select the preferred video codec to transcode to. If it isn't supported, the server uses the next best available codec.") }
                 ComboRow { label: qsTr("Preferred transcode audio codec"); options: [{value: "", text: qsTr("Auto (AAC)")}, {value: "aac", text: "AAC"}, {value: "ac3", text: "AC3"}, {value: "eac3", text: "E-AC3"}, {value: "flac", text: "FLAC"}]; value: screen.pref("playback/transcodeAudioCodec", ""); onPicked: (v) => screen.setPref("playback/transcodeAudioCodec", v) }
                 Hint { text: qsTr("Select the preferred audio codec to transcode to for video content if audio transcoding is necessary.") }
-                ToggleRow { label: qsTr("Allow 10-bit H.264 (Hi10P)"); on: screen.prefBool("playback/enableHi10p", true); onSwitched: (v) => screen.setPref("playback/enableHi10p", v) }
-                Hint { text: qsTr("Enable to avoid transcoding H.264 10-bit videos. Disable if the video displays blank frames.") }
                 ToggleRow { label: qsTr("Prefer fMP4-HLS container"); on: screen.prefBool("playback/preferFmp4", false); onSwitched: (v) => screen.setPref("playback/preferFmp4", v) }
                 Hint { text: qsTr("Prefer fMP4 as the default HLS container, making it possible to direct stream HEVC and AV1 content on supported devices.") }
 

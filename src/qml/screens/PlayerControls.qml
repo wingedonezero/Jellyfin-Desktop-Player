@@ -16,6 +16,9 @@ Item {
     property var trickInfo: null         // selected trickplay resolution info, or null
     property string trickItemId: ""      // item id for the trickplay sheet URL
     property alias scrubberHovered: scrubHover.hovered
+    // any OSD popup open → the auto-hide must not fade the bar out from under it
+    readonly property bool anyMenuOpen: chapterMenu.opened || subtitleMenu.opened
+                                        || audioMenu.opened || settingsMenu.opened
     property string title: ""
     property bool favorite: false
     property int repeatMode: 0 // 0 none, 1 one, 2 all
@@ -136,6 +139,9 @@ Item {
         property color fg: Theme.textPrimary
         flat: true
         hoverEnabled: true
+        // Keyboard stays with the player (Space = pause, arrows = seek via mpv);
+        // a clicked button must not keep focus or Space re-triggers it.
+        focusPolicy: Qt.NoFocus
         implicitWidth: Theme.iconButton
         implicitHeight: Theme.iconButton
         font.pixelSize: 18
@@ -272,10 +278,13 @@ Item {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
-                Label { text: root.fmt(root.player.position); color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
+                // while dragging / settling, show the time under the handle, not playback time
+                Label { text: root.fmt((scrubber.seeking || scrubber.settling) ? scrubber.value : root.player.position)
+                        color: Theme.textPrimary; font.pixelSize: Theme.fontSmall }
 
                 Slider {
                     id: scrubber
+                    focusPolicy: Qt.NoFocus // arrows keep seeking through mpv, not nudging the handle
                     Layout.fillWidth: true
                     from: 0
                     to: Math.max(1, root.player.duration)
@@ -335,19 +344,36 @@ Item {
                         border.width: scrubber.pressed ? 2 : 0
                     }
 
+                    // After release the handle must stay where it was dropped
+                    // until mpv actually reports the new position — rebinding
+                    // immediately snapped it back to the old time for a moment.
+                    property bool settling: false
+                    property real seekTarget: 0
                     onPressedChanged: {
                         if (pressed) {
                             seeking = true
                         } else {
+                            seekTarget = value
+                            settling = true
+                            settleGuard.restart()
                             root.player.seek(value)
                             seeking = false
+                        }
+                    }
+                    Timer { id: settleGuard; interval: 1500; onTriggered: scrubber.settling = false }
+                    Connections {
+                        target: root.player
+                        function onPlaybackRestart() { scrubber.settling = false }
+                        function onPositionChanged() {
+                            if (scrubber.settling && Math.abs(root.player.position - scrubber.seekTarget) < 2)
+                                scrubber.settling = false
                         }
                     }
                     Binding {
                         target: scrubber
                         property: "value"
                         value: root.player.position
-                        when: !scrubber.seeking
+                        when: !scrubber.seeking && !scrubber.settling
                     }
                 }
 
@@ -486,6 +512,7 @@ Item {
                 }
                 Slider {
                     id: volume
+                    focusPolicy: Qt.NoFocus
                     Layout.preferredWidth: 100
                     from: 0
                     to: 100
@@ -528,6 +555,11 @@ Item {
                         x: gearBtn.width - width
                         y: -height - Theme.spacingSmall
                         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        // modal: the dismissing click must not fall through to the
+                        // video's pause MouseArea; focus: Esc closes THIS, not playback
+                        modal: true
+                        dim: false
+                        focus: true
                         background: Rectangle {
                             color: Theme.surface
                             radius: Theme.radius

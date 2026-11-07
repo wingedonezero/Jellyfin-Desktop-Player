@@ -7,6 +7,8 @@
 #include <QUrl>
 #include <QVariantList>
 
+#include <functional>
+
 class QNetworkAccessManager;
 class QNetworkReply;
 class QJsonObject;
@@ -70,6 +72,9 @@ public:
                                      const QString &sortBy, const QString &sortOrder,
                                      const QString &extraQuery, int startIndex, int limit);
     // Available filter values for a library → jsonReady(tag, {Genres,OfficialRatings,Tags,Years}).
+    Q_INVOKABLE void fetchItemFilters2(const QString &parentId, const QString &includeItemTypes,
+                                       const QString &requestTag);
+    Q_INVOKABLE void fetchItemCollections(const QString &itemId, const QString &requestTag);
     Q_INVOKABLE void fetchItemFilters(const QString &parentId, const QString &includeItemTypes,
                                       const QString &requestTag);
     Q_INVOKABLE void fetchItem(const QString &itemId,
@@ -115,7 +120,8 @@ public:
     Q_INVOKABLE void requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
                                    const QString &requestTag = QStringLiteral("stream"),
                                    int audioStreamIndex = -1, int subtitleStreamIndex = -1,
-                                   const QString &mediaSourceId = QString());
+                                   const QString &mediaSourceId = QString(),
+                                   const QString &preferredSourceName = QString());
 
     // --- playback progress reporting ---
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId);
@@ -165,6 +171,8 @@ Q_SIGNALS:
     void playbackStopReported(); // the /Sessions/Playing/Stopped POST finished — server userData is committed
     void userDataChanged();      // a favorite/played toggle landed — screens refetch badges
     void errorOccurred(const QString &message);
+    void requestFailed(const QString &requestTag); // a tagged fetch gave up — screens reset their loading state
+    void sessionExpired(const QString &reason);    // 401 on a live session: we signed out, login view shows
 
 private:
     QString authHeader() const; // "MediaBrowser Token=..., Client=..., ..."
@@ -173,6 +181,13 @@ private:
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     void getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft);
+    // Every browse GET goes through this: a valid JSON body → onOk(body); an
+    // empty/invalid body or transport error retries once, then emits
+    // requestFailed(tag) + errorOccurred. 401 is handled globally (expireSession).
+    void fetchBody(const QString &path, const QString &requestTag, int triesLeft,
+                   std::function<void(const QByteArray &)> onOk);
+    void expireSession();        // token rejected by the server → sign out, show login
+    void stopActiveEncoding();   // DELETE /Videos/ActiveEncodings for the live transcode
     void saveSession() const;  // persist server+token to QSettings
     void fetchEndpointInfo();  // GET /System/Endpoint → m_inNetwork
     static QVariantList parseItems(const QByteArray &json);
@@ -187,6 +202,11 @@ private:
     QString m_deviceId;
     QString m_deviceName;
     QVariantMap m_userConfig;
+    // setUserConfig POSTs the WHOLE configuration, so it must not run before the
+    // server's copy is known (a restored session starts with an empty cache).
+    bool m_userConfigLoaded = false;
+    QVariantMap m_pendingUserConfig; // edits made before the fetch landed
+    void postUserConfig();
     bool m_inNetwork = true;
 
     // current playback session (for progress reports + transcode teardown)

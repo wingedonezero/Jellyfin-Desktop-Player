@@ -59,22 +59,40 @@ Item {
             screen._pending = 0
             return
         }
+        // Each query gets a generation in its tags: replies from a superseded
+        // query are dropped instead of overwriting newer results / corrupting
+        // the pending count (which could go negative → "No results" never shown).
+        screen._gen++
         screen._pending = 4
-        client.search(query, "search:items")
-        client.searchPeople(query, "search:people")
-        client.searchStudios(query, "search:studios")
-        client.searchVideos(query, "search:videos")
+        const g = "search:" + screen._gen + ":"
+        client.search(query, g + "items")
+        client.searchPeople(query, g + "people")
+        client.searchStudios(query, g + "studios")
+        client.searchVideos(query, g + "videos")
+    }
+    property int _gen: 0
+    // "search:<gen>:<kind>" → kind if it belongs to the live query, else ""
+    function _liveKind(tag) {
+        if (tag.indexOf("search:") !== 0) return ""
+        const parts = tag.split(":")
+        return (parts.length === 3 && Number(parts[1]) === screen._gen) ? parts[2] : ""
     }
 
     Connections {
         target: screen.client
         function onItemsReady(tag, its) {
-            if (tag === "search:items") { screen.mainResults = its; screen._pending-- }
-            else if (tag === "search:people") { screen.peopleResults = its; screen._pending-- }
-            else if (tag === "search:studios") { screen.studioResults = its; screen._pending-- }
-            else if (tag === "search:videos") { screen.videoResults = its; screen._pending-- }
-            else if (tag === "search:suggest") screen.suggestions = its
+            if (tag === "search:suggest") { screen.suggestions = its; return }
+            const kind = screen._liveKind(tag)
+            if (kind === "items") screen.mainResults = its
+            else if (kind === "people") screen.peopleResults = its
+            else if (kind === "studios") screen.studioResults = its
+            else if (kind === "videos") screen.videoResults = its
+            else return
+            screen._pending--
         }
+        // a failed request still counts as "answered", or the spinner state
+        // would stick and "No results" could never appear
+        function onRequestFailed(tag) { if (screen._liveKind(tag) !== "") screen._pending-- }
     }
 
     ColumnLayout {
@@ -103,7 +121,7 @@ Item {
                     id: field
                     Layout.fillWidth: true
                     placeholderText: qsTr("Search")
-                    maximumLength: 40 // web parity
+                    // (web dropped its 40-char limit in 12.0)
                     color: Theme.textPrimary
                     placeholderTextColor: Theme.textDisabled
                     font.pixelSize: Theme.fontNormal

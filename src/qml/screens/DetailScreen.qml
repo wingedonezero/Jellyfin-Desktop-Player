@@ -43,10 +43,16 @@ Item {
     property string selectedSeasonId: ""
     property string selectedSeasonName: ""
     property var similar: []
+    property var inCollections: []     // the BoxSets this item belongs to (web 12 "Collections" row)
 
     readonly property bool isSeries: detail && detail.type === "Series"
     readonly property bool isPerson: detail && detail.type === "Person"
     readonly property bool isBoxSet: detail && detail.type === "BoxSet"
+    readonly property bool isPlaylist: detail && detail.type === "Playlist"
+    // collection or playlist: a container whose children are fetched, listed
+    // and played as a queue (a playlist opened from Search used to land here
+    // with Play wired to the playlist id itself → stream error)
+    readonly property bool isContainer: isBoxSet || isPlaylist
     readonly property bool isSeason: detail && detail.type === "Season"
     readonly property bool isEpisode: detail && detail.type === "Episode"
     readonly property bool isPlayableLeaf: detail && (detail.type === "Movie" || detail.type === "Episode"
@@ -95,7 +101,9 @@ Item {
 
     // collection members grouped by type, in a sensible display order
     readonly property var collectionGroups: {
-        if (!isBoxSet) return []
+        if (!isContainer) return []
+        // a playlist is one ordered list, not grouped by type
+        if (isPlaylist) return collectionItems.length > 0 ? [{ title: qsTr("Items"), items: collectionItems }] : []
         var buckets = ({})
         for (var i = 0; i < collectionItems.length; ++i) {
             var it = collectionItems[i]
@@ -172,7 +180,7 @@ Item {
                     if (!real[i].played) { ep = real[i]; break }
                 playEpisode(ep)
             }
-        } else if (isBoxSet) {
+        } else if (isContainer) {
             if (playableChildren.length > 0) screen.playQueue(playableChildren, 0)
         } else {
             screen.play(_withSelections(detail))
@@ -182,7 +190,7 @@ Item {
         if (!detail) return
         if (isSeries) client.fetchEpisodes(detail.id, "", "d:shuffle:" + detail.id) // whole series
         else if (isSeason) playShuffled(episodes)
-        else if (isBoxSet) playShuffled(playableChildren)
+        else if (isContainer) playShuffled(playableChildren)
     }
     function playShuffled(list) {
         if (!list) return
@@ -248,6 +256,35 @@ Item {
         var pp = (detail && detail.people) ? detail.people : []
         return pp.filter(p => p.type === t)
     }
+    function roleLabel(t) {
+        return t === "Director" ? qsTr("Director") : t === "Writer" ? qsTr("Writer")
+             : t === "Producer" ? qsTr("Producer") : t === "Creator" ? qsTr("Creator") : t
+    }
+    // web 12 renderCast: Writer/Director/Producer entries sharing a person Id
+    // become ONE card labelled "Director / Writer"; crew without a Role show
+    // their type as the label (getPeopleRoleOrTypeLabel). Actors are untouched.
+    function mergeCrew(pp) {
+        var crew = { Director: true, Writer: true, Producer: true }
+        var out = [], byId = ({})
+        for (var i = 0; i < pp.length; ++i) {
+            var p = pp[i]
+            if (!crew[p.type]) { out.push(p); continue }
+            if (p.id && byId[p.id] !== undefined) {
+                var m = out[byId[p.id]]
+                if (m.roleList.indexOf(p.type) < 0) {
+                    m.roleList.push(p.type)
+                    m.role = m.roleList.map(screen.roleLabel).join(" / ")
+                }
+                continue
+            }
+            var c = Object.assign({}, p)
+            c.roleList = [p.type]
+            if (!c.role) c.role = screen.roleLabel(p.type)
+            if (p.id) byId[p.id] = out.length
+            out.push(c)
+        }
+        return out
+    }
     function fmtDate(iso) {
         if (!iso) return ""
         var d = new Date(iso)
@@ -262,7 +299,8 @@ Item {
                 screen.detail = items.length > 0 ? items[0] : ({})
                 screen.favorite = screen.detail.isFavorite === true
                 screen.played = screen.detail.played === true
-                screen.cast = screen.detail.people || []
+                screen.cast = screen.mergeCrew(screen.detail.people || [])
+                screen.inCollections = []
                 screen.overviewExpanded = false
                 screen.selectSource(0) // reset version + default tracks for the new item
                 if (screen.isPerson) {
@@ -270,11 +308,14 @@ Item {
                 } else {
                     screen.client.fetchSimilar(screen.itemId, "d:similar:" + screen.itemId)
                     screen.client.fetchSpecialFeatures(screen.itemId, "d:extras:" + screen.itemId)
+                    if (!screen.isContainer) // which collections include this item (12.0+; empty → row hidden)
+                        screen.client.fetchItemCollections(screen.itemId, "d:incollections:" + screen.itemId)
                     if (screen.isSeries) {
                         screen.client.fetchSeasons(screen.detail.id, "d:seasons:" + screen.itemId)
                         screen.client.fetchNextUp("d:nextup:" + screen.detail.id, screen.detail.id)
-                    } else if (screen.isBoxSet)
-                        screen.client.fetchItems(screen.detail.id, "d:children:" + screen.itemId, "SortName", "Ascending")
+                    } else if (screen.isContainer) // playlists keep their own order (no SortBy)
+                        screen.client.fetchItems(screen.detail.id, "d:children:" + screen.itemId,
+                                                 screen.isPlaylist ? "" : "SortName", "Ascending")
                     else if (screen.isSeason)
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
                     else if (screen.isEpisode && screen.detail.seriesId)
@@ -304,6 +345,8 @@ Item {
                 screen.seriesNextUp = items
             } else if (screen.detail && tag === "d:morefrom:" + screen.detail.id) {
                 screen.moreFrom = items.filter(e => e.id !== screen.detail.id) // exclude the current episode
+            } else if (tag === "d:incollections:" + screen.itemId) {
+                screen.inCollections = items
             } else if (tag === "d:similar:" + screen.itemId) {
                 screen.similar = items
             } else if (tag === "d:filmography:" + screen.itemId) {
@@ -489,7 +532,8 @@ Item {
                     color: Theme.overlayStrong
                     border.color: Theme.textPrimary; border.width: 1
                     Text { anchors.centerIn: parent; text: "▶"; color: Theme.textPrimary; font.pixelSize: 18 }
-                    TapHandler { onTapped: screen.playEpisode(ep.modelData) }
+                    // exclusive grab: don't let the row-body handler also open the episode page
+                    TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: screen.playEpisode(ep.modelData) }
                 }
                 // resume progress (matches the card overlay)
                 Rectangle {
@@ -538,7 +582,7 @@ Item {
                 border.width: epMoreHover.hovered ? 1 : 0
                 Text { anchors.centerIn: parent; text: "⋮"; color: Theme.textPrimary; font.pixelSize: 16; font.bold: true }
                 HoverHandler { id: epMoreHover }
-                TapHandler { onTapped: epMenu.popup() }
+                TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: epMenu.popup() }
             }
         }
     }
@@ -708,7 +752,8 @@ Item {
                         // director / writer rows
                         Repeater {
                             model: [{ label: qsTr("Director"), people: screen.peopleByType("Director") },
-                                    { label: qsTr("Writer"),   people: screen.peopleByType("Writer") }]
+                                    { label: qsTr("Writer"),   people: screen.peopleByType("Writer") },
+                                    { label: qsTr("Creator"),  people: screen.peopleByType("Creator") }] // TV creators (web 12)
                                    .filter(r => r.people.length > 0)
                             RowLayout {
                                 id: dwRow
@@ -755,7 +800,7 @@ Item {
                                 visible: !screen.isPerson
                                 text: (screen.detail && screen.detail.playbackTicks > 0) ? qsTr("▶  Resume") : qsTr("▶  Play")
                                 enabled: (screen.isSeries || screen.isSeason) ? screen.episodes.length > 0
-                                         : screen.isBoxSet ? screen.playableChildren.length > 0 : true
+                                         : screen.isContainer ? screen.playableChildren.length > 0 : true
                                 onClicked: screen.playPrimary()
                             }
                             JIconButton {
@@ -765,7 +810,7 @@ Item {
                             }
                             JIconButton {
                                 text: "⇄"  // shuffle (series / season / collection) — 🔀 emoji is tofu on this font
-                                visible: screen.isSeries || screen.isSeason || screen.isBoxSet
+                                visible: screen.isSeries || screen.isSeason || screen.isContainer
                                 enabled: screen.isSeries ? screen.seasons.length > 0
                                          : screen.isSeason ? screen.episodes.length > 0
                                          : screen.playableChildren.length > 0
@@ -854,7 +899,7 @@ Item {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacingLarge
-                visible: screen.isBoxSet && screen.collectionItems.length > 0
+                visible: screen.isContainer && screen.collectionItems.length > 0
                 Repeater {
                     model: screen.collectionGroups
                     MediaRow {
@@ -1133,6 +1178,19 @@ Item {
                 client: screen.client
                 shape: "thumb"
                 onItemActivated: (it) => screen.play(it)
+                onItemOpenDetail: (it) => screen.openDetail(it)
+                onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
+                onItemAddToCollection: (it) => screen.itemAddToCollection(it)
+                onCardAction: (verb, it) => screen.cardAction(verb, it)
+            }
+
+            // --- collections this item is part of (web 12 renderItemCollections) ---
+            MediaRow {
+                title: qsTr("Collections")
+                model: screen.inCollections
+                client: screen.client
+                shape: "poster"
+                onItemActivated: (it) => screen.openDetail(it)
                 onItemOpenDetail: (it) => screen.openDetail(it)
                 onItemAddToPlaylist: (it) => screen.itemAddToPlaylist(it)
                 onItemAddToCollection: (it) => screen.itemAddToCollection(it)

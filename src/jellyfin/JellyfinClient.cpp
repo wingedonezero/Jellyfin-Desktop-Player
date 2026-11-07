@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QScreen>
 #include <QSettings>
 #include <QSysInfo>
 #include <QUrlQuery>
@@ -63,6 +64,40 @@ JellyfinClient::JellyfinClient(QObject *parent)
     // and holding one of Qt's 6 per-host connection slots (which, once enough
     // stall, starves every later request → blank admin panels).
     m_net->setTransferTimeout(20000);
+
+    // One place catches a rejected token for EVERY request (browse, progress
+    // reports, toggles): a 401 while signed in means the server dropped this
+    // session (device deleted, token revoked, user disabled). Sign out so the
+    // login view shows, like jellyfin-web's redirect-on-401, instead of a Home
+    // that stays blank forever. The login/QuickConnect calls 401 legitimately.
+    connect(m_net, &QNetworkAccessManager::finished, this, [this](QNetworkReply *reply) {
+        if (m_token.isEmpty())
+            return;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status != 401)
+            return;
+        const QString path = reply->url().path();
+        if (path.contains(QLatin1String("/Users/AuthenticateByName"))
+            || path.contains(QLatin1String("/QuickConnect/")))
+            return;
+        expireSession();
+    });
+}
+
+void JellyfinClient::expireSession()
+{
+    qWarning().noquote() << "[jf] server rejected the access token (401) — signing out";
+    m_token.clear();
+    m_userId.clear(); // m_userName kept so the login form can prefill it
+    m_userConfig.clear();
+    m_userConfigLoaded = false;
+    m_pendingUserConfig.clear();
+    m_playSessionId.clear();
+    m_mediaSourceId.clear();
+    m_transcoding = false;
+    QSettings().remove(QStringLiteral("session"));
+    Q_EMIT sessionExpired(tr("Your session is no longer valid — please sign in again."));
+    Q_EMIT authenticatedChanged();
 }
 
 void JellyfinClient::setServerUrl(const QString &url)
@@ -134,6 +169,8 @@ void JellyfinClient::authenticate(const QString &username, const QString &passwo
         m_userId = user.value(QStringLiteral("Id")).toString();
         m_userName = user.value(QStringLiteral("Name")).toString();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        m_userConfigLoaded = true;
+        m_pendingUserConfig.clear();
 
         if (m_token.isEmpty() || m_userId.isEmpty()) {
             Q_EMIT authenticationFailed(tr("Server did not return an access token"));
@@ -169,6 +206,9 @@ void JellyfinClient::logout()
     m_token.clear();
     m_userId.clear();
     m_userName.clear();
+    m_userConfig.clear();
+    m_userConfigLoaded = false;
+    m_pendingUserConfig.clear();
     QSettings().remove(QStringLiteral("session"));
     Q_EMIT authenticatedChanged();
 }
@@ -178,25 +218,38 @@ void JellyfinClient::getJson(const QString &path, const QString &requestTag)
     getJsonAttempt(path, requestTag, 1); // one retry on transient failure
 }
 
-// A GET that emits jsonReady only on a genuinely valid response, and retries
-// once on a transient failure — a stalled/reset/half-closed keep-alive
-// connection can "finish" with NoError but an EMPTY body, which previously got
-// handed to QML as empty data (panels rendered blank). We treat empty/invalid
-// bodies as failures, retry once on a fresh connection, and never retry a real
-// client error (status >= 400). Every outcome is logged for diagnosis.
+// A GET that emits jsonReady only on a genuinely valid response (see fetchBody).
 void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft)
 {
+    fetchBody(path, requestTag, triesLeft, [this, requestTag](const QByteArray &body) {
+        Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(body).toVariant());
+    });
+}
+
+// The one GET path for browse data. A stalled/reset/half-closed keep-alive
+// connection can "finish" with NoError but an EMPTY body, which used to be
+// handed to QML as empty data (rows/grids rendered blank at random). Empty or
+// invalid bodies are failures: retry once on a fresh connection, never retry a
+// real client error (status >= 400), and tell the screen (requestFailed) so it
+// can drop its loading state. Every failure is logged for diagnosis.
+void JellyfinClient::fetchBody(const QString &path, const QString &requestTag, int triesLeft,
+                               std::function<void(const QByteArray &)> onOk)
+{
     QNetworkReply *reply = get(path);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft, onOk]() {
         reply->deleteLater();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         const QNetworkReply::NetworkError err = reply->error();
-        const QVariant data = QJsonDocument::fromJson(body).toVariant();
-        if (err == QNetworkReply::NoError && data.isValid()) {
+        const bool validJson = !QJsonDocument::fromJson(body).isNull();
+        if (err == QNetworkReply::NoError && validJson) {
             if (qEnvironmentVariableIsSet("JFD_NETLOG")) // opt-in full request trace
                 qInfo().noquote() << "[net] GET" << path << "->" << status << body.size() << "bytes ok";
-            Q_EMIT jsonReady(requestTag, data);
+            onOk(body);
+            return;
+        }
+        if (status == 401) { // the session handler has already signed us out
+            Q_EMIT requestFailed(requestTag);
             return;
         }
         const bool willRetry = triesLeft > 0 && status < 400;
@@ -205,9 +258,10 @@ void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestT
                              << "body" << body.size() << "bytes"
                              << (willRetry ? "— retrying" : "— FAILED");
         if (willRetry) {
-            getJsonAttempt(path, requestTag, triesLeft - 1);
+            fetchBody(path, requestTag, triesLeft - 1, onOk);
             return;
         }
+        Q_EMIT requestFailed(requestTag);
         Q_EMIT errorOccurred(reply->errorString().isEmpty()
                                  ? QStringLiteral("Empty/invalid response for %1 (HTTP %2)").arg(path).arg(status)
                                  : reply->errorString());
@@ -218,7 +272,7 @@ void JellyfinClient::fetchUserConfig()
 {
     if (m_userId.isEmpty())
         return;
-    QNetworkReply *reply = get(QStringLiteral("/Users/%1").arg(m_userId));
+    QNetworkReply *reply = get(QStringLiteral("/Users/Me")); // the token's own user
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -227,6 +281,15 @@ void JellyfinClient::fetchUserConfig()
         }
         const QJsonObject user = QJsonDocument::fromJson(reply->readAll()).object();
         m_userConfig = user.value(QStringLiteral("Configuration")).toObject().toVariantMap();
+        m_userConfigLoaded = true;
+        // settings changed while the config was still unknown: apply on top of
+        // the real server state and push once (never POST a partial object)
+        if (!m_pendingUserConfig.isEmpty()) {
+            for (auto it = m_pendingUserConfig.cbegin(); it != m_pendingUserConfig.cend(); ++it)
+                m_userConfig.insert(it.key(), it.value());
+            m_pendingUserConfig.clear();
+            postUserConfig();
+        }
         Q_EMIT userConfigChanged();
     });
 }
@@ -240,8 +303,21 @@ void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
         return;
     m_userConfig.insert(key, value);
     Q_EMIT userConfigChanged();
+    if (!m_userConfigLoaded) {
+        // A restored session hasn't fetched the user's configuration yet.
+        // POSTing the near-empty cache would reset every OTHER preference
+        // (audio language, subtitle mode, …) to defaults on the server.
+        m_pendingUserConfig.insert(key, value);
+        fetchUserConfig();
+        return;
+    }
+    postUserConfig();
+}
+
+void JellyfinClient::postUserConfig()
+{
     const QJsonObject body = QJsonObject::fromVariantMap(m_userConfig);
-    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Configuration").arg(m_userId),
+    QNetworkReply *reply = post(QStringLiteral("/Users/Configuration?userId=%1").arg(m_userId),
                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -293,6 +369,7 @@ bool JellyfinClient::restoreSession()
     Q_EMIT serverUrlChanged();
     Q_EMIT authenticatedChanged();
     fetchEndpointInfo();
+    fetchUserConfig(); // search/episodes read DisplayMissingEpisodes; settings POST the whole object
     return true;
 }
 
@@ -300,14 +377,8 @@ bool JellyfinClient::restoreSession()
 
 void JellyfinClient::requestItems(const QString &pathWithQuery, const QString &requestTag)
 {
-    QNetworkReply *reply = get(pathWithQuery);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
-            return;
-        }
-        Q_EMIT itemsReady(requestTag, parseItems(reply->readAll()));
+    fetchBody(pathWithQuery, requestTag, 1, [this, requestTag](const QByteArray &body) {
+        Q_EMIT itemsReady(requestTag, parseItems(body));
     });
 }
 
@@ -318,7 +389,7 @@ void JellyfinClient::fetchUserViews(const QString &requestTag)
 
 void JellyfinClient::fetchResume(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items/Resume?Limit=24&MediaTypes=Video&%2&%3")
+    requestItems(QStringLiteral("/UserItems/Resume?userId=%1&Limit=24&MediaTypes=Video&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
 }
@@ -349,7 +420,7 @@ void JellyfinClient::fetchNextUp(const QString &requestTag, const QString &serie
 void JellyfinClient::fetchLatest(const QString &parentId, const QString &requestTag)
 {
     // NB: /Items/Latest returns a bare JSON array (not {Items:[...]}); parseItems handles both.
-    requestItems(QStringLiteral("/Users/%1/Items/Latest?ParentId=%2&Limit=20&%3&%4")
+    requestItems(QStringLiteral("/Items/Latest?userId=%1&ParentId=%2&Limit=20&%3&%4")
                      .arg(m_userId, parentId, kItemFields, kImageTypes),
                  requestTag);
 }
@@ -358,7 +429,7 @@ void JellyfinClient::fetchItems(const QString &parentId, const QString &requestT
                                 const QString &sortBy, const QString &sortOrder,
                                 const QString &extraQuery)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6%7")
+    requestItems(QStringLiteral("/Items?userId=%1&ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6%7")
                      .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
                      .arg(kItemFields).arg(kImageTypes).arg(extraQuery),
                  requestTag);
@@ -368,16 +439,12 @@ void JellyfinClient::fetchItemsPaged(const QString &parentId, const QString &req
                                      const QString &sortBy, const QString &sortOrder,
                                      const QString &extraQuery, int startIndex, int limit)
 {
-    QString q = QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6&StartIndex=%7&EnableTotalRecordCount=true%8")
+    QString q = QStringLiteral("/Items?userId=%1&ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6&StartIndex=%7&EnableTotalRecordCount=true%8")
                     .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
                     .arg(kItemFields).arg(kImageTypes).arg(startIndex).arg(extraQuery);
     if (limit > 0)
         q += QStringLiteral("&Limit=%1").arg(limit);
-    QNetworkReply *reply = get(q);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, startIndex]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) { Q_EMIT errorOccurred(reply->errorString()); return; }
-        const QByteArray body = reply->readAll();
+    fetchBody(q, requestTag, 1, [this, requestTag, startIndex](const QByteArray &body) {
         const QVariantList items = parseItems(body);
         const int total = QJsonDocument::fromJson(body).object()
                               .value(QStringLiteral("TotalRecordCount")).toInt(int(items.size()));
@@ -394,20 +461,34 @@ void JellyfinClient::fetchItemFilters(const QString &parentId, const QString &in
     getJsonAttempt(path, requestTag, 1); // → jsonReady(tag, object)
 }
 
+// /Items/Filters2 → {Genres[{Name,Id}], Tags[], AudioLanguages[{Name,Value}],
+// SubtitleLanguages[{Name,Value}]}. The language lists (12.0+) feed the
+// Library's audio/subtitle-language filters; older servers just omit them.
+void JellyfinClient::fetchItemFilters2(const QString &parentId, const QString &includeItemTypes,
+                                       const QString &requestTag)
+{
+    QString path = QStringLiteral("/Items/Filters2?userId=%1&recursive=true").arg(m_userId);
+    if (!parentId.isEmpty())         path += QStringLiteral("&parentId=%1").arg(parentId);
+    if (!includeItemTypes.isEmpty()) path += QStringLiteral("&includeItemTypes=%1").arg(includeItemTypes);
+    getJsonAttempt(path, requestTag, 1);
+}
+
+// The collections (BoxSets) an item belongs to — web 12's "Collections" row on
+// the item details page (GET /Items/{id}/Collections, 12.0+).
+void JellyfinClient::fetchItemCollections(const QString &itemId, const QString &requestTag)
+{
+    requestItems(QStringLiteral("/Items/%1/Collections?userId=%2&%3&%4")
+                     .arg(itemId, m_userId, kItemFields, kImageTypes),
+                 requestTag);
+}
+
 void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
     // one-element list so the UI consumes it via the same itemsReady path.
-    QNetworkReply *reply = get(QStringLiteral("/Users/%1/Items/%2?%3&%4")
-                                   .arg(m_userId, itemId, kDetailFields, kImageTypes));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
-            return;
-        }
-        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
-        Q_EMIT itemsReady(requestTag, QVariantList{parseItem(o)});
+    fetchBody(QStringLiteral("/Items/%2?userId=%1&%3&%4").arg(m_userId, itemId, kDetailFields, kImageTypes),
+              requestTag, 1, [this, requestTag](const QByteArray &body) {
+        Q_EMIT itemsReady(requestTag, QVariantList{parseItem(QJsonDocument::fromJson(body).object())});
     });
 }
 
@@ -467,7 +548,7 @@ void JellyfinClient::fetchMediaSegments(const QString &itemId, const QString &in
 
 void JellyfinClient::fetchFavorites(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Filters=IsFavorite&Recursive=true&SortBy=SortName"
+    requestItems(QStringLiteral("/Items?userId=%1&Filters=IsFavorite&Recursive=true&SortBy=SortName"
                                 "&IncludeItemTypes=Movie,Series,Episode&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -479,7 +560,7 @@ void JellyfinClient::fetchFavorites(const QString &requestTag)
 void JellyfinClient::search(const QString &query, const QString &requestTag)
 {
     const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    QString path = QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+    QString path = QStringLiteral("/Items?userId=%1&searchTerm=%2&Recursive=true&Limit=100"
                                   "&IncludeItemTypes=Movie,Series,Episode,Playlist,BoxSet&%3&%4")
                        .arg(m_userId, q, kItemFields, kImageTypes);
     if (!m_userConfig.value(QStringLiteral("DisplayMissingEpisodes")).toBool())
@@ -509,7 +590,7 @@ void JellyfinClient::searchStudios(const QString &query, const QString &requestT
 void JellyfinClient::searchVideos(const QString &query, const QString &requestTag)
 {
     const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    requestItems(QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+    requestItems(QStringLiteral("/Items?userId=%1&searchTerm=%2&Recursive=true&Limit=100"
                                 "&MediaTypes=Video&ExcludeItemTypes=Movie,Episode,TvChannel&%3&%4")
                      .arg(m_userId, q, kItemFields, kImageTypes),
                  requestTag);
@@ -519,7 +600,7 @@ void JellyfinClient::searchVideos(const QString &query, const QString &requestTa
 // useSearchSuggestions — rendered as text links, so no image fields needed).
 void JellyfinClient::fetchSearchSuggestions(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?SortBy=IsFavoriteOrLiked,Random"
+    requestItems(QStringLiteral("/Items?userId=%1&SortBy=IsFavoriteOrLiked,Random"
                                 "&IncludeItemTypes=Movie,Series&Limit=20&Recursive=true")
                      .arg(m_userId),
                  requestTag);
@@ -527,7 +608,7 @@ void JellyfinClient::fetchSearchSuggestions(const QString &requestTag)
 
 void JellyfinClient::fetchByPerson(const QString &personId, const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?personIds=%2&Recursive=true"
+    requestItems(QStringLiteral("/Items?userId=%1&personIds=%2&Recursive=true"
                                 "&SortBy=PremiereDate&SortOrder=Descending"
                                 "&IncludeItemTypes=Movie,Series&%3&%4")
                      .arg(m_userId, personId, kItemFields, kImageTypes),
@@ -550,7 +631,7 @@ void JellyfinClient::fetchStudios(const QString &parentId, const QString &reques
 
 void JellyfinClient::fetchCollections(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=BoxSet"
+    requestItems(QStringLiteral("/Items?userId=%1&Recursive=true&IncludeItemTypes=BoxSet"
                                 "&SortBy=SortName&SortOrder=Ascending&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -566,12 +647,12 @@ void JellyfinClient::fetchUpcoming(const QString &requestTag)
 void JellyfinClient::fetchSpecialFeatures(const QString &itemId, const QString &requestTag)
 {
     // returns a bare array; parseItems handles that
-    requestItems(QStringLiteral("/Users/%1/Items/%2/SpecialFeatures").arg(m_userId, itemId), requestTag);
+    requestItems(QStringLiteral("/Items/%2/SpecialFeatures?userId=%1").arg(m_userId, itemId), requestTag);
 }
 
 void JellyfinClient::fetchPlaylists(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=Playlist"
+    requestItems(QStringLiteral("/Items?userId=%1&Recursive=true&IncludeItemTypes=Playlist"
                                 "&SortBy=SortName&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -587,9 +668,14 @@ void JellyfinClient::addToPlaylist(const QString &playlistId, const QString &ite
 
 void JellyfinClient::createPlaylist(const QString &name, const QString &itemId)
 {
-    QNetworkReply *reply = post(QStringLiteral("/Playlists?Name=%1&Ids=%2&userId=%3")
-                                    .arg(QString::fromUtf8(QUrl::toPercentEncoding(name)), itemId, m_userId),
-                                QByteArray());
+    // CreatePlaylistDto body — the query-string form is [ParameterObsolete]
+    // since 10.9 and may go in a future major.
+    const QJsonObject body{
+        {QStringLiteral("Name"), name},
+        {QStringLiteral("Ids"), QJsonArray{itemId}},
+        {QStringLiteral("UserId"), m_userId},
+    };
+    QNetworkReply *reply = post(QStringLiteral("/Playlists"), QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
@@ -867,7 +953,9 @@ QUrl JellyfinClient::streamUrl(const QString &itemId, const QString &sourceId) c
     q.addQueryItem(QStringLiteral("static"), QStringLiteral("true"));
     q.addQueryItem(QStringLiteral("mediaSourceId"), sourceId.isEmpty() ? itemId : sourceId);
     q.addQueryItem(QStringLiteral("deviceId"), m_deviceId);
-    q.addQueryItem(QStringLiteral("api_key"), m_token);
+    // "ApiKey" is the only token query param Jellyfin 12 accepts by default
+    // (legacy "api_key" is off unless EnableLegacyAuthorization); 10.11 takes both.
+    q.addQueryItem(QStringLiteral("ApiKey"), m_token);
     url.setQuery(q);
     return url;
 }
@@ -899,9 +987,27 @@ QJsonObject JellyfinClient::deviceProfile() const
     if (aCodec.isEmpty() || aCodec == QLatin1String("auto")) aCodec = QStringLiteral("aac,mp3");
     int channels = cfg.value(QStringLiteral("playback/audioChannels"), 2).toInt();
     if (channels < 1) channels = 2;
-    const int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
-    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS.
-    const QString hlsContainer = (vCodec == QLatin1String("h264")) ? QStringLiteral("ts") : QStringLiteral("mp4");
+    // Passthrough codecs the transcode may COPY instead of re-encoding (web's
+    // enableDts/enableTrueHd append to videoAudioCodecs). Direct play is
+    // unaffected: mpv decodes everything.
+    if (cfg.value(QStringLiteral("playback/enableDts"), false).toBool())
+        aCodec += QStringLiteral(",dts");
+    if (cfg.value(QStringLiteral("playback/enableTrueHd"), false).toBool())
+        aCodec += QStringLiteral(",truehd");
+    int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
+    // "Limit to the display's resolution": cap at the primary screen's pixel width
+    if (cfg.value(QStringLiteral("playback/limitResolution"), false).toBool()) {
+        if (const QScreen *scr = QGuiApplication::primaryScreen()) {
+            const int screenW = qRound(scr->geometry().width() * scr->devicePixelRatio());
+            if (screenW > 0 && (maxResW <= 0 || screenW < maxResW))
+                maxResW = screenW;
+        }
+    }
+    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS unless
+    // the user prefers fMP4 (web's preferFmp4HlsContainer).
+    const bool preferFmp4 = cfg.value(QStringLiteral("playback/preferFmp4"), false).toBool();
+    const QString hlsContainer = (vCodec == QLatin1String("h264") && !preferFmp4) ? QStringLiteral("ts") : QStringLiteral("mp4");
+    const bool vbrAudio = !cfg.value(QStringLiteral("playback/disableVbrAudio"), false).toBool();
 
     const QJsonObject videoDirect{
         {QStringLiteral("Container"), QStringLiteral("mp4,m4v,mkv,webm,avi,mov,ts,m2ts,flv,wmv,asf,mpg,mpeg,3gp,ogv")},
@@ -918,7 +1024,8 @@ QJsonObject JellyfinClient::deviceProfile() const
         {QStringLiteral("Protocol"), QStringLiteral("hls")},
         {QStringLiteral("MaxAudioChannels"), QString::number(channels)},
         {QStringLiteral("MinSegments"), 1},
-        {QStringLiteral("BreakOnNonKeyFrames"), true}};
+        {QStringLiteral("BreakOnNonKeyFrames"), true},
+        {QStringLiteral("EnableAudioVbrEncoding"), vbrAudio}};
     const auto subtitle = [](const QString &fmt) {
         return QJsonObject{{QStringLiteral("Format"), fmt}, {QStringLiteral("Method"), QStringLiteral("External")}};
     };
@@ -950,10 +1057,15 @@ QJsonObject JellyfinClient::deviceProfile() const
 
 void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64 startTicks,
                                    const QString &requestTag, int audioStreamIndex,
-                                   int subtitleStreamIndex, const QString &mediaSourceId)
+                                   int subtitleStreamIndex, const QString &mediaSourceId,
+                                   const QString &preferredSourceName)
 {
     const QString srcId = mediaSourceId.isEmpty() ? itemId : mediaSourceId; // chosen version
     const bool autoQuality = (maxBitrate <= 0);
+
+    // A new PlaybackInfo replaces the play session: if the previous one was a
+    // transcode that hasn't been stopped (quality change), kill its ffmpeg first.
+    stopActiveEncoding();
 
     // Always go through PlaybackInfo so the server applies the user's audio /
     // subtitle preferences (AudioLanguagePreference, SubtitleMode, …) and
@@ -982,9 +1094,11 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
 
     const QString path = QStringLiteral("/Items/%1/PlaybackInfo?userId=%2").arg(itemId, m_userId);
     QNetworkReply *reply = post(path, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, itemId, srcId, autoQuality]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, requestTag, itemId, srcId, autoQuality, mediaSourceId, preferredSourceName]() {
         reply->deleteLater();
         QVariantMap info;
+        info[QStringLiteral("itemId")] = itemId; // lets the player drop replies for an item it left
         if (reply->error() != QNetworkReply::NoError) {
             // PlaybackInfo failed → direct play, no preference-computed defaults.
             m_playSessionId.clear();
@@ -1000,7 +1114,17 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         const QJsonObject resp = QJsonDocument::fromJson(reply->readAll()).object();
         m_playSessionId = resp.value(QStringLiteral("PlaySessionId")).toString();
         const QJsonArray sources = resp.value(QStringLiteral("MediaSources")).toArray();
-        const QJsonObject ms = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+        // Version choice: an explicit detail-page pick (the server then returns
+        // only that source); else the source whose Name matches the previous
+        // item's (web's getMatchingMediaSource — the next episode keeps e.g.
+        // "Director's Cut" / "1080p" instead of silently switching); else first.
+        QJsonObject ms = sources.isEmpty() ? QJsonObject() : sources.first().toObject();
+        if (mediaSourceId.isEmpty() && !preferredSourceName.isEmpty()) {
+            for (const QJsonValue &sv : sources) {
+                const QJsonObject so = sv.toObject();
+                if (so.value(QStringLiteral("Name")).toString() == preferredSourceName) { ms = so; break; }
+            }
+        }
         m_mediaSourceId = ms.value(QStringLiteral("Id")).toString();
         if (m_mediaSourceId.isEmpty())
             m_mediaSourceId = itemId;
@@ -1019,17 +1143,18 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
         QString url;
         bool isTranscode = false;
         if (autoQuality) {
-            url = streamUrl(itemId, srcId).toString();       // mpv direct-plays every codec
+            url = streamUrl(itemId, m_mediaSourceId).toString(); // mpv direct-plays every codec (chosen version)
         } else if (!transcodingUrl.isEmpty()) {
             url = m_serverUrl + transcodingUrl;              // server-provided HLS transcode
             isTranscode = true;
         } else {
-            url = streamUrl(itemId, srcId).toString();       // last-resort direct
+            url = streamUrl(itemId, m_mediaSourceId).toString(); // last-resort direct
         }
         m_transcoding = isTranscode;
         info[QStringLiteral("url")] = url;
         info[QStringLiteral("isTranscode")] = isTranscode;
         info[QStringLiteral("playSessionId")] = m_playSessionId;
+        info[QStringLiteral("mediaSourceName")] = ms.value(QStringLiteral("Name")).toString(); // for version carry-over
         // Server-side facts for the OSD "Playback Info" panel (web's Playback
         // Data dialog): source container/bitrate + why a transcode was needed.
         info[QStringLiteral("container")] = ms.value(QStringLiteral("Container")).toString();
@@ -1104,22 +1229,30 @@ void JellyfinClient::reportPlaybackStopped(const QString &itemId, qint64 positio
         Q_EMIT playbackStopReported();
     });
 
-    // Free the server-side transcode if one was running.
+    stopActiveEncoding();
+    m_playSessionId.clear();
+    m_mediaSourceId.clear();
+}
+
+// Free the server-side transcode if one is running for the current session.
+// Called on stop AND before a new PlaybackInfo (quality change / next item
+// without a stop report), or the old ffmpeg keeps running until its idle
+// timeout — one orphan per quality switch.
+void JellyfinClient::stopActiveEncoding()
+{
     if (m_transcoding && !m_playSessionId.isEmpty()) {
         QNetworkReply *d = del(QStringLiteral("/Videos/ActiveEncodings?deviceId=%1&playSessionId=%2")
                                    .arg(m_deviceId, m_playSessionId));
         connect(d, &QNetworkReply::finished, d, &QNetworkReply::deleteLater);
     }
     m_transcoding = false;
-    m_playSessionId.clear();
-    m_mediaSourceId.clear();
 }
 
 // --- user data -------------------------------------------------------------
 
 void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
 {
-    const QString path = QStringLiteral("/Users/%1/FavoriteItems/%2").arg(m_userId, itemId);
+    const QString path = QStringLiteral("/UserFavoriteItems/%2?userId=%1").arg(m_userId, itemId);
     QNetworkReply *reply = favorite ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -1129,7 +1262,7 @@ void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
 
 void JellyfinClient::setWatched(const QString &itemId, bool watched)
 {
-    const QString path = QStringLiteral("/Users/%1/PlayedItems/%2").arg(m_userId, itemId);
+    const QString path = QStringLiteral("/UserPlayedItems/%2?userId=%1").arg(m_userId, itemId);
     QNetworkReply *reply = watched ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -1149,7 +1282,7 @@ void JellyfinClient::changePassword(const QString &currentPw, const QString &new
         {QStringLiteral("CurrentPw"), currentPw},
         {QStringLiteral("NewPw"), newPw},
     };
-    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Password").arg(m_userId),
+    QNetworkReply *reply = post(QStringLiteral("/Users/Password?userId=%1").arg(m_userId),
                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();

@@ -30,9 +30,22 @@ ApplicationWindow {
     JellyfinClient {
         id: jellyfin
         serverUrl: (typeof initialServer !== "undefined") ? initialServer : ""
-        onErrorOccurred: (msg) => console.log("[jf] error:", msg)
+        // Failures used to be log-only: a blank row or grid gave no hint why.
+        // Show them as a toast (deduped — a dropped connection fails several
+        // requests at once) so the user knows it's the server, not the app.
+        onErrorOccurred: (msg) => {
+            console.log("[jf] error:", msg)
+            // signed out (login view has its own messages; a 401 cascade would
+            // otherwise overwrite the "session expired" toast)
+            if (!jellyfin.authenticated) return
+            if (errorToastDedup.running) return
+            errorToastDedup.restart()
+            win.showToast(qsTr("Server request failed: %1").arg(msg))
+        }
+        onSessionExpired: (reason) => win.showToast(reason)
         onAuthenticationFailed: (msg) => console.log("[jf] auth failed:", msg)
     }
+    Timer { id: errorToastDedup; interval: 8000 }
 
     AppConfig { id: appConfig }
 
@@ -48,17 +61,24 @@ ApplicationWindow {
 
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }
-    function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name, collectionType: lib.collectionType || "" }) }
-    function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
-    function openSearch() { stack.push(searchComp) }
-    function openSettings() { stack.push(settingsComp) }
+    // Every page carries an objectName key; pushing the page that's already on
+    // top is a no-op (🔍 while on Search, the current library from the drawer…)
+    // instead of stacking a duplicate that needs two Backs and refetches.
+    function pushPage(comp, props) {
+        if (stack.currentItem && stack.currentItem.objectName === props.objectName) return
+        stack.push(comp, props)
+    }
+    function openLibrary(lib) { pushPage(libraryComp, { objectName: "page:lib:" + lib.id, parentId: lib.id, pageTitle: lib.name, collectionType: lib.collectionType || "" }) }
+    function openFavorites() { pushPage(libraryComp, { objectName: "page:favorites", favorites: true, pageTitle: qsTr("Favorites") }) }
+    function openSearch() { pushPage(searchComp, { objectName: "page:search" }) }
+    function openSettings() { pushPage(settingsComp, { objectName: "page:settings" }) }
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
         else if (item.type === "Studio") // e.g. from search: a studio is a filtered library list
-            stack.push(libraryComp, { studioId: item.id, pageTitle: item.name })
+            pushPage(libraryComp, { objectName: "page:studio:" + item.id, studioId: item.id, pageTitle: item.name })
         else
-            stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
+            pushPage(detailComp, { objectName: "page:detail:" + item.id, itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }
@@ -367,10 +387,19 @@ ApplicationWindow {
         function onUserDataChanged() { win.refreshAllPages() }
     }
 
-    Component.onCompleted: {
-        // apply client-local display prefs that affect the whole UI
+    // client-local display prefs that affect the whole UI — applied at start and
+    // live when Settings changes them
+    function applyDisplayPrefs() {
         var fa = appConfig.value("display/fastAnimations", false)
         Theme.fastAnimations = (fa === true || fa === "true" || fa === 1 || fa === "1")
+    }
+    Connections {
+        target: appConfig
+        function onValueChanged(key) { if (key === "display/fastAnimations") win.applyDisplayPrefs() }
+    }
+
+    Component.onCompleted: {
+        applyDisplayPrefs()
 
         if (jellyfin.restoreSession()) // saved login: skip re-auth
             return
