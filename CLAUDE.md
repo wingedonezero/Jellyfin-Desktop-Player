@@ -24,13 +24,21 @@ Dependencies (Debian/Ubuntu — all already installed on the dev machine):
 sudo apt install build-essential cmake ninja-build \
   qt6-base-dev qt6-declarative-dev libmpv-dev
 ```
-Build & run:
+Build & run — **`./build.sh` is the master script** (vendored mpv/libplacebo +
+patched QtWayland are built once into `.cache/` when missing, then the app,
+then the AppImage; `./build.sh install` also copies it over the user's
+`~/Jellyfin_Desktop-x86_64.AppImage`, which is what they run day to day):
 ```
-cmake -B build -G Ninja
-cmake --build build
+./build.sh               # → dist/Jellyfin-Desktop-x86_64.AppImage
+./build.sh install       # … and replace ~/Jellyfin_Desktop-x86_64.AppImage
+./build.sh app           # just build/jellyfin-desktop (dev loop)
+cmake -B build -G Ninja && cmake --build build   # the bare dev build underneath
 ./build/jellyfin-desktop                 # interactive: type server + login
 ./build/jellyfin-desktop /path/file.mkv  # play a local file directly
 ```
+A plain `cmake` build against the system libmpv (no `.cache/mpv-prefix`) will
+compile but **cannot embed on Wayland** — the subsurface patch is only in the
+vendored mpv. Always go through `build.sh` (or `scripts/build-mpv.sh`) first.
 **Dev/test auto-login + auto-play** (env vars → QML context properties in
 `main.cpp`; absent => normal interactive login):
 ```
