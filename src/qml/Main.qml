@@ -35,6 +35,9 @@ ApplicationWindow {
         // requests at once) so the user knows it's the server, not the app.
         onErrorOccurred: (msg) => {
             console.log("[jf] error:", msg)
+            // signed out (login view has its own messages; a 401 cascade would
+            // otherwise overwrite the "session expired" toast)
+            if (!jellyfin.authenticated) return
             if (errorToastDedup.running) return
             errorToastDedup.restart()
             win.showToast(qsTr("Server request failed: %1").arg(msg))

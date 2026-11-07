@@ -720,7 +720,9 @@ Item {
     Button {
         id: skipBtn
         visible: root.currentSkipSegment !== null
-        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 48; bottomMargin: 96 }
+        // sits above the up-next card when both show (outro segment + next episode)
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 48
+                  bottomMargin: upNextCard.visible ? 96 + upNextCard.height + Theme.spacing : 96 }
         z: 60
         hoverEnabled: true
         padding: 12
@@ -823,7 +825,9 @@ Item {
         id: osdTimer
         interval: 3000
         // keep the OSD up while the user is hovering the scrubber (trickplay preview)
-        onTriggered: controls.scrubberHovered ? osdTimer.restart() : (root.osdVisible = false)
+        // stay up while the scrubber is hovered (trickplay bubble) or a menu is open
+        onTriggered: (controls.scrubberHovered || controls.anyMenuOpen) ? osdTimer.restart()
+                                                                       : (root.osdVisible = false)
     }
 
     // Report real playback position so continue-watching / resume work.

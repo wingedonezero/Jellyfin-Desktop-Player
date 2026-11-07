@@ -6,6 +6,10 @@ import JellyfinDesktop
 Menu {
     implicitWidth: 240
     padding: 4
+    // Modal so the click that dismisses the menu doesn't ALSO act on what's
+    // under it (over the video that's the pause area; on a card, its ▶/detail).
+    modal: true
+    dim: false
     background: Rectangle {
         color: Theme.surface
         radius: Theme.radius
