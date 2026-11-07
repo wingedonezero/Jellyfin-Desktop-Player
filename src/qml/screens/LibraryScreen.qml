@@ -94,7 +94,11 @@ Item {
     readonly property string curKind: filteredView ? "items" : (tabs[tab] ? tabs[tab].kind : "items")
     readonly property var kindIndex: ({ items: 0, suggestions: 1, collections: 2, upcoming: 3, genres: 4, networks: 5, favorites: 6, episodes: 7 })
 
-    readonly property string itemsTag: "lib:items:" + parentId + ":" + genreId + ":" + studioId + ":" + tagName + ":" + (favorites ? "f" : "")
+    // The tag carries a generation that reloadItems() bumps: a page request from
+    // the previous sort/filter that lands after the new page 0 no longer matches
+    // and is dropped (its start could equal the model count and get appended).
+    property int _itemsGen: 0
+    readonly property string itemsTag: "lib:items:" + parentId + ":" + genreId + ":" + studioId + ":" + tagName + ":" + (favorites ? "f" : "") + ":" + _itemsGen
     readonly property var suggestions: {
         var out = []
         if (collectionType === "tvshows") {
@@ -182,6 +186,7 @@ Item {
     }
     function reloadItems() {
         loadingMore = false; refreshingItems = false
+        _itemsGen++
         fetchPage(0, pageSize)
     }
     // Infinite scroll: fetch the next chunk when the grid nears the bottom.
@@ -282,6 +287,11 @@ Item {
                 itemsModel.setItems(its)
             }
             Qt.callLater(screen.fillViewport)
+        }
+        // a failed page must release the flags or infinite scroll / the next
+        // user-data refresh silently stops for this view
+        function onRequestFailed(tag) {
+            if (tag === screen.itemsTag) { screen.loadingMore = false; screen.refreshingItems = false }
         }
         function onJsonReady(tag, data) { if (tag === "lib:filters:" + screen.parentId && data) screen.filterData = data }
         function onCategoriesReady(tag, cats) { if (tag === "lib:sugRecs:" + screen.parentId) screen.sugRecs = cats }

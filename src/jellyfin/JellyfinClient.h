@@ -7,6 +7,8 @@
 #include <QUrl>
 #include <QVariantList>
 
+#include <functional>
+
 class QNetworkAccessManager;
 class QNetworkReply;
 class QJsonObject;
@@ -165,6 +167,8 @@ Q_SIGNALS:
     void playbackStopReported(); // the /Sessions/Playing/Stopped POST finished — server userData is committed
     void userDataChanged();      // a favorite/played toggle landed — screens refetch badges
     void errorOccurred(const QString &message);
+    void requestFailed(const QString &requestTag); // a tagged fetch gave up — screens reset their loading state
+    void sessionExpired(const QString &reason);    // 401 on a live session: we signed out, login view shows
 
 private:
     QString authHeader() const; // "MediaBrowser Token=..., Client=..., ..."
@@ -173,6 +177,13 @@ private:
     QNetworkReply *del(const QString &pathWithQuery) const;
     void requestItems(const QString &pathWithQuery, const QString &requestTag);
     void getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft);
+    // Every browse GET goes through this: a valid JSON body → onOk(body); an
+    // empty/invalid body or transport error retries once, then emits
+    // requestFailed(tag) + errorOccurred. 401 is handled globally (expireSession).
+    void fetchBody(const QString &path, const QString &requestTag, int triesLeft,
+                   std::function<void(const QByteArray &)> onOk);
+    void expireSession();        // token rejected by the server → sign out, show login
+    void stopActiveEncoding();   // DELETE /Videos/ActiveEncodings for the live transcode
     void saveSession() const;  // persist server+token to QSettings
     void fetchEndpointInfo();  // GET /System/Endpoint → m_inNetwork
     static QVariantList parseItems(const QByteArray &json);

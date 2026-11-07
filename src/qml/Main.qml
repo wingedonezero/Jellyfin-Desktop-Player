@@ -30,9 +30,19 @@ ApplicationWindow {
     JellyfinClient {
         id: jellyfin
         serverUrl: (typeof initialServer !== "undefined") ? initialServer : ""
-        onErrorOccurred: (msg) => console.log("[jf] error:", msg)
+        // Failures used to be log-only: a blank row or grid gave no hint why.
+        // Show them as a toast (deduped — a dropped connection fails several
+        // requests at once) so the user knows it's the server, not the app.
+        onErrorOccurred: (msg) => {
+            console.log("[jf] error:", msg)
+            if (errorToastDedup.running) return
+            errorToastDedup.restart()
+            win.showToast(qsTr("Server request failed: %1").arg(msg))
+        }
+        onSessionExpired: (reason) => win.showToast(reason)
         onAuthenticationFailed: (msg) => console.log("[jf] auth failed:", msg)
     }
+    Timer { id: errorToastDedup; interval: 8000 }
 
     AppConfig { id: appConfig }
 

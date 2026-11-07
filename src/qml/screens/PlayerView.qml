@@ -403,6 +403,9 @@ Item {
                 if (idx >= 0) { root.queue = items; root.queueIndex = idx }
             }
         }
+        // the server dropped our session mid-play: close the player so the
+        // login view (which sits under this overlay) is actually reachable
+        function onSessionExpired(reason) { if (player.playing) root.stop() }
         function onMediaSegmentsReady(itemId, segs) {
             if (itemId === player.currentId) root.segments = segs
         }

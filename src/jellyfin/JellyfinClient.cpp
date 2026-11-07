@@ -63,6 +63,40 @@ JellyfinClient::JellyfinClient(QObject *parent)
     // and holding one of Qt's 6 per-host connection slots (which, once enough
     // stall, starves every later request → blank admin panels).
     m_net->setTransferTimeout(20000);
+
+    // One place catches a rejected token for EVERY request (browse, progress
+    // reports, toggles): a 401 while signed in means the server dropped this
+    // session (device deleted, token revoked, user disabled). Sign out so the
+    // login view shows, like jellyfin-web's redirect-on-401, instead of a Home
+    // that stays blank forever. The login/QuickConnect calls 401 legitimately.
+    connect(m_net, &QNetworkAccessManager::finished, this, [this](QNetworkReply *reply) {
+        if (m_token.isEmpty())
+            return;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (status != 401)
+            return;
+        const QString path = reply->url().path();
+        if (path.contains(QLatin1String("/Users/AuthenticateByName"))
+            || path.contains(QLatin1String("/QuickConnect/")))
+            return;
+        expireSession();
+    });
+}
+
+void JellyfinClient::expireSession()
+{
+    qWarning().noquote() << "[jf] server rejected the access token (401) — signing out";
+    m_token.clear();
+    m_userId.clear(); // m_userName kept so the login form can prefill it
+    m_userConfig.clear();
+    m_userConfigLoaded = false;
+    m_pendingUserConfig.clear();
+    m_playSessionId.clear();
+    m_mediaSourceId.clear();
+    m_transcoding = false;
+    QSettings().remove(QStringLiteral("session"));
+    Q_EMIT sessionExpired(tr("Your session is no longer valid — please sign in again."));
+    Q_EMIT authenticatedChanged();
 }
 
 void JellyfinClient::setServerUrl(const QString &url)
@@ -183,25 +217,38 @@ void JellyfinClient::getJson(const QString &path, const QString &requestTag)
     getJsonAttempt(path, requestTag, 1); // one retry on transient failure
 }
 
-// A GET that emits jsonReady only on a genuinely valid response, and retries
-// once on a transient failure — a stalled/reset/half-closed keep-alive
-// connection can "finish" with NoError but an EMPTY body, which previously got
-// handed to QML as empty data (panels rendered blank). We treat empty/invalid
-// bodies as failures, retry once on a fresh connection, and never retry a real
-// client error (status >= 400). Every outcome is logged for diagnosis.
+// A GET that emits jsonReady only on a genuinely valid response (see fetchBody).
 void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestTag, int triesLeft)
 {
+    fetchBody(path, requestTag, triesLeft, [this, requestTag](const QByteArray &body) {
+        Q_EMIT jsonReady(requestTag, QJsonDocument::fromJson(body).toVariant());
+    });
+}
+
+// The one GET path for browse data. A stalled/reset/half-closed keep-alive
+// connection can "finish" with NoError but an EMPTY body, which used to be
+// handed to QML as empty data (rows/grids rendered blank at random). Empty or
+// invalid bodies are failures: retry once on a fresh connection, never retry a
+// real client error (status >= 400), and tell the screen (requestFailed) so it
+// can drop its loading state. Every failure is logged for diagnosis.
+void JellyfinClient::fetchBody(const QString &path, const QString &requestTag, int triesLeft,
+                               std::function<void(const QByteArray &)> onOk)
+{
     QNetworkReply *reply = get(path);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, path, requestTag, triesLeft, onOk]() {
         reply->deleteLater();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QByteArray body = reply->readAll();
         const QNetworkReply::NetworkError err = reply->error();
-        const QVariant data = QJsonDocument::fromJson(body).toVariant();
-        if (err == QNetworkReply::NoError && data.isValid()) {
+        const bool validJson = !QJsonDocument::fromJson(body).isNull();
+        if (err == QNetworkReply::NoError && validJson) {
             if (qEnvironmentVariableIsSet("JFD_NETLOG")) // opt-in full request trace
                 qInfo().noquote() << "[net] GET" << path << "->" << status << body.size() << "bytes ok";
-            Q_EMIT jsonReady(requestTag, data);
+            onOk(body);
+            return;
+        }
+        if (status == 401) { // the session handler has already signed us out
+            Q_EMIT requestFailed(requestTag);
             return;
         }
         const bool willRetry = triesLeft > 0 && status < 400;
@@ -210,9 +257,10 @@ void JellyfinClient::getJsonAttempt(const QString &path, const QString &requestT
                              << "body" << body.size() << "bytes"
                              << (willRetry ? "— retrying" : "— FAILED");
         if (willRetry) {
-            getJsonAttempt(path, requestTag, triesLeft - 1);
+            fetchBody(path, requestTag, triesLeft - 1, onOk);
             return;
         }
+        Q_EMIT requestFailed(requestTag);
         Q_EMIT errorOccurred(reply->errorString().isEmpty()
                                  ? QStringLiteral("Empty/invalid response for %1 (HTTP %2)").arg(path).arg(status)
                                  : reply->errorString());
@@ -328,14 +376,8 @@ bool JellyfinClient::restoreSession()
 
 void JellyfinClient::requestItems(const QString &pathWithQuery, const QString &requestTag)
 {
-    QNetworkReply *reply = get(pathWithQuery);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
-            return;
-        }
-        Q_EMIT itemsReady(requestTag, parseItems(reply->readAll()));
+    fetchBody(pathWithQuery, requestTag, 1, [this, requestTag](const QByteArray &body) {
+        Q_EMIT itemsReady(requestTag, parseItems(body));
     });
 }
 
@@ -401,11 +443,7 @@ void JellyfinClient::fetchItemsPaged(const QString &parentId, const QString &req
                     .arg(kItemFields).arg(kImageTypes).arg(startIndex).arg(extraQuery);
     if (limit > 0)
         q += QStringLiteral("&Limit=%1").arg(limit);
-    QNetworkReply *reply = get(q);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag, startIndex]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) { Q_EMIT errorOccurred(reply->errorString()); return; }
-        const QByteArray body = reply->readAll();
+    fetchBody(q, requestTag, 1, [this, requestTag, startIndex](const QByteArray &body) {
         const QVariantList items = parseItems(body);
         const int total = QJsonDocument::fromJson(body).object()
                               .value(QStringLiteral("TotalRecordCount")).toInt(int(items.size()));
@@ -426,16 +464,9 @@ void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
     // one-element list so the UI consumes it via the same itemsReady path.
-    QNetworkReply *reply = get(QStringLiteral("/Users/%1/Items/%2?%3&%4")
-                                   .arg(m_userId, itemId, kDetailFields, kImageTypes));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, requestTag]() {
-        reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            Q_EMIT errorOccurred(reply->errorString());
-            return;
-        }
-        const QJsonObject o = QJsonDocument::fromJson(reply->readAll()).object();
-        Q_EMIT itemsReady(requestTag, QVariantList{parseItem(o)});
+    fetchBody(QStringLiteral("/Users/%1/Items/%2?%3&%4").arg(m_userId, itemId, kDetailFields, kImageTypes),
+              requestTag, 1, [this, requestTag](const QByteArray &body) {
+        Q_EMIT itemsReady(requestTag, QVariantList{parseItem(QJsonDocument::fromJson(body).object())});
     });
 }
 
@@ -985,6 +1016,10 @@ void JellyfinClient::requestStream(const QString &itemId, int maxBitrate, qint64
     const QString srcId = mediaSourceId.isEmpty() ? itemId : mediaSourceId; // chosen version
     const bool autoQuality = (maxBitrate <= 0);
 
+    // A new PlaybackInfo replaces the play session: if the previous one was a
+    // transcode that hasn't been stopped (quality change), kill its ffmpeg first.
+    stopActiveEncoding();
+
     // Always go through PlaybackInfo so the server applies the user's audio /
     // subtitle preferences (AudioLanguagePreference, SubtitleMode, …) and
     // returns the chosen default stream indices. In Auto quality we still
@@ -1135,15 +1170,23 @@ void JellyfinClient::reportPlaybackStopped(const QString &itemId, qint64 positio
         Q_EMIT playbackStopReported();
     });
 
-    // Free the server-side transcode if one was running.
+    stopActiveEncoding();
+    m_playSessionId.clear();
+    m_mediaSourceId.clear();
+}
+
+// Free the server-side transcode if one is running for the current session.
+// Called on stop AND before a new PlaybackInfo (quality change / next item
+// without a stop report), or the old ffmpeg keeps running until its idle
+// timeout — one orphan per quality switch.
+void JellyfinClient::stopActiveEncoding()
+{
     if (m_transcoding && !m_playSessionId.isEmpty()) {
         QNetworkReply *d = del(QStringLiteral("/Videos/ActiveEncodings?deviceId=%1&playSessionId=%2")
                                    .arg(m_deviceId, m_playSessionId));
         connect(d, &QNetworkReply::finished, d, &QNetworkReply::deleteLater);
     }
     m_transcoding = false;
-    m_playSessionId.clear();
-    m_mediaSourceId.clear();
 }
 
 // --- user data -------------------------------------------------------------
