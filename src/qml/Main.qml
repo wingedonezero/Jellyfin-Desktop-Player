@@ -61,17 +61,24 @@ ApplicationWindow {
 
     // ---- routing ----------------------------------------------------------
     function goHome() { if (stack.depth > 1) stack.pop(null) }
-    function openLibrary(lib) { stack.push(libraryComp, { parentId: lib.id, pageTitle: lib.name, collectionType: lib.collectionType || "" }) }
-    function openFavorites() { stack.push(libraryComp, { favorites: true, pageTitle: qsTr("Favorites") }) }
-    function openSearch() { stack.push(searchComp) }
-    function openSettings() { stack.push(settingsComp) }
+    // Every page carries an objectName key; pushing the page that's already on
+    // top is a no-op (🔍 while on Search, the current library from the drawer…)
+    // instead of stacking a duplicate that needs two Backs and refetches.
+    function pushPage(comp, props) {
+        if (stack.currentItem && stack.currentItem.objectName === props.objectName) return
+        stack.push(comp, props)
+    }
+    function openLibrary(lib) { pushPage(libraryComp, { objectName: "page:lib:" + lib.id, parentId: lib.id, pageTitle: lib.name, collectionType: lib.collectionType || "" }) }
+    function openFavorites() { pushPage(libraryComp, { objectName: "page:favorites", favorites: true, pageTitle: qsTr("Favorites") }) }
+    function openSearch() { pushPage(searchComp, { objectName: "page:search" }) }
+    function openSettings() { pushPage(settingsComp, { objectName: "page:settings" }) }
     function openDetail(item) {
         if (item.type === "CollectionFolder" || item.type === "UserView")
             openLibrary(item)
         else if (item.type === "Studio") // e.g. from search: a studio is a filtered library list
-            stack.push(libraryComp, { studioId: item.id, pageTitle: item.name })
+            pushPage(libraryComp, { objectName: "page:studio:" + item.id, studioId: item.id, pageTitle: item.name })
         else
-            stack.push(detailComp, { itemId: item.id, pageTitle: item.name })
+            pushPage(detailComp, { objectName: "page:detail:" + item.id, itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
     function playQueue(items, index) { playerView.playQueue(items, index) }

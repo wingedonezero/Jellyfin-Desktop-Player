@@ -126,6 +126,21 @@ don't re-add. Remaining ideas (user will ask): hold-key speed boost, visible
 queue panel with reorder (both exceed web), server-side displayPreferences
 sync for settings interop.
 
+**2026-11-07 audit (Jellyfin 12 prep + rough edges):** three audits (C++,
+QML, jellyfin-web delta f0e06c7→v12.4) → Tier 1 (data-safety/12-auth) and
+Tier 2 (robustness/OSD/nav) landed in four commits. **Still owed:** Tier 3 —
+swap the `[Obsolete]` `/Users/{id}/Items…`, `FavoriteItems`, `PlayedItems`,
+`Configuration`, `Password` routes for `/Items?userId=`, `/UserItems/Resume`,
+`/Items/Latest`, `/UserFavoriteItems/{id}`, `/UserPlayedItems/{id}`,
+`/Users/Configuration`, `/Users/Password` (all verified present in 10.11.11),
+and send `POST /Playlists` as a JSON body. Tier 4 — new web parity since June:
+audio/subtitle-language library filters (`/Items/Filters2` → `audioLanguages`/
+`subtitleLanguages`), Collections row on Details (`/Items/{id}/Collections`),
+Creators + merged crew cards, chapter name in the scrubber bubble, version-
+persistent next-episode. jellyfin-web v12.4 moved `src/controllers/*` to
+`src/apps/legacy/controllers/*` and `experimental`→`modern`; Modern reuses the
+Legacy screens except Library browse, so our Legacy-mirroring UI is current.
+
 `docs/web-parity-audit-2026-06-16.md` is now largely historical — verify any
 claim against code before acting on it. Theme stays the single dark skin; a
 swappable-skin *picker* is a separate later project. Cast/SyncPlay render

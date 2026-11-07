@@ -20,10 +20,27 @@ Item {
     signal itemAddToCollection(var item)
     signal cardAction(string verb, var item)
 
-    property var resumeModel: []
-    property var nextUpModel: []
-    property var librariesModel: []
-    property var latestByLib: ({})
+    // Rows are ItemListModels updated IN PLACE on refresh (back-nav, playback
+    // stop, watched toggles): the delegates and scroll offset survive, instead
+    // of every row resetting to X=0 and re-creating its cards (visible blink).
+    ItemListModel { id: resumeList }
+    ItemListModel { id: nextUpList }
+    property var librariesModel: []      // only reassigned when the set of libraries changes
+    property var _latest: ({})           // libraryId → ItemListModel (plain JS map; mutated, never reassigned)
+    Component { id: listModelComp; ItemListModel {} }
+    function latestModel(libId) {
+        if (!_latest[libId]) _latest[libId] = listModelComp.createObject(screen)
+        return _latest[libId]
+    }
+    function sameIds(a, b) {
+        if (a.length !== b.length) return false
+        for (var i = 0; i < a.length; ++i) if (a[i].id !== b[i].id) return false
+        return true
+    }
+    function clearAll() {
+        resumeList.clear(); nextUpList.clear(); librariesModel = []
+        for (var k in _latest) _latest[k].clear()
+    }
 
     // Settings → Display: use episode stills vs the show poster in Next Up / Resume
     function cfgBool(key, def) {
@@ -57,8 +74,8 @@ Item {
     }
     // does a section have anything to show? (so empty slots don't reserve space)
     function sectionHasContent(key) {
-        if (key === "resume") return resumeModel.length > 0
-        if (key === "nextup") return nextUpModel.length > 0
+        if (key === "resume") return resumeList.count > 0
+        if (key === "nextup") return nextUpList.count > 0
         if (key === "smalllibrarytiles" || key === "librarybuttons" || key === "latestmedia")
             return librariesModel.length > 0
         return false
@@ -83,21 +100,23 @@ Item {
 
     Connections {
         target: screen.client
-        function onAuthenticatedChanged() { screen.maybeReload() }
+        function onAuthenticatedChanged() {
+            // signed out: don't keep showing the previous user's rows
+            if (screen.client && !screen.client.authenticated) screen.clearAll()
+            screen.maybeReload()
+        }
         function onItemsReady(tag, items) {
             if (tag === "home:resume") {
-                screen.resumeModel = items
+                resumeList.updateItems(items)
             } else if (tag === "home:nextup") {
-                screen.nextUpModel = items
+                nextUpList.updateItems(items)
             } else if (tag === "home:views") {
-                screen.librariesModel = items
+                // reassigning recreates every Latest row — only when libraries changed
+                if (!screen.sameIds(screen.librariesModel, items)) screen.librariesModel = items
                 for (let i = 0; i < items.length; ++i)
                     screen.client.fetchLatest(items[i].id, "home:latest:" + items[i].id)
             } else if (tag.indexOf("home:latest:") === 0) {
-                const id = tag.substring("home:latest:".length)
-                let m = Object.assign({}, screen.latestByLib)
-                m[id] = items
-                screen.latestByLib = m
+                screen.latestModel(tag.substring("home:latest:".length)).updateItems(items)
             }
         }
     }
@@ -106,7 +125,7 @@ Item {
     Component {
         id: resumeRow
         MediaRow {
-            title: qsTr("Continue Watching"); model: screen.resumeModel
+            title: qsTr("Continue Watching"); model: resumeList
             client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
@@ -118,7 +137,7 @@ Item {
     Component {
         id: nextUpRow
         MediaRow {
-            title: qsTr("Next Up"); model: screen.nextUpModel
+            title: qsTr("Next Up"); model: nextUpList
             client: screen.client; shape: "thumb"; episodeImages: screen.useEpisodeImages
             onItemActivated: (it) => screen.itemActivated(it)
             onItemOpenDetail: (it) => screen.itemOpenDetail(it)
@@ -187,8 +206,7 @@ Item {
                 MediaRow {
                     required property var modelData
                     title: qsTr("Latest %1").arg(modelData.name)
-                    visible: (screen.latestByLib[modelData.id] || []).length > 0
-                    model: screen.latestByLib[modelData.id] || []
+                    model: screen.latestModel(modelData.id) // (MediaRow hides itself when empty)
                     client: screen.client; shape: "poster"
                     onItemActivated: (it) => screen.itemActivated(it)
                     onItemOpenDetail: (it) => screen.itemOpenDetail(it)

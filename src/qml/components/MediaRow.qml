@@ -23,8 +23,10 @@ ColumnLayout {
     signal cardAction(string verb, var item)  // queue/playNext
     signal titleClicked()            // "see all" header click (when titleLink)
 
+    // works with a JS array (.length) or an ItemListModel (.count)
+    readonly property int modelCount: !model ? 0 : (model.count !== undefined ? model.count : (model.length || 0))
     Layout.fillWidth: true
-    visible: model && model.length > 0
+    visible: modelCount > 0
     spacing: Theme.spacingSmall
 
     RowLayout {

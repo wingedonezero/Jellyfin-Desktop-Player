@@ -10,6 +10,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QScreen>
 #include <QSettings>
 #include <QSysInfo>
 #include <QUrlQuery>
@@ -960,9 +961,27 @@ QJsonObject JellyfinClient::deviceProfile() const
     if (aCodec.isEmpty() || aCodec == QLatin1String("auto")) aCodec = QStringLiteral("aac,mp3");
     int channels = cfg.value(QStringLiteral("playback/audioChannels"), 2).toInt();
     if (channels < 1) channels = 2;
-    const int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
-    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS.
-    const QString hlsContainer = (vCodec == QLatin1String("h264")) ? QStringLiteral("ts") : QStringLiteral("mp4");
+    // Passthrough codecs the transcode may COPY instead of re-encoding (web's
+    // enableDts/enableTrueHd append to videoAudioCodecs). Direct play is
+    // unaffected: mpv decodes everything.
+    if (cfg.value(QStringLiteral("playback/enableDts"), false).toBool())
+        aCodec += QStringLiteral(",dts");
+    if (cfg.value(QStringLiteral("playback/enableTrueHd"), false).toBool())
+        aCodec += QStringLiteral(",truehd");
+    int maxResW = cfg.value(QStringLiteral("playback/maxResolutionWidth"), 0).toInt(); // 0 = no cap
+    // "Limit to the display's resolution": cap at the primary screen's pixel width
+    if (cfg.value(QStringLiteral("playback/limitResolution"), false).toBool()) {
+        if (const QScreen *scr = QGuiApplication::primaryScreen()) {
+            const int screenW = qRound(scr->geometry().width() * scr->devicePixelRatio());
+            if (screenW > 0 && (maxResW <= 0 || screenW < maxResW))
+                maxResW = screenW;
+        }
+    }
+    // hevc/av1 need an fMP4 (mp4) HLS container; h264 stays in MPEG-TS unless
+    // the user prefers fMP4 (web's preferFmp4HlsContainer).
+    const bool preferFmp4 = cfg.value(QStringLiteral("playback/preferFmp4"), false).toBool();
+    const QString hlsContainer = (vCodec == QLatin1String("h264") && !preferFmp4) ? QStringLiteral("ts") : QStringLiteral("mp4");
+    const bool vbrAudio = !cfg.value(QStringLiteral("playback/disableVbrAudio"), false).toBool();
 
     const QJsonObject videoDirect{
         {QStringLiteral("Container"), QStringLiteral("mp4,m4v,mkv,webm,avi,mov,ts,m2ts,flv,wmv,asf,mpg,mpeg,3gp,ogv")},
@@ -979,7 +998,8 @@ QJsonObject JellyfinClient::deviceProfile() const
         {QStringLiteral("Protocol"), QStringLiteral("hls")},
         {QStringLiteral("MaxAudioChannels"), QString::number(channels)},
         {QStringLiteral("MinSegments"), 1},
-        {QStringLiteral("BreakOnNonKeyFrames"), true}};
+        {QStringLiteral("BreakOnNonKeyFrames"), true},
+        {QStringLiteral("EnableAudioVbrEncoding"), vbrAudio}};
     const auto subtitle = [](const QString &fmt) {
         return QJsonObject{{QStringLiteral("Format"), fmt}, {QStringLiteral("Method"), QStringLiteral("External")}};
     };
