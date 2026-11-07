@@ -272,7 +272,7 @@ void JellyfinClient::fetchUserConfig()
 {
     if (m_userId.isEmpty())
         return;
-    QNetworkReply *reply = get(QStringLiteral("/Users/%1").arg(m_userId));
+    QNetworkReply *reply = get(QStringLiteral("/Users/Me")); // the token's own user
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -317,7 +317,7 @@ void JellyfinClient::setUserConfig(const QString &key, const QVariant &value)
 void JellyfinClient::postUserConfig()
 {
     const QJsonObject body = QJsonObject::fromVariantMap(m_userConfig);
-    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Configuration").arg(m_userId),
+    QNetworkReply *reply = post(QStringLiteral("/Users/Configuration?userId=%1").arg(m_userId),
                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -389,7 +389,7 @@ void JellyfinClient::fetchUserViews(const QString &requestTag)
 
 void JellyfinClient::fetchResume(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items/Resume?Limit=24&MediaTypes=Video&%2&%3")
+    requestItems(QStringLiteral("/UserItems/Resume?userId=%1&Limit=24&MediaTypes=Video&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
 }
@@ -420,7 +420,7 @@ void JellyfinClient::fetchNextUp(const QString &requestTag, const QString &serie
 void JellyfinClient::fetchLatest(const QString &parentId, const QString &requestTag)
 {
     // NB: /Items/Latest returns a bare JSON array (not {Items:[...]}); parseItems handles both.
-    requestItems(QStringLiteral("/Users/%1/Items/Latest?ParentId=%2&Limit=20&%3&%4")
+    requestItems(QStringLiteral("/Items/Latest?userId=%1&ParentId=%2&Limit=20&%3&%4")
                      .arg(m_userId, parentId, kItemFields, kImageTypes),
                  requestTag);
 }
@@ -429,7 +429,7 @@ void JellyfinClient::fetchItems(const QString &parentId, const QString &requestT
                                 const QString &sortBy, const QString &sortOrder,
                                 const QString &extraQuery)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6%7")
+    requestItems(QStringLiteral("/Items?userId=%1&ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6%7")
                      .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
                      .arg(kItemFields).arg(kImageTypes).arg(extraQuery),
                  requestTag);
@@ -439,7 +439,7 @@ void JellyfinClient::fetchItemsPaged(const QString &parentId, const QString &req
                                      const QString &sortBy, const QString &sortOrder,
                                      const QString &extraQuery, int startIndex, int limit)
 {
-    QString q = QStringLiteral("/Users/%1/Items?ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6&StartIndex=%7&EnableTotalRecordCount=true%8")
+    QString q = QStringLiteral("/Items?userId=%1&ParentId=%2&SortBy=%3&SortOrder=%4&%5&%6&StartIndex=%7&EnableTotalRecordCount=true%8")
                     .arg(m_userId).arg(parentId).arg(sortBy).arg(sortOrder)
                     .arg(kItemFields).arg(kImageTypes).arg(startIndex).arg(extraQuery);
     if (limit > 0)
@@ -465,7 +465,7 @@ void JellyfinClient::fetchItem(const QString &itemId, const QString &requestTag)
 {
     // Single item (/Users/{id}/Items/{id}) returns a bare object; wrap as a
     // one-element list so the UI consumes it via the same itemsReady path.
-    fetchBody(QStringLiteral("/Users/%1/Items/%2?%3&%4").arg(m_userId, itemId, kDetailFields, kImageTypes),
+    fetchBody(QStringLiteral("/Items/%2?userId=%1&%3&%4").arg(m_userId, itemId, kDetailFields, kImageTypes),
               requestTag, 1, [this, requestTag](const QByteArray &body) {
         Q_EMIT itemsReady(requestTag, QVariantList{parseItem(QJsonDocument::fromJson(body).object())});
     });
@@ -527,7 +527,7 @@ void JellyfinClient::fetchMediaSegments(const QString &itemId, const QString &in
 
 void JellyfinClient::fetchFavorites(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Filters=IsFavorite&Recursive=true&SortBy=SortName"
+    requestItems(QStringLiteral("/Items?userId=%1&Filters=IsFavorite&Recursive=true&SortBy=SortName"
                                 "&IncludeItemTypes=Movie,Series,Episode&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -539,7 +539,7 @@ void JellyfinClient::fetchFavorites(const QString &requestTag)
 void JellyfinClient::search(const QString &query, const QString &requestTag)
 {
     const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    QString path = QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+    QString path = QStringLiteral("/Items?userId=%1&searchTerm=%2&Recursive=true&Limit=100"
                                   "&IncludeItemTypes=Movie,Series,Episode,Playlist,BoxSet&%3&%4")
                        .arg(m_userId, q, kItemFields, kImageTypes);
     if (!m_userConfig.value(QStringLiteral("DisplayMissingEpisodes")).toBool())
@@ -569,7 +569,7 @@ void JellyfinClient::searchStudios(const QString &query, const QString &requestT
 void JellyfinClient::searchVideos(const QString &query, const QString &requestTag)
 {
     const QString q = QString::fromUtf8(QUrl::toPercentEncoding(query));
-    requestItems(QStringLiteral("/Users/%1/Items?searchTerm=%2&Recursive=true&Limit=100"
+    requestItems(QStringLiteral("/Items?userId=%1&searchTerm=%2&Recursive=true&Limit=100"
                                 "&MediaTypes=Video&ExcludeItemTypes=Movie,Episode,TvChannel&%3&%4")
                      .arg(m_userId, q, kItemFields, kImageTypes),
                  requestTag);
@@ -579,7 +579,7 @@ void JellyfinClient::searchVideos(const QString &query, const QString &requestTa
 // useSearchSuggestions — rendered as text links, so no image fields needed).
 void JellyfinClient::fetchSearchSuggestions(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?SortBy=IsFavoriteOrLiked,Random"
+    requestItems(QStringLiteral("/Items?userId=%1&SortBy=IsFavoriteOrLiked,Random"
                                 "&IncludeItemTypes=Movie,Series&Limit=20&Recursive=true")
                      .arg(m_userId),
                  requestTag);
@@ -587,7 +587,7 @@ void JellyfinClient::fetchSearchSuggestions(const QString &requestTag)
 
 void JellyfinClient::fetchByPerson(const QString &personId, const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?personIds=%2&Recursive=true"
+    requestItems(QStringLiteral("/Items?userId=%1&personIds=%2&Recursive=true"
                                 "&SortBy=PremiereDate&SortOrder=Descending"
                                 "&IncludeItemTypes=Movie,Series&%3&%4")
                      .arg(m_userId, personId, kItemFields, kImageTypes),
@@ -610,7 +610,7 @@ void JellyfinClient::fetchStudios(const QString &parentId, const QString &reques
 
 void JellyfinClient::fetchCollections(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=BoxSet"
+    requestItems(QStringLiteral("/Items?userId=%1&Recursive=true&IncludeItemTypes=BoxSet"
                                 "&SortBy=SortName&SortOrder=Ascending&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -626,12 +626,12 @@ void JellyfinClient::fetchUpcoming(const QString &requestTag)
 void JellyfinClient::fetchSpecialFeatures(const QString &itemId, const QString &requestTag)
 {
     // returns a bare array; parseItems handles that
-    requestItems(QStringLiteral("/Users/%1/Items/%2/SpecialFeatures").arg(m_userId, itemId), requestTag);
+    requestItems(QStringLiteral("/Items/%2/SpecialFeatures?userId=%1").arg(m_userId, itemId), requestTag);
 }
 
 void JellyfinClient::fetchPlaylists(const QString &requestTag)
 {
-    requestItems(QStringLiteral("/Users/%1/Items?Recursive=true&IncludeItemTypes=Playlist"
+    requestItems(QStringLiteral("/Items?userId=%1&Recursive=true&IncludeItemTypes=Playlist"
                                 "&SortBy=SortName&%2&%3")
                      .arg(m_userId, kItemFields, kImageTypes),
                  requestTag);
@@ -647,9 +647,14 @@ void JellyfinClient::addToPlaylist(const QString &playlistId, const QString &ite
 
 void JellyfinClient::createPlaylist(const QString &name, const QString &itemId)
 {
-    QNetworkReply *reply = post(QStringLiteral("/Playlists?Name=%1&Ids=%2&userId=%3")
-                                    .arg(QString::fromUtf8(QUrl::toPercentEncoding(name)), itemId, m_userId),
-                                QByteArray());
+    // CreatePlaylistDto body — the query-string form is [ParameterObsolete]
+    // since 10.9 and may go in a future major.
+    const QJsonObject body{
+        {QStringLiteral("Name"), name},
+        {QStringLiteral("Ids"), QJsonArray{itemId}},
+        {QStringLiteral("UserId"), m_userId},
+    };
+    QNetworkReply *reply = post(QStringLiteral("/Playlists"), QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
 }
 
@@ -1213,7 +1218,7 @@ void JellyfinClient::stopActiveEncoding()
 
 void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
 {
-    const QString path = QStringLiteral("/Users/%1/FavoriteItems/%2").arg(m_userId, itemId);
+    const QString path = QStringLiteral("/UserFavoriteItems/%2?userId=%1").arg(m_userId, itemId);
     QNetworkReply *reply = favorite ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -1223,7 +1228,7 @@ void JellyfinClient::setFavorite(const QString &itemId, bool favorite)
 
 void JellyfinClient::setWatched(const QString &itemId, bool watched)
 {
-    const QString path = QStringLiteral("/Users/%1/PlayedItems/%2").arg(m_userId, itemId);
+    const QString path = QStringLiteral("/UserPlayedItems/%2?userId=%1").arg(m_userId, itemId);
     QNetworkReply *reply = watched ? post(path, QByteArray()) : del(path);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
@@ -1243,7 +1248,7 @@ void JellyfinClient::changePassword(const QString &currentPw, const QString &new
         {QStringLiteral("CurrentPw"), currentPw},
         {QStringLiteral("NewPw"), newPw},
     };
-    QNetworkReply *reply = post(QStringLiteral("/Users/%1/Password").arg(m_userId),
+    QNetworkReply *reply = post(QStringLiteral("/Users/Password?userId=%1").arg(m_userId),
                                 QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
