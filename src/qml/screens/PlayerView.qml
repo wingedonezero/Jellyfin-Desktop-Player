@@ -207,16 +207,31 @@ Item {
         return it.name
     }
 
-    function playQueue(items, index) {
+    // continueSeries: the queue is one series' episodes in order (a season's
+    // list, or the auto-queue above) — see _extendSeriesQueue.
+    function playQueue(items, index, continueSeries) {
         root.queue = items
         root.queueIndex = index
+        root._seriesQueue = continueSeries === true
         _startCurrent()
+    }
+    // A series queue never just runs out at a season boundary (or at the
+    // auto-queue's 100-episode page): when its LAST item starts, ask for the
+    // episodes that follow it and append them, so auto-play-next, the up-next
+    // card and ⏭ carry straight on into the next season.
+    property bool _seriesQueue: false
+    function _extendSeriesQueue() {
+        if (!root._seriesQueue || queueIndex !== queue.length - 1) return
+        const last = queue[queueIndex]
+        if (last && last.type === "Episode" && last.seriesId)
+            client.fetchEpisodes(last.seriesId, "", "player:extend", last.id)
     }
 
     // card menu "Add to queue" / "Play next" — append/insert into the live queue;
     // if nothing is playing yet, just start the item.
     function enqueue(item) {
         if (!player.playing) { playItem(item); return }
+        root._seriesQueue = false // the tail is now the user's pick — don't run on past it
         root.queue = root.queue.concat([item])
     }
     function playNextInsert(item) {
@@ -280,6 +295,7 @@ Item {
         var segTypes = root._enabledSegTypes()
         if (segTypes.length > 0) client.fetchMediaSegments(item.id, segTypes.join(","))
         console.log("[jf] play", item.id, "(" + (queueIndex + 1) + "/" + queue.length + ") resume@", root._resumeSeconds)
+        root._extendSeriesQueue()
     }
 
     // Re-resolve the current item (e.g. after a quality change) and resume where
@@ -408,7 +424,22 @@ Item {
                 var idx = -1
                 for (var i = 0; i < items.length; ++i)
                     if (items[i].id === player.currentId) { idx = i; break }
-                if (idx >= 0) { root.queue = items; root.queueIndex = idx }
+                if (idx >= 0) {
+                    // never queue a missing-episode placeholder (nothing to stream)
+                    var real = items.filter((e, i) => i === idx || e.isMissing !== true)
+                    root.queue = real
+                    root.queueIndex = real.indexOf(items[idx])
+                    root._seriesQueue = true
+                    root._extendSeriesQueue() // launched on a season's/page's last episode
+                }
+            } else if (tag === "player:extend" && root._seriesQueue && items.length > 1 && root.queue.length > 0
+                       && items[0].id === root.queue[root.queue.length - 1].id) {
+                // items = the queue's last episode + what follows it in the series
+                var more = items.slice(1).filter(e => e.isMissing !== true)
+                if (more.length > 0) {
+                    root.queue = root.queue.concat(more)
+                    console.log("[jf] series queue extended by", more.length, "→", root.queue.length)
+                }
             }
         }
         // the server dropped our session mid-play: close the player so the
@@ -545,6 +576,7 @@ Item {
         player.currentId = ""
         root.queue = []
         root.queueIndex = -1
+        root._seriesQueue = false
         root.segments = []
         root.currentSkipSegment = null
         player.command(["stop"])

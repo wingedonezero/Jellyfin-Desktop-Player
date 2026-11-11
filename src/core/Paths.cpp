@@ -57,9 +57,13 @@ vo=gpu-next                 # libplacebo renderer. Required for all modern tone-
                             #   choices: gpu-next >>use this<< | gpu (legacy) | dmabuf-wayland
 gpu-api=vulkan              # graphics API. vulkan is the recommended pairing with gpu-next on Linux.
                             #   choices: auto | vulkan >>recommended<< | opengl (fallback)
-hwdec=auto-safe             # GPU-offload decode via known-reliable paths, else software.
-                            #   choices: no | auto-safe >>recommended<< | auto-copy (copies frames to
-                            #            RAM so all shaders work) | vaapi (Intel/AMD) | nvdec (NVIDIA)
+hwdec=vulkan,auto-safe      # GPU-offload decode. A list, tried in order: Vulkan Video first (frames stay
+                            #   on the GPU for gpu-next; 'd' deinterlaces with bwdif_vulkan), then mpv's
+                            #   known-reliable paths (VAAPI on Intel/AMD: 'd' uses the driver's own
+                            #   deinterlacer), else software. mpv 0.42 dropped Vulkan from auto-safe,
+                            #   so it is named explicitly here.
+                            #   choices: no | auto-safe | vulkan | vaapi (Intel/AMD) | nvdec (NVIDIA) |
+                            #            auto-copy (copies frames to RAM so all shaders work) | a,b,... list
 
 # --- decode / runtime knobs (commented = mpv default) ---
 #hwdec-codecs=all           # allow HW decode for every codec. Default already covers the common ones.

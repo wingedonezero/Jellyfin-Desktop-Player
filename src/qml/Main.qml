@@ -81,7 +81,7 @@ ApplicationWindow {
             pushPage(detailComp, { objectName: "page:detail:" + item.id, itemId: item.id, pageTitle: item.name })
     }
     function playItem(item) { playerView.playItem(item) }
-    function playQueue(items, index) { playerView.playQueue(items, index) }
+    function playQueue(items, index, continueSeries) { playerView.playQueue(items, index, continueSeries === true) }
 
     property double _lastRefreshMs: 0
     function refreshAllPages() {
@@ -211,7 +211,7 @@ ApplicationWindow {
             client: jellyfin
             config: appConfig
             onPlay: (it) => win.playItem(it)
-            onPlayQueue: (items, index) => win.playQueue(items, index)
+            onPlayQueue: (items, index, continueSeries) => win.playQueue(items, index, continueSeries)
             onOpenDetail: (it) => win.openDetail(it)
             onItemAddToPlaylist: (it) => win.openAddTo(it, "playlist")
             onItemAddToCollection: (it) => win.openAddTo(it, "collection")

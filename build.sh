@@ -11,9 +11,10 @@
 #   ./build.sh clean-all    also remove .cache/ (vendored deps + sources + tools)
 #
 # What it chains (each step is its own script under scripts/, usable alone):
-#   1. scripts/build-mpv.sh       vendored mpv 0.41 + libplacebo with our Wayland
+#   1. scripts/build-mpv.sh       vendored mpv 0.42 + libplacebo with our Wayland
 #                                 subsurface-embed patch → .cache/mpv-prefix
-#                                 (only when missing; the distro mpv can't embed)
+#                                 (when missing, or built from other pins/patches;
+#                                 the distro mpv can't embed)
 #   2. scripts/build-qtwayland.sh patched QtWaylandClient matching the SYSTEM Qt
 #                                 → .cache/qtwayland-prefix (only when missing;
 #                                 stock qtwayland segfaults on screen blank)
@@ -83,6 +84,16 @@ if [ -f "$MPV_PREFIX/lib/pkgconfig/mpv.pc" ] \
 elif [ -f "$MPV_PREFIX/lib/pkgconfig/mpv.pc" ]; then
   echo "build.sh: .cache/mpv-prefix was built for another path — rebuilding it" >&2
   rm -rf "$MPV_PREFIX" "$ROOT/.cache/mpv-src"
+fi
+# The prefix records which mpv/libplacebo pins + patch set it was built from;
+# when scripts/build-mpv.sh or patches/mpv/ changed since (an mpv upgrade, a
+# patch fix), it is stale even though it "exists". build-mpv.sh re-fetches the
+# sources itself when their version or patch set no longer matches.
+if [ "$mpv_ok" = 1 ] \
+   && [ "$(cat "$MPV_PREFIX/.jfd-stamp" 2>/dev/null)" != "$(scripts/build-mpv.sh --stamp)" ]; then
+  echo "build.sh: .cache/mpv-prefix is from a different mpv version or patch set — rebuilding it" >&2
+  rm -rf "$MPV_PREFIX"
+  mpv_ok=0
 fi
 if [ "$mode" = deps ] || [ "$mpv_ok" = 0 ]; then
   say "vendored mpv + libplacebo (scripts/build-mpv.sh)"

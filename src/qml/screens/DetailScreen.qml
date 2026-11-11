@@ -25,7 +25,9 @@ Item {
                                          && cfgBool("display/detailsBanner", true)
 
     signal play(var item)
-    signal playQueue(var items, int index)
+    // continueSeries: the queue is a run of one series' episodes in order —
+    // the player keeps going into the next season when it runs out
+    signal playQueue(var items, int index, bool continueSeries)
     signal openDetail(var item)
     signal itemAddToPlaylist(var item)
     signal itemAddToCollection(var item)
@@ -157,14 +159,24 @@ Item {
         episodes = []
         client.fetchEpisodes(detail.id, s.id, "d:episodes:" + s.id)
     }
+    // Season page: jump to a sibling season in place (same page, so Back still
+    // leaves the show instead of walking back through every season visited).
+    function switchSeason(s) {
+        if (!s || s.id === itemId) return
+        episodes = []
+        pageTitle = s.name
+        objectName = "page:detail:" + s.id // Main's duplicate-page key
+        itemId = s.id                      // → load()
+    }
     function playEpisode(ep) {
-        // queue the season so it auto-plays next, skipping missing placeholders
+        // queue the season so it auto-plays next, skipping missing placeholders;
+        // the player carries on into the following season at the end
         let q = episodes.filter(e => e.isMissing !== true || e.id === ep.id)
         let idx = 0
         for (let i = 0; i < q.length; ++i)
             if (q[i].id === ep.id) { idx = i; break }
         q[idx] = ep // honor a modified copy (context menu's "Play from beginning" zeroes ticks)
-        screen.playQueue(q, idx)
+        screen.playQueue(q, idx, true)
     }
     function playPrimary() {
         if (!detail) return
@@ -181,7 +193,7 @@ Item {
                 playEpisode(ep)
             }
         } else if (isContainer) {
-            if (playableChildren.length > 0) screen.playQueue(playableChildren, 0)
+            if (playableChildren.length > 0) screen.playQueue(playableChildren, 0, false)
         } else {
             screen.play(_withSelections(detail))
         }
@@ -200,7 +212,7 @@ Item {
             var j = Math.floor(Math.random() * (i + 1))
             var t = a[i]; a[i] = a[j]; a[j] = t
         }
-        screen.playQueue(a, 0)
+        screen.playQueue(a, 0, false)
     }
     // play an item ignoring its saved resume position (web's "Play from beginning")
     function playFromStart(item) {
@@ -316,8 +328,12 @@ Item {
                     } else if (screen.isContainer) // playlists keep their own order (no SortBy)
                         screen.client.fetchItems(screen.detail.id, "d:children:" + screen.itemId,
                                                  screen.isPlaylist ? "" : "SortName", "Ascending")
-                    else if (screen.isSeason)
+                    else if (screen.isSeason) {
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.id, "d:episodes:" + screen.detail.id)
+                        // sibling seasons for the season switcher
+                        if (screen.detail.seriesId)
+                            screen.client.fetchSeasons(screen.detail.seriesId, "d:seasons:" + screen.itemId)
+                    }
                     else if (screen.isEpisode && screen.detail.seriesId)
                         screen.client.fetchEpisodes(screen.detail.seriesId, screen.detail.seasonId, "d:morefrom:" + screen.detail.id)
                 }
@@ -331,14 +347,17 @@ Item {
                 }
             } else if (tag === "d:seasons:" + screen.itemId) {
                 screen.seasons = items
-                if (items.length > 0) screen.selectSeason(items[0])
+                if (screen.isSeries && items.length > 0) screen.selectSeason(items[0])
             } else if (screen.detail && tag === "d:seriesplay:" + screen.detail.id) {
                 if (items.length > 0) screen.play(items[0])              // → auto-queues the series
                 else if (screen.episodes.length > 0) screen.playEpisode(screen.episodes[0]) // all watched → rewatch
             } else if (screen.detail && tag === "d:shuffle:" + screen.detail.id) {
                 screen.playShuffled(items)
             } else if (tag.indexOf("d:episodes:") === 0) {
-                screen.episodes = items
+                // only the season this page is showing: every stacked detail
+                // page hears every reply, and a slow one can land after a switch
+                if (screen.detail && tag === "d:episodes:" + (screen.isSeries ? screen.selectedSeasonId : screen.detail.id))
+                    screen.episodes = items
             } else if (tag === "d:children:" + screen.itemId) {
                 screen.collectionItems = items
             } else if (screen.detail && tag === "d:nextup:" + screen.detail.id) {
@@ -393,6 +412,33 @@ Item {
                     onObjectAdded: (index, object) => tsMenu.insertItem(index, object)
                     onObjectRemoved: (index, object) => tsMenu.removeItem(object)
                 }
+            }
+        }
+    }
+
+    // reusable: the season dropdown (series page: picks the listed season;
+    // season page: jumps to a sibling season)
+    component SeasonPicker: Button {
+        id: sp
+        property string currentName: ""
+        signal picked(var season)
+        text: currentName + "  ▾"
+        hoverEnabled: true
+        leftPadding: 14; rightPadding: 14; implicitHeight: Theme.controlHeight
+        background: Rectangle { radius: Theme.radius; color: sp.hovered ? Theme.surfaceHover : Theme.surface; border.color: Theme.divider; border.width: 1 }
+        contentItem: Text { text: sp.text; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; verticalAlignment: Text.AlignVCenter }
+        onClicked: spMenu.popup()
+        DarkMenu {
+            id: spMenu
+            Instantiator {
+                model: screen.seasons
+                delegate: DarkMenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    onTriggered: sp.picked(modelData)
+                }
+                onObjectAdded: (index, object) => spMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => spMenu.removeItem(object)
             }
         }
     }
@@ -646,9 +692,10 @@ Item {
                         Layout.alignment: Qt.AlignBottom
                         spacing: Theme.spacingSmall
 
-                        // episode breadcrumb: clickable series name + SxxExx
+                        // episode / season breadcrumb: clickable series name (+ SxxExx);
+                        // web's parentName link — the way from a season to the whole show
                         RowLayout {
-                            visible: screen.isEpisode && screen.detail && screen.detail.seriesName
+                            visible: !!((screen.isEpisode || screen.isSeason) && screen.detail && screen.detail.seriesName)
                             spacing: 8
                             Text {
                                 text: screen.detail ? (screen.detail.seriesName || "") : ""
@@ -661,7 +708,7 @@ Item {
                                 }
                             }
                             Text {
-                                visible: screen.detail && screen.detail.parentIndexNumber !== undefined
+                                visible: screen.isEpisode && screen.detail && screen.detail.parentIndexNumber !== undefined
                                          && screen.detail.indexNumber !== undefined
                                 text: "·  S" + (screen.detail ? screen.detail.parentIndexNumber : "")
                                       + ":E" + (screen.detail ? screen.detail.indexNumber : "")
@@ -917,14 +964,22 @@ Item {
                 }
             }
 
-            // --- standalone season: episode list (no season selector) ---
+            // --- standalone season: season switcher + episode list ---
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: Theme.pagePad
                 Layout.rightMargin: Theme.pagePad
                 spacing: Theme.spacingSmall
-                visible: screen.isSeason && screen.episodes.length > 0
+                // stays up while a switch is loading (and for an empty season),
+                // so the switcher never disappears from under the pointer
+                visible: screen.isSeason && (screen.episodes.length > 0 || screen.seasons.length > 1)
+                SeasonPicker {
+                    visible: screen.seasons.length > 1
+                    currentName: screen.detail ? (screen.detail.name || "") : ""
+                    onPicked: (s) => screen.switchSeason(s)
+                }
                 Text {
+                    visible: screen.seasons.length <= 1
                     text: qsTr("Episodes")
                     color: Theme.textPrimary; font.pixelSize: Theme.fontMedium; font.bold: true
                 }
@@ -1072,27 +1127,9 @@ Item {
                 spacing: Theme.spacingSmall
                 visible: screen.isSeries && screen.seasons.length > 0
 
-                Button {
-                    id: seasonBtn
-                    text: screen.selectedSeasonName + "  ▾"
-                    hoverEnabled: true
-                    leftPadding: 14; rightPadding: 14; implicitHeight: Theme.controlHeight
-                    background: Rectangle { radius: Theme.radius; color: seasonBtn.hovered ? Theme.surfaceHover : Theme.surface; border.color: Theme.divider; border.width: 1 }
-                    contentItem: Text { text: seasonBtn.text; color: Theme.textPrimary; font.pixelSize: Theme.fontNormal; verticalAlignment: Text.AlignVCenter }
-                    onClicked: seasonMenu.popup()
-                    DarkMenu {
-                        id: seasonMenu
-                        Instantiator {
-                            model: screen.seasons
-                            delegate: DarkMenuItem {
-                                required property var modelData
-                                text: modelData.name
-                                onTriggered: screen.selectSeason(modelData)
-                            }
-                            onObjectAdded: (index, object) => seasonMenu.insertItem(index, object)
-                            onObjectRemoved: (index, object) => seasonMenu.removeItem(object)
-                        }
-                    }
+                SeasonPicker {
+                    currentName: screen.selectedSeasonName
+                    onPicked: (s) => screen.selectSeason(s)
                 }
                 Repeater {
                     model: screen.episodes
