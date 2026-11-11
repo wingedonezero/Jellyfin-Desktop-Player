@@ -15,7 +15,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 find_package(PkgConfig REQUIRED)
 
 # Prefer a vendored, version-pinned libmpv built by scripts/build-mpv.sh
-# (mpv 0.41 + libplacebo 7.360, for gpu-next/Vulkan) over the distro's older mpv.
+# (mpv 0.42 + libplacebo 7.387, for gpu-next/Vulkan) over the distro's older mpv.
 # When the prefix exists we build against its pkg-config; the rpath is baked onto
 # the target below so the executable — and transitively libmpv -> libplacebo —
 # resolves the vendored .so files at runtime.
@@ -101,7 +101,7 @@ target_link_libraries(jellyfin-desktop PRIVATE
 
 # Bake the vendored mpv prefix into the rpath. DT_RPATH (old dtags) is required
 # rather than DT_RUNPATH so the search also satisfies libmpv's own transitive
-# dependency on the vendored libplacebo.so.360 (RUNPATH does not propagate).
+# dependency on the vendored libplacebo.so (RUNPATH does not propagate).
 if(JFD_VENDORED_MPV_LIBDIR)
     set_target_properties(jellyfin-desktop PROPERTIES
         BUILD_RPATH "${JFD_VENDORED_MPV_LIBDIR}"

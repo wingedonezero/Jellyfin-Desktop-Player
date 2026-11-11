@@ -39,6 +39,15 @@ cmake -B build -G Ninja && cmake --build build   # the bare dev build underneath
 A plain `cmake` build against the system libmpv (no `.cache/mpv-prefix`) will
 compile but **cannot embed on Wayland** — the subsurface patch is only in the
 vendored mpv. Always go through `build.sh` (or `scripts/build-mpv.sh`) first.
+
+**Vendored mpv = 0.42.0 + libplacebo 7.387.0** (pins at the top of
+`scripts/build-mpv.sh`). The prefix carries a `.jfd-stamp` (pins + patch hash);
+`build.sh` rebuilds it — and `build-mpv.sh` re-clones the source — whenever the
+pins or `patches/mpv/*` change, so an upgrade is "bump the pins, re-port the
+patch if it no longer applies, run `./build.sh`". To re-port: edit in
+`.cache/mpv-src/mpv`, then `git -C .cache/mpv-src/mpv diff > patches/mpv/0001-…`.
+`.cache/` is per checkout: a worktree needs its own (copy `tools/` and
+`qtwayland-prefix/` from the main checkout to skip the downloads).
 **Dev/test auto-login + auto-play** (env vars → QML context properties in
 `main.cpp`; absent => normal interactive login):
 ```
@@ -93,6 +102,20 @@ src/
   user's mpv.conf can't break embedding.
 - QML_ELEMENT header dirs must be on the include path (the generated
   `*_qmltyperegistrations.cpp` does `#include <Basename.h>`).
+- **Embedded mpv is host-sized, always.** With no xdg toplevel there is no
+  configure event, so the patch sets size + scale at init (`embed_apply_size`)
+  and makes `set_geometry`/`rescale_geometry`/window-scale requests no-ops when
+  embedded. mpv 0.42 delivers surface-enter (→ resize) BEFORE the first
+  reconfig; an unsized surface then sends `wp_viewport.set_destination(0,0)`,
+  a fatal protocol error that kills **Qt's connection too** (whole app dies
+  with "The Wayland connection experienced a fatal error"). Any new mpv code
+  path that sizes the surface must go through the embedded guards.
+- **mpv's proxies live on a private event queue**, created through a display
+  *wrapper* so the registry is never on Qt's default queue even for an instant.
+  Never add a default-queue `wl_display_roundtrip/dispatch` on the embedded path.
+- **`hwdec=vulkan,auto-safe`** in the generated mpv.conf: 0.42 removed Vulkan
+  from `auto-safe` (it would pick VAAPI and `d` would use the driver's
+  deinterlacer instead of `bwdif_vulkan`). The list keeps Vulkan first.
 - **Shared wl_display zombie crashes (screen blank!):** Qt + embedded mpv are
   ONE Wayland client, so each side receives events referencing the OTHER
   side's proxies — or NULL once a proxy is destroyed mid-flight (libwayland
